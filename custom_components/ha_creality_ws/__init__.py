@@ -147,15 +147,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 new_data["_cached_max_nozzle_temp"] = coord.data.get("maxNozzleTemp")
                 new_data["_cached_max_box_temp"] = coord.data.get("maxBoxTemp")  # May be None for printers without heated chamber
                 
-                # Re-detect camera type if upgrading or missing
+                # Re-detect camera type only if missing (not on every update)
                 cached_camera_type = entry.data.get("_cached_camera_type")
-                if not cached_camera_type or cached_version != current_version:
+                if not cached_camera_type:
                     new_data["_cached_camera_type"] = "webrtc" if printermodel.is_k2_family else (
                         "mjpeg_optional" if (printermodel.is_k1_se or printermodel.is_ender_v3_family) else "mjpeg"
                     )
                     _LOGGER.info("Camera type detected: %s", new_data["_cached_camera_type"])
                 else:
-                    # Keep existing camera type
+                    # Keep existing camera type (don't override on updates)
                     new_data["_cached_camera_type"] = cached_camera_type
                 
                 hass.config_entries.async_update_entry(entry, data=new_data)

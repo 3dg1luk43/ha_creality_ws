@@ -43,6 +43,16 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_power_off = False
         await self.client.start()
         
+    async def ensure_connected(self) -> bool:
+        """Ensure WebSocket connection is active, restart if needed."""
+        if self.power_is_off():
+            return False
+        if not self.client._task or self.client._task.done():
+            _LOGGER.info("WebSocket connection lost, restarting...")
+            await self.client.start()
+            return await self.client.wait_first_connect(timeout=10.0)
+        return True
+        
     async def async_stop(self) -> None:
         await self.client.stop()
         

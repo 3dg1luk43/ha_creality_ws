@@ -28,6 +28,10 @@ class KHomeAllButton(KEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         async with self._seq_lock:
+            # Ensure WebSocket connection is active before sending commands
+            if not await self.coordinator.ensure_connected():
+                _LOGGER.warning("Cannot execute home command: printer not connected")
+                return
             await self.coordinator.client.send_set_retry(autohome="X Y")
             await asyncio.sleep(1.0)
             await self._wait_until_idle_or_timeout(15.0)
@@ -61,5 +65,9 @@ class KPrintStopButton(_BasePrintButton):
     def __init__(self, coordinator):
         super().__init__(coordinator, "Stop Print", "stop_print")
     async def async_press(self) -> None:
+        # Ensure WebSocket connection is active before sending commands
+        if not await self.coordinator.ensure_connected():
+            _LOGGER.warning("Cannot execute stop command: printer not connected")
+            return
         await self.coordinator.client.send_set_retry(stop=1)
-        # don’t force paused flag here; telemetry will reflect idle soon
+        # don't force paused flag here; telemetry will reflect idle soon

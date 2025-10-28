@@ -521,13 +521,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
     # Core sensors
     ents.append(PrintStatusSensor(coord))
 
-    # Add box temperature if supported by model and data is available
+    # Add box temperature if supported by model
     has_box_sensor = entry.data.get("_cached_has_box_sensor", False)
-    has_box_data = bool((coord.data or {}).get("boxTemp") is not None)
     
     for spec in SPECS:
         if spec.get("uid") == "box_temperature":
-            if has_box_data and has_box_sensor:
+            if has_box_sensor:
                 ents.append(KSimpleFieldSensor(coord, spec))
         else:
             ents.append(KSimpleFieldSensor(coord, spec))
