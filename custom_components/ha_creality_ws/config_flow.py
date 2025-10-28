@@ -138,8 +138,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     _LOGGER.debug("ha_creality_ws: detected K2 family printer (WebRTC)")
                     return CAM_MODE_WEBRTC
                 
-                # K1 family, K1 Max, Creality Hi use MJPEG
-                if printermodel.is_k1_family or printermodel.is_k1_max or printermodel.is_creality_hi:
+                # K1 family, K1 Max, K1C, Creality Hi use MJPEG
+                if printermodel.is_k1_family or printermodel.is_k1_max or printermodel.is_k1c or printermodel.is_creality_hi:
                     _LOGGER.debug("ha_creality_ws: detected MJPEG camera model")
                     return CAM_MODE_MJPEG
                 

@@ -131,6 +131,9 @@ class ModelDetection:
         # K1 Max - "CR-K1 Max"
         self.is_k1_max = "cr-k1 max" in self.model_l
         
+        # K1C - "K1C"
+        self.is_k1c = "k1c" in self.model_l
+        
         # K2 Base - "F021"
         self.is_k2_base = "F021" in self.model
         
@@ -178,6 +181,7 @@ class ModelDetection:
             self.is_k1_base or
             self.is_k1_se or
             self.is_k1_max or
+            self.is_k1c or
             "k1" in self.model_l
         )
         
@@ -199,5 +203,12 @@ class ModelDetection:
         
         # Feature detection
         self.has_box_control = self.is_k2_pro or self.is_k2_plus
-        self.has_box_sensor = (self.is_k1_family and not self.is_k1_se) or self.is_k1_max or self.is_k2_family
+        # K1C has box sensor but no box control, K1 SE has neither
+        self.has_box_sensor = (
+            (self.is_k1_family and not self.is_k1_se) or 
+            self.is_k1_max or 
+            self.is_k1c or 
+            self.is_k2_family
+        )
+        # K1C has light, K1 SE and Ender V3 family don't
         self.has_light = not (self.is_k1_se or self.is_ender_v3_family)
