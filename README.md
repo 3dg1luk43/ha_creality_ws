@@ -2,6 +2,7 @@
 ![Latest](https://img.shields.io/github/v/release/3dg1luk43/ha_creality_ws)
 ![Hassfest](https://img.shields.io/github/actions/workflow/status/3dg1luk43/ha_creality_ws/hassfest.yml?label=hassfest)
 ![HACS](https://img.shields.io/github/actions/workflow/status/3dg1luk43/ha_creality_ws/validate.yaml?label=HACS)
+![GitHub commits since latest release (branch)](https://img.shields.io/github/commits-since/3dg1luk43/ha_creality_ws/latest/dev)
 
 # Creality WebSocket Integration for Home Assistant
 
