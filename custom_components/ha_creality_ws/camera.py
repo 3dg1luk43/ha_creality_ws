@@ -325,8 +325,17 @@ class CrealityWebRTCCamera(_BaseCamera):
         super().__init__(coordinator, "Printer Camera", "camera")
         self._upstream_signaling_url = signaling_url
         self._use_proxy = use_proxy  # Deprecated, kept for compatibility
-        self._go2rtc_url: str | None = go2rtc_url or DEFAULT_GO2RTC_URL
-        self._go2rtc_port: int | None = go2rtc_port or DEFAULT_GO2RTC_PORT
+        self._go2rtc_url: str | None = (go2rtc_url or DEFAULT_GO2RTC_URL)
+        # Sanitize port from options (can arrive as float/str); default on failure
+        port_val = go2rtc_port if go2rtc_port is not None else DEFAULT_GO2RTC_PORT
+        try:
+            port_int = int(port_val)
+            if not (1 <= port_int <= 65535):
+                raise ValueError("port out of range")
+            self._go2rtc_port = port_int
+        except Exception:
+            _LOGGER.warning("ha_creality_ws: invalid go2rtc_port %r, using default %s", port_val, DEFAULT_GO2RTC_PORT)
+            self._go2rtc_port = int(DEFAULT_GO2RTC_PORT)
         self._stream_name: str | None = None
         self._last_error: str | None = None
         
@@ -377,7 +386,7 @@ class CrealityWebRTCCamera(_BaseCamera):
         )
 
     @property
-    def stream_source(self) -> str:
+    def stream_source(self) -> Optional[str]:
         """Return the go2rtc WebRTC stream source URL.
         
         This property provides the WebRTC stream source URL that Home Assistant
@@ -392,7 +401,7 @@ class CrealityWebRTCCamera(_BaseCamera):
             return f"{go2rtc_url_with_port}/api/webrtc?src={self._stream_name}"
         return None
 
-    async def async_get_stream_source(self) -> str:
+    async def async_get_stream_source(self) -> Optional[str]:
         """Return the go2rtc WebRTC stream source URL.
         
         Async version of stream_source property for compatibility with
@@ -407,14 +416,11 @@ class CrealityWebRTCCamera(_BaseCamera):
         """Configure go2rtc stream when camera is added to Home Assistant.
         
         This method is called when the camera entity is added to Home Assistant.
-        It initializes the go2rtc connection and configures the WebRTC stream
-        for the printer.
+        We defer configuring go2rtc until first actual use (on-demand) to avoid
+        background connection attempts that may probe the printer periodically.
         """
         await super().async_added_to_hass()
-        
-        # Configure the stream (go2rtc URL is already set in __init__)
-        await self._configure_go2rtc_stream()
-        _LOGGER.info("ha_creality_ws: WebRTC camera successfully configured with go2rtc")
+        # No eager configuration here; will configure on first access
 
     async def async_camera_image(
         self,
@@ -441,8 +447,10 @@ class CrealityWebRTCCamera(_BaseCamera):
         if not height or height <= 0:
             height = None
             
+        # Do NOT auto-configure go2rtc for snapshots to avoid background POSTs.
+        # Only use snapshot if stream was already configured by an active view.
         if not self._go2rtc_url or not self._stream_name or not self._go2rtc_port:
-            _LOGGER.debug("ha_creality_ws: go2rtc not configured, returning fallback image")
+            _LOGGER.debug("ha_creality_ws: go2rtc not configured (by design) for snapshots; returning fallback image")
             return await self._fallback_image()
 
         try:
@@ -491,6 +499,9 @@ class CrealityWebRTCCamera(_BaseCamera):
         Returns:
             web.Response: HTTP response with MJPEG stream or error
         """
+        # Ensure the stream is configured on first actual streaming request
+        if self._go2rtc_url and self._go2rtc_port and not self._stream_name:
+            await self._ensure_stream_configured()
         if not self._go2rtc_url or not self._stream_name or not self._go2rtc_port:
             _LOGGER.warning("ha_creality_ws: go2rtc not available for streaming")
             return web.Response(status=503, text="go2rtc not available")
@@ -539,6 +550,24 @@ class CrealityWebRTCCamera(_BaseCamera):
             str: go2rtc base URL (e.g., "http://localhost:11984")
         """
         return f"http://{self._go2rtc_url}:{self._go2rtc_port}"
+
+    async def _ensure_stream_configured(self) -> None:
+        """Ensure the go2rtc stream is configured (with simple backoff).
+        
+        Avoids configuring more than once per minute when errors occur.
+        """
+        # Backoff using an attribute timestamp
+        now = asyncio.get_running_loop().time()
+        last_attempt = getattr(self, "_last_stream_cfg_attempt", 0.0)
+        if self._stream_name:
+            return
+        if now - last_attempt < 60.0:
+            return
+        self._last_stream_cfg_attempt = now
+        try:
+            await self._configure_go2rtc_stream()
+        except Exception as exc:
+            _LOGGER.debug("ha_creality_ws: go2rtc stream configure deferred due to error: %s", exc)
 
     async def _configure_go2rtc_stream(self) -> None:
         """Configure go2rtc to pull the WebRTC stream from the printer.
@@ -652,6 +681,9 @@ class CrealityWebRTCCamera(_BaseCamera):
             session_id: Unique session identifier
             send_message: Callback function to send messages to the frontend
         """
+        # Ensure go2rtc stream is configured on first actual WebRTC offer
+        if self._go2rtc_url and self._go2rtc_port and not self._stream_name:
+            await self._ensure_stream_configured()
         if not self._go2rtc_url or not self._stream_name:
             _LOGGER.error("ha_creality_ws: go2rtc not configured for WebRTC offer")
             send_message(
