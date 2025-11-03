@@ -9,17 +9,17 @@ Usage:
   python3 tools/creality_ws_test_server.py [--host 0.0.0.0] [--port 9999] [--model MODEL] [--simulate-print]
 
 Models:
-  k1c     - K1C (box temp sensor only, light, MJPEG camera)
-  k1      - K1 (box temp sensor & control, light, MJPEG camera)  
-  k1max   - K1 Max (box temp sensor & control, light, MJPEG camera)
-  k1se    - K1 SE (no box temp, no light, optional MJPEG camera)
-  k2      - K2 (box temp sensor only, light, WebRTC camera)
-  k2pro   - K2 Pro (box temp sensor & control, light, WebRTC camera)
-  k2plus  - K2 Plus (box temp sensor & control, light, WebRTC camera)
-  e3v3    - Ender 3 V3 (no box temp, no light, optional MJPEG camera)
-  e3v3ke  - Ender 3 V3 KE (no box temp, no light, optional MJPEG camera)
-  e3v3plus- Ender 3 V3 Plus (no box temp, no light, optional MJPEG camera)
-  crealityhi - Creality Hi (box temp sensor & control, light, MJPEG camera)
+    k1c        - K1C (box temp sensor only, light, MJPEG camera)
+    k1         - K1 (box temp sensor only, no control; light; MJPEG camera)
+    k1max      - K1 Max (box temp sensor only, no control; light; MJPEG camera)
+    k1se       - K1 SE (no box temp, no light, optional MJPEG camera)
+    k2         - K2 (box temp sensor only, light, WebRTC camera)
+    k2pro      - K2 Pro (box temp sensor & control, light, WebRTC camera)
+    k2plus     - K2 Plus (box temp sensor & control, light, WebRTC camera)
+    e3v3       - Ender 3 V3 (no box temp, no light, optional MJPEG camera)
+    e3v3ke     - Ender 3 V3 KE (no box temp, no light, optional MJPEG camera)
+    e3v3plus   - Ender 3 V3 Plus (no box temp, no light, optional MJPEG camera)
+    crealityhi - Creality Hi (no box temp, light, MJPEG camera)
 
 This pairs with `tools/creality_webrtc_test_server_local.py` for WebRTC signaling on :8000.
 """
@@ -78,18 +78,21 @@ class PrinterState:
         self._error_code = 0
         
         # Model-specific configurations
+        # name maps to the integration's expected "model" field content for detection
+        # - K1 family uses human-readable names that include "CR-K1" or exact variants
+        # - K2/Ender/Hi use F-codes for precise detection
         self._model_configs = {
-            "k1c": {"name": "K1C", "box_control": False, "light": True, "camera": "mjpeg"},
-            "k1": {"name": "K1", "box_control": True, "light": True, "camera": "mjpeg"},
-            "k1max": {"name": "K1 Max", "box_control": True, "light": True, "camera": "mjpeg"},
-            "k1se": {"name": "K1 SE", "box_control": False, "light": False, "camera": "mjpeg"},
-            "k2": {"name": "K2", "box_control": False, "light": True, "camera": "webrtc"},
-            "k2pro": {"name": "K2 Pro", "box_control": True, "light": True, "camera": "webrtc"},
-            "k2plus": {"name": "K2 Plus", "box_control": True, "light": True, "camera": "webrtc"},
-            "e3v3": {"name": "Ender 3 V3", "box_control": False, "light": False, "camera": "mjpeg"},
-            "e3v3ke": {"name": "Ender 3 V3 KE", "box_control": False, "light": False, "camera": "mjpeg"},
-            "e3v3plus": {"name": "Ender 3 V3 Plus", "box_control": False, "light": False, "camera": "mjpeg"},
-            "crealityhi": {"name": "Creality Hi", "box_control": True, "light": True, "camera": "mjpeg"},
+            "k1c": {"name": "K1C", "box_sensor": True, "box_control": False, "light": True, "camera": "mjpeg"},
+            "k1": {"name": "CR-K1", "box_sensor": True, "box_control": False, "light": True, "camera": "mjpeg"},
+            "k1max": {"name": "CR-K1 Max", "box_sensor": True, "box_control": False, "light": True, "camera": "mjpeg"},
+            "k1se": {"name": "K1 SE", "box_sensor": False, "box_control": False, "light": False, "camera": "mjpeg"},
+            "k2": {"name": "F021", "box_sensor": True, "box_control": False, "light": True, "camera": "webrtc"},
+            "k2pro": {"name": "F012", "box_sensor": True, "box_control": True, "light": True, "camera": "webrtc"},
+            "k2plus": {"name": "F008", "box_sensor": True, "box_control": True, "light": True, "camera": "webrtc"},
+            "e3v3": {"name": "F001", "box_sensor": False, "box_control": False, "light": False, "camera": "mjpeg"},
+            "e3v3ke": {"name": "F005", "box_sensor": False, "box_control": False, "light": False, "camera": "mjpeg"},
+            "e3v3plus": {"name": "F002", "box_sensor": False, "box_control": False, "light": False, "camera": "mjpeg"},
+            "crealityhi": {"name": "F018", "box_sensor": False, "box_control": False, "light": True, "camera": "mjpeg"},
         }
         
         self._config = self._model_configs.get(model, self._model_configs["k2plus"])
@@ -99,7 +102,7 @@ class PrinterState:
             # System summary fields used by sensors
             "model": self._config["name"],
             "hostname": f"creality-{self.model}",
-            "modelVersion": f"{self.model}-test-1",
+            "modelVersion": f"Printer HW Ver: {self._config['name']}; Printer SW Ver: test-1",
             
             # Temperature readings and targets
             "nozzleTemp": self._nozzle_temp,
@@ -110,7 +113,8 @@ class PrinterState:
             "maxBedTemp": 120.0,
             
             # Position and movement
-            "curPosition": self._position,
+            # Position needs to be a string like "X:.. Y:.. Z:.." for integration parsing
+            "curPosition": f"X:{self._position[0]:.2f} Y:{self._position[1]:.2f} Z:{self._position[2]:.2f}",
             "deviceState": self._device_state,
             
             # Status and error
@@ -136,22 +140,24 @@ class PrinterState:
             "TotalLayer": self._total_layers,
             
             # Control parameters
-            "feedratePct": self._feedrate_pct,
-            "flowratePct": self._flowrate_pct,
+            "feedratePct": self._feedrate_pct,   # legacy/external reference
+            "flowratePct": self._flowrate_pct,   # legacy/external reference
+            "curFeedratePct": self._feedrate_pct,
+            "curFlowratePct": self._flowrate_pct,
         }
         
-        # Add box temperature if supported
-        if self._config["box_control"] or self.model in ["k1c", "k2"]:
+        # Add box temperature if sensor present; include target only when control is supported
+        if self._config.get("box_sensor", False):
             d.update({
                 "boxTemp": self._box_temp,
                 "maxBoxTemp": 80.0,
             })
-            if self._config["box_control"]:
+            if self._config.get("box_control", False):
                 d["targetBoxTemp"] = self._box_temp_target
         
-        # Add light control if supported
+        # Add light control if supported (telemetry key expected by integration is "lightSw")
         if self._config["light"]:
-            d["light"] = 1 if self._light_on else 0
+            d["lightSw"] = 1 if self._light_on else 0
             
         return d
 
@@ -211,7 +217,7 @@ class PrinterState:
         pass
 
 
-async def handle_conn(ws: websockets.WebSocketServerProtocol, state: PrinterState):
+async def handle_conn(ws: Any, state: PrinterState):
     # websockets>=12 provides only the connection; path is on ws.path
     path = getattr(ws, "path", "/")
     LOGGER.info("🔌 WebSocket client connected from %s (path=%s)", ws.remote_address, path)
@@ -277,15 +283,15 @@ async def handle_conn(ws: websockets.WebSocketServerProtocol, state: PrinterStat
                         LOGGER.info(f"🛏️  Bed temperature target set to {temp}°C")
                     handled = True
                     
-                elif "targetBoxTemp" in params:
-                    temp = float(params.get("targetBoxTemp") or 0)
+                elif "boxTempControl" in params or "targetBoxTemp" in params:
+                    temp = float(params.get("boxTempControl") or params.get("targetBoxTemp") or 0)
                     state.set_box_temp(temp)
                     LOGGER.info(f"📦 Box temperature target set to {temp}°C")
                     handled = True
                 
-                # Light control
-                elif "light" in params:
-                    light_on = bool(int(params.get("light") or 0))
+                # Light control (accept both legacy 'light' and expected 'lightSw')
+                elif "lightSw" in params or "light" in params:
+                    light_on = bool(int(params.get("lightSw") if params.get("lightSw") is not None else params.get("light") or 0))
                     state.set_light(light_on)
                     status = "💡 ON" if light_on else "💡 OFF"
                     LOGGER.info(f"Light {status}")
@@ -373,7 +379,7 @@ async def handle_conn(ws: websockets.WebSocketServerProtocol, state: PrinterStat
         LOGGER.info("🔌 WebSocket client disconnected from %s", ws.remote_address)
 
 
-async def safe_send(ws: websockets.WebSocketServerProtocol, obj: Any):
+async def safe_send(ws: Any, obj: Any):
     try:
         await ws.send(json.dumps(obj, separators=(",", ":")))
     except Exception:

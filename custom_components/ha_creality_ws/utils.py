@@ -86,11 +86,11 @@ def extract_host_from_zeroconf(info: Any) -> Optional[str]:
         host = info.get("host")
         if host:
             return str(host)
-        addrs = info.get("addresses") or info.get("ip_addresses") or info.get("ip_address")
-        if isinstance(addrs, (list, tuple)) and addrs:
-            return str(addrs[0])
-        if isinstance(addrs, str):
-            return addrs
+        addrs_raw = info.get("addresses") or info.get("ip_addresses") or info.get("ip_address")
+        if isinstance(addrs_raw, (list, tuple)) and addrs_raw:
+            return str(addrs_raw[0])
+        if isinstance(addrs_raw, str):
+            return addrs_raw
         hn = info.get("hostname")
         if isinstance(hn, str):
             return hn.strip(".")
@@ -122,17 +122,22 @@ class ModelDetection:
         # but requires known model/mainboard version mapping
         
         # Individual printer model detection
-        # K1 Base - "CR-K1"
-        self.is_k1_base = "cr-k1" in self.model_l
-        
+        # Detect specific K1 variants first so the base detector can exclude them
         # K1 SE - "K1 SE"
         self.is_k1_se = "k1 se" in self.model_l
-        
+
         # K1 Max - "CR-K1 Max"
         self.is_k1_max = "cr-k1 max" in self.model_l
-        
+
         # K1C - "K1C"
         self.is_k1c = "k1c" in self.model_l
+
+        # K1 Base - "CR-K1" or an exact "k1" model. Exclude SE/C/Max variants.
+        # Avoid matching substrings that would incorrectly mark variants as base.
+        self.is_k1_base = (
+            ("cr-k1" in self.model_l or self.model_l.strip() == "k1")
+            and not (self.is_k1_se or self.is_k1_max or self.is_k1c)
+        )
         
         # K2 Base - "F021"
         self.is_k2_base = "F021" in self.model
@@ -202,13 +207,15 @@ class ModelDetection:
         )
         
         # Feature detection
+        # Box temperature control is only available on K2 Pro and K2 Plus
         self.has_box_control = self.is_k2_pro or self.is_k2_plus
-        # K1C has box sensor but no box control, K1 SE has neither
+
+        # Box temperature sensor is present on K1 family (except K1 SE), K1 Max, K1C,
+        # and K2 family. Ender V3 family, K1 SE, and Creality Hi do not have it.
         self.has_box_sensor = (
-            (self.is_k1_family and not self.is_k1_se) or 
-            self.is_k1_max or 
-            self.is_k1c or 
-            self.is_k2_family
-        )
-        # K1C has light, K1 SE and Ender V3 family don't
+            (self.is_k1_base or self.is_k1c or self.is_k1_max)
+            or self.is_k2_family
+        ) and not self.is_ender_v3_family and not self.is_k1_se
+
+        # Light is present on most models except K1 SE and Ender V3 family
         self.has_light = not (self.is_k1_se or self.is_ender_v3_family)

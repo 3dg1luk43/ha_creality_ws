@@ -258,18 +258,78 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
                 "timestamp": datetime.now().isoformat(),
                 "home_assistant_version": getattr(hass.config, 'version', 'unknown'),
                 "integration_version": await _get_integration_version(hass),
+                # Static list of supported models and headline capabilities for quick reference
+                "supported_models": {
+                    "k1_family": [
+                        {"model": "K1", "box_sensor": True, "box_control": False, "light": True, "camera": "mjpeg"},
+                        {"model": "K1C", "box_sensor": True, "box_control": False, "light": True, "camera": "mjpeg"},
+                        {"model": "K1 SE", "box_sensor": False, "box_control": False, "light": False, "camera": "mjpeg_optional"},
+                        {"model": "K1 Max", "box_sensor": True, "box_control": False, "light": True, "camera": "mjpeg"}
+                    ],
+                    "k2_family": [
+                        {"model": "K2", "box_sensor": True, "box_control": False, "light": True, "camera": "webrtc"},
+                        {"model": "K2 Pro", "box_sensor": True, "box_control": True, "light": True, "camera": "webrtc"},
+                        {"model": "K2 Plus", "box_sensor": True, "box_control": True, "light": True, "camera": "webrtc"}
+                    ],
+                    "ender_3_v3_family": [
+                        {"model": "Ender 3 V3", "box_sensor": False, "box_control": False, "light": False, "camera": "mjpeg_optional"},
+                        {"model": "Ender 3 V3 KE", "box_sensor": False, "box_control": False, "light": False, "camera": "mjpeg_optional"},
+                        {"model": "Ender 3 V3 Plus", "box_sensor": False, "box_control": False, "light": False, "camera": "mjpeg_optional"}
+                    ],
+                    "other": [
+                        {"model": "Creality Hi", "box_sensor": False, "box_control": False, "light": True, "camera": "mjpeg"}
+                    ]
+                },
                 "printers": {}
             }
             
             for entry_id, coord in coordinators:
+                # Collect config entry details for this coordinator (non-sensitive)
+                cfg_entry = hass.config_entries.async_get_entry(entry_id)
+                entry_meta: dict[str, Any] = {
+                    "entry_id": entry_id,
+                    "title": getattr(cfg_entry, "title", None),
+                    "options": {
+                        "power_switch": cfg_entry.options.get(CONF_POWER_SWITCH) if cfg_entry else None,
+                        "go2rtc_url": cfg_entry.options.get(CONF_GO2RTC_URL) if cfg_entry else None,
+                        "go2rtc_port": cfg_entry.options.get(CONF_GO2RTC_PORT) if cfg_entry else None,
+                    } if cfg_entry else {},
+                    "cached": {
+                        "model": cfg_entry.data.get("_cached_model") if cfg_entry else None,
+                        "hostname": cfg_entry.data.get("_cached_hostname") if cfg_entry else None,
+                        "model_version": cfg_entry.data.get("_cached_model_version") if cfg_entry else None,
+                        "camera_type": cfg_entry.data.get("_cached_camera_type") if cfg_entry else None,
+                        "has_light": cfg_entry.data.get("_cached_has_light") if cfg_entry else None,
+                        "has_box_sensor": cfg_entry.data.get("_cached_has_box_sensor") if cfg_entry else None,
+                        "has_box_control": cfg_entry.data.get("_cached_has_box_control") if cfg_entry else None,
+                        "max_bed_temp": cfg_entry.data.get("_cached_max_bed_temp") if cfg_entry else None,
+                        "max_nozzle_temp": cfg_entry.data.get("_cached_max_nozzle_temp") if cfg_entry else None,
+                        "max_box_temp": cfg_entry.data.get("_cached_max_box_temp") if cfg_entry else None,
+                    } if cfg_entry else {},
+                }
+
+                # WebSocket connection diagnostics
+                client = coord.client
+                ws_diag = {
+                    "ws_url": client._url(),
+                    "ws_connected": client._ws is not None,
+                    "ws_ready": getattr(client._ws_ready, "is_set", lambda: False)(),
+                    "connected_once": getattr(client._connected_once, "is_set", lambda: False)(),
+                    "task_running": bool(client._task and not client._task.done()),
+                    "last_rx_monotonic": client.last_rx_monotonic(),
+                }
+
                 printer_data = {
-                    "host": coord.client._host,
+                    "host": client._host,
                     "available": coord.available,
                     "power_is_off": coord.power_is_off(),
+                    "power_switch_entity": getattr(coord, "_power_switch_entity", None),
                     "paused_flag": coord.paused_flag(),
                     "pending_pause": coord.pending_pause(),
                     "pending_resume": coord.pending_resume(),
-                    "last_rx_time": coord.client.last_rx_monotonic(),
+                    "last_rx_time": client.last_rx_monotonic(),
+                    "ws": ws_diag,
+                    "config_entry": entry_meta,
                     "telemetry_data": coord.data.copy() if coord.data else {}
                 }
                 
@@ -281,6 +341,10 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
                     "raw_model": model,
                     "model_lower": model_l,
                     "is_k1_family": printermodel.is_k1_family,
+                    "is_k1_base": printermodel.is_k1_base,
+                    "is_k1c": printermodel.is_k1c,
+                    "is_k1_base": printermodel.is_k1_base,
+                    "is_k1c": printermodel.is_k1c,
                     "is_k1_se": printermodel.is_k1_se,
                     "is_k1_max": printermodel.is_k1_max,
                     "is_k2_family": printermodel.is_k2_family,

@@ -302,10 +302,10 @@ The integration auto-detects the printer model and creates the appropriate camer
 ## Supported Models
 
 ### K1 Family
-- **K1** - Box temperature sensor & control, light, MJPEG camera
+- **K1** - Box temperature sensor only (no control), light, MJPEG camera
 - **K1C** - Box temperature sensor only (no control), light, MJPEG camera  
 - **K1 SE** - No box temperature, no light, optional MJPEG camera
-- **K1 Max** - Box temperature sensor & control, light, MJPEG camera
+- **K1 Max** - Box temperature sensor only (no control), light, MJPEG camera
 
 ### K2 Family
 - **K2** - Box temperature sensor only (no control), light, WebRTC camera
@@ -318,7 +318,7 @@ The integration auto-detects the printer model and creates the appropriate camer
 - **Ender 3 V3 Plus** - No box temperature, no light, optional MJPEG camera
 
 ### Other Models
-- **Creality Hi** - Box temperature sensor & control, light, MJPEG camera
+- **Creality Hi** - No box temperature, light, MJPEG camera
 
 Other K-series models may work but are unverified.
 
@@ -329,6 +329,8 @@ Other K-series models may work but are unverified.
 Currently verified on:
 - **Creality K1C** - Full functionality including box temperature and light controls
 - **Creality Ender 3 V3 KE** - Full functionality (no box temperature or light controls, optional camera)
+- **Creality K2 Pro / K2 Plus** - WebRTC camera verified with Home Assistant 2025.11 release
+- **Creality K1 (Base)** - Box temperature sensor only (no control), light, MJPEG camera
 
 ---
 
