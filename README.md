@@ -388,8 +388,6 @@ The diagnostic data can be safely shared with developers for troubleshooting. It
 }
 ```
 
-**Note**: The data is also saved to a file in your Home Assistant config directory as a backup, but the UI response is the primary way to access it.
-
 ---
 
 ## License
