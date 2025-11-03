@@ -100,6 +100,10 @@ Processing
 
 ![Processing](img/k1c_processing.png)
 
+Color picker
+
+![Color picker](img/color-picker.png)
+
 ### Resource registration
 
 * **Storage mode (default)**
