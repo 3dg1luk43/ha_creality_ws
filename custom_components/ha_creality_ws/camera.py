@@ -125,6 +125,10 @@ class CrealityMjpegCamera(_BaseCamera):
         """
         super().__init__(coordinator, "Printer Camera", "camera")
         self._url = url
+        # Snapshot throttling to avoid repeatedly opening MJPEG streams
+        self._last_snapshot_ts: float = 0.0
+        self._snapshot_min_interval: float = 1.0  # seconds
+        self._snapshot_lock = asyncio.Lock()
         _LOGGER.debug("ha_creality_ws: MJPEG camera initialized with URL: %s", url)
 
     def _is_valid_jpeg(self, data: bytes) -> bool:
@@ -206,23 +210,34 @@ class CrealityMjpegCamera(_BaseCamera):
             height = None
 
         frame: bytes | None = None
-        
+
+        # Respect snapshot throttle and cached frame
+        now = asyncio.get_running_loop().time()
+        if self._last_frame and (now - self._last_snapshot_ts) < self._snapshot_min_interval:
+            return self._last_frame
+
         # Only try grabbing a fresh frame when the printer is powered
         if not self.coordinator.power_is_off():
-            try:
-                frame = await self._grab_snapshot_from_mjpeg(timeout=5.0)
-            except Exception:  # pragma: no cover - defensive
-                _LOGGER.exception("ha_creality_ws: unexpected error while fetching MJPEG snapshot")
-                frame = None
-                
-            # Validate and cache the frame if it's valid
-            if frame and self._is_valid_jpeg(frame):
-                self._last_frame = frame
-                _LOGGER.debug("ha_creality_ws: successfully captured MJPEG frame")
-            elif frame:
-                _LOGGER.debug("ha_creality_ws: dropping invalid MJPEG frame from upstream")
-            else:
-                _LOGGER.debug("ha_creality_ws: printer is offline, using fallback image")
+            async with self._snapshot_lock:
+                # Check throttle again inside the lock
+                now = asyncio.get_running_loop().time()
+                if self._last_frame and (now - self._last_snapshot_ts) < self._snapshot_min_interval:
+                    return self._last_frame
+                try:
+                    frame = await self._grab_snapshot_from_mjpeg(timeout=5.0)
+                except Exception:  # pragma: no cover - defensive
+                    _LOGGER.exception("ha_creality_ws: unexpected error while fetching MJPEG snapshot")
+                    frame = None
+
+                # Validate and cache the frame if it's valid
+                if frame and self._is_valid_jpeg(frame):
+                    self._last_frame = frame
+                    self._last_snapshot_ts = now
+                    _LOGGER.debug("ha_creality_ws: successfully captured MJPEG frame")
+                elif frame:
+                    _LOGGER.debug("ha_creality_ws: dropping invalid MJPEG frame from upstream")
+                else:
+                    _LOGGER.debug("ha_creality_ws: printer is offline, using fallback image")
 
         # Return the frame or fallback image
         if frame is None:
@@ -338,6 +353,10 @@ class CrealityWebRTCCamera(_BaseCamera):
             self._go2rtc_port = int(DEFAULT_GO2RTC_PORT)
         self._stream_name: str | None = None
         self._last_error: str | None = None
+        # Snapshot throttling to avoid hammering go2rtc /api/frame.jpeg
+        self._last_snapshot_ts: float = 0.0
+        self._snapshot_min_interval: float = 2.0  # seconds
+        self._snapshot_lock = asyncio.Lock()
         
         _LOGGER.debug(
             "ha_creality_ws: WebRTC camera initialized with signaling URL: %s, go2rtc: %s:%s",
@@ -453,30 +472,40 @@ class CrealityWebRTCCamera(_BaseCamera):
             _LOGGER.debug("ha_creality_ws: go2rtc not configured (by design) for snapshots; returning fallback image")
             return await self._fallback_image()
 
+        # Snapshot throttling: return cached frame if recent
+        now = asyncio.get_running_loop().time()
+        if self._last_frame and (now - self._last_snapshot_ts) < self._snapshot_min_interval:
+            return self._last_frame
+
         try:
-            session = async_get_clientsession(self.hass)
-            # Request a single frame from go2rtc using the snapshot API
-            # According to go2rtc API docs: GET /api/frame.jpeg?src=stream_name
-            go2rtc_base_url = f"http://{self._go2rtc_url}:{self._go2rtc_port}"
-            image_url = f"{go2rtc_base_url}/api/frame.jpeg?src={self._stream_name}"
-            
-            _LOGGER.debug("ha_creality_ws: requesting snapshot from go2rtc: %s", image_url)
-            
-            async with session.get(image_url, timeout=5) as response:
-                if response.status == 200:
-                    image_data = await response.read()
-                    if self._is_valid_jpeg(image_data):
-                        self._last_frame = image_data
-                        _LOGGER.debug("ha_creality_ws: successfully captured WebRTC snapshot")
-                        return image_data
+            async with self._snapshot_lock:
+                # Throttle check again inside the lock
+                now = asyncio.get_running_loop().time()
+                if self._last_frame and (now - self._last_snapshot_ts) < self._snapshot_min_interval:
+                    return self._last_frame
+
+                session = async_get_clientsession(self.hass)
+                # Request a single frame from go2rtc using the snapshot API
+                go2rtc_base_url = f"http://{self._go2rtc_url}:{self._go2rtc_port}"
+                image_url = f"{go2rtc_base_url}/api/frame.jpeg?src={self._stream_name}"
+                _LOGGER.debug("ha_creality_ws: requesting snapshot from go2rtc: %s", image_url)
+
+                async with session.get(image_url, timeout=5) as response:
+                    if response.status == 200:
+                        image_data = await response.read()
+                        if self._is_valid_jpeg(image_data):
+                            self._last_frame = image_data
+                            self._last_snapshot_ts = now
+                            _LOGGER.debug("ha_creality_ws: successfully captured WebRTC snapshot")
+                            return image_data
+                        else:
+                            _LOGGER.warning("ha_creality_ws: invalid JPEG from go2rtc snapshot")
+                    elif response.status == 404:
+                        # Stream not found/not active - this is normal for on-demand streams
+                        _LOGGER.debug("ha_creality_ws: go2rtc stream not active yet (404) - returning fallback")
                     else:
-                        _LOGGER.warning("ha_creality_ws: invalid JPEG from go2rtc snapshot")
-                elif response.status == 404:
-                    # Stream not found/not active - this is normal for on-demand streams
-                    _LOGGER.debug("ha_creality_ws: go2rtc stream not active yet (404) - returning fallback")
-                else:
-                    _LOGGER.warning("ha_creality_ws: go2rtc frame returned status %d", response.status)
-                    
+                        _LOGGER.warning("ha_creality_ws: go2rtc frame returned status %d", response.status)
+
         except ClientError as err:
             _LOGGER.warning("ha_creality_ws: failed to get image from go2rtc: %s", err)
         except asyncio.TimeoutError:

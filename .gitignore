@@ -1,5 +1,7 @@
 copilot-instructions.md
 webrtc_materials/*
 tools/deploy_*
+tools/client*
+tools/webrtc*
 .venv/*
 backups/*

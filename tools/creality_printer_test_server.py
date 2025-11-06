@@ -52,6 +52,7 @@ from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
 from aiortc.contrib.media import MediaBlackhole
 import av
+import shutil
 
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger("creality_printer_test_server")
@@ -100,9 +101,11 @@ class SyntheticVideoTrack(MediaStreamTrack):
         self._video_time_base = Fraction(1, fps)
 
     async def recv(self):
+        # Maintain nominal frame pacing without blocking the event loop
         await asyncio.sleep(self._frame_dur)
         t = asyncio.get_event_loop().time() - self._t0
-        img = self._bars(self.width, self.height, t)
+        # Offload heavy numpy work to a background thread so Ctrl+C remains responsive
+        img = await asyncio.to_thread(self._bars, self.width, self.height, t)
         frame = av.VideoFrame.from_ndarray(img, format="rgb24")
         frame.pts = int(self._video_pts)
         frame.time_base = self._video_time_base
@@ -164,17 +167,88 @@ class SyntheticAudioTrack(MediaStreamTrack):
     async def recv(self):
         await asyncio.sleep(0.02)
         samples = int(self.samplerate * 0.02)
-        t = (np.arange(samples) + self._t) / self.samplerate
+        # Generate samples off the event loop to remain responsive
+        def _gen():
+            t = (np.arange(samples) + self._t) / self.samplerate
+            data = 0.1 * np.sin(2 * math.pi * self.tone_hz * t)
+            pcm = (data * 32767).astype(np.int16)
+            return np.expand_dims(pcm, axis=0)  # mono
+
+        pcm2 = await asyncio.to_thread(_gen)
         self._t += samples
-        data = 0.1 * np.sin(2 * math.pi * self.tone_hz * t)
-        pcm = (data * 32767).astype(np.int16)
-        pcm2 = np.expand_dims(pcm, axis=0)  # mono
         frame = av.AudioFrame.from_ndarray(pcm2, format="s16", layout="mono")
         frame.sample_rate = self.samplerate
         frame.pts = int(self._audio_pts)
         frame.time_base = self._audio_time_base
         self._audio_pts += samples
         return frame
+
+
+# -----------------------------------------------------------------------------
+# FFmpeg-backed sources (CPU-optimized C code generation and encoding)
+# -----------------------------------------------------------------------------
+
+
+class FFmpegVideoTrack(MediaStreamTrack):
+    """Video track reading raw frames from an ffmpeg testsrc2 pipeline.
+
+    We use asyncio subprocess to read RGB24 frames at width*height*3 bytes.
+    This avoids Python-side heavy math and relies on ffmpeg's optimized code.
+    """
+
+    kind = "video"
+
+    def __init__(self, width: int, height: int, fps: int, ffmpeg_bin: str = "ffmpeg"):
+        super().__init__()
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.ffmpeg_bin = ffmpeg_bin
+        self._proc: Optional[asyncio.subprocess.Process] = None
+        self._frame_len = self.width * self.height * 3  # rgb24
+        self._time_base = Fraction(1, fps)
+        self._pts = 0
+
+    async def _ensure_proc(self):
+        if self._proc is not None and self._proc.returncode is None:
+            return
+        if not shutil.which(self.ffmpeg_bin):
+            raise RuntimeError("ffmpeg binary not found")
+        # Generate a moving test pattern at the desired size and fps
+        # -f lavfi -i testsrc2 produces synthetic frames; output RGB24 rawvideo
+        self._proc = await asyncio.create_subprocess_exec(
+            self.ffmpeg_bin,
+            "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi", "-i", f"testsrc2=size={self.width}x{self.height}:rate={self.fps}",
+            "-pix_fmt", "rgb24",
+            "-f", "rawvideo", "pipe:1",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+    async def recv(self):
+        await self._ensure_proc()
+        assert self._proc and self._proc.stdout
+        # Read exactly one frame worth of bytes; this blocks until available
+        data = await self._proc.stdout.readexactly(self._frame_len)
+        # Construct frame without heavy Python math
+        arr = np.frombuffer(data, dtype=np.uint8).reshape((self.height, self.width, 3))
+        frame = av.VideoFrame.from_ndarray(arr, format="rgb24")
+        frame.pts = self._pts
+        frame.time_base = self._time_base
+        self._pts += 1
+        return frame
+
+    async def _stop(self):
+        try:
+            if self._proc and self._proc.returncode is None:
+                self._proc.terminate()
+                try:
+                    await asyncio.wait_for(self._proc.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    self._proc.kill()
+        except Exception:
+            pass
 
 
 # -----------------------------------------------------------------------------
@@ -546,7 +620,8 @@ CALL_PATH = "/call/webrtc_local"
 
 
 class HttpServer:
-    def __init__(self, host: str, port: int, cam_mode: str, width: int, height: int, fps: int, audio: bool) -> None:
+    def __init__(self, host: str, port: int, cam_mode: str, width: int, height: int, fps: int, audio: bool,
+                 video_source: str = "synthetic", ffmpeg_bin: str = "ffmpeg") -> None:
         self.host = host
         self.port = port
         self.cam_mode = cam_mode  # "webrtc" or "mjpeg"
@@ -554,6 +629,8 @@ class HttpServer:
         self.height = height
         self.fps = fps
         self.audio = audio
+        self.video_source = video_source
+        self.ffmpeg_bin = ffmpeg_bin
         self.app = web.Application()
         self.app.add_routes([
             web.get("/", self.handle_root),
@@ -578,12 +655,78 @@ class HttpServer:
     async def handle_call(self, request: web.Request):
         if self.cam_mode != "webrtc":
             return web.Response(status=404, text="WebRTC not enabled for this model")
+        # Accept multiple payload formats and always answer as base64 JSON (Creality style)
+        # Supported inputs:
+        #  - base64(JSON{"type":"offer","sdp":"v=0..."})   [go2rtc creality client]
+        #  - JSON {"type":"offer","sdp":"v=0..."}
+        #  - base64("v=0...") or plain "v=0..." (raw SDP)
+        response_mode = "base64_json"
         try:
-            body_b64 = await request.text()
-            payload = json.loads(base64.b64decode(body_b64).decode("utf-8"))
-            if payload.get("type") != "offer" or "sdp" not in payload:
+            raw = await request.read()
+            ctype = (request.headers.get("Content-Type") or "").lower()
+            LOGGER.debug(
+                "/call/webrtc_local content-type=%s body_len=%d raw_head=%r",
+                ctype,
+                len(raw),
+                raw[:16],
+            )
+
+            payload: dict | None = None
+            raw_stripped = raw.strip()
+
+            def _payload_from_json(b: bytes) -> dict | None:
+                try:
+                    obj = json.loads(b.decode("utf-8"))
+                    return obj if isinstance(obj, dict) else None
+                except Exception:
+                    return None
+
+            def _payload_from_sdp_text(b: bytes) -> dict | None:
+                try:
+                    s = b.decode("utf-8", errors="ignore").lstrip("\ufeff\n\r\t ")
+                except Exception:
+                    return None
+                if s.startswith("v=0"):
+                    return {"type": "offer", "sdp": s}
+                return None
+
+            # Try base64 first (Creality/go2rtc path)
+            decoded: bytes | None = None
+            try:
+                decoded = base64.b64decode(raw_stripped, validate=False)
+            except Exception:
+                decoded = None
+
+            if decoded:
+                # base64(JSON) or base64(SDP)
+                LOGGER.debug("decoded base64 head=%r", decoded[:16])
+                payload = _payload_from_json(decoded)
+                if not payload:
+                    payload = _payload_from_sdp_text(decoded)
+                    if payload:
+                        LOGGER.debug("parsed mode=b64_sdp")
+                else:
+                    LOGGER.debug("parsed mode=b64_json")
+
+            # If not base64 or failed - try plain JSON
+            if not payload and ("application/json" in ctype or raw_stripped.startswith(b"{")):
+                payload = _payload_from_json(raw_stripped)
+                if payload:
+                    LOGGER.debug("parsed mode=json")
+
+            # Finally, try plain SDP text
+            if not payload:
+                payload = _payload_from_sdp_text(raw_stripped)
+                if payload:
+                    LOGGER.debug("parsed mode=plain_sdp")
+
+            if not isinstance(payload, dict) or payload.get("type") != "offer" or "sdp" not in payload:
                 return web.Response(status=400, text="invalid payload")
-            offer_sdp = payload["sdp"]
+            offer_sdp = str(payload["sdp"]) or ""
+            LOGGER.debug("offer SDP head: %s", offer_sdp[:32].replace("\n", "\\n"))
+            if not offer_sdp.startswith("v=0"):
+                LOGGER.error("Offer SDP doesn't start with 'v=0' (head=%r)", offer_sdp[:16])
+                return web.Response(status=400, text="invalid sdp")
         except Exception as exc:
             LOGGER.exception("Failed to parse offer: %s", exc)
             return web.Response(status=400, text="bad request")
@@ -610,7 +753,14 @@ class HttpServer:
         offer_has_audio = "m=audio" in offer_sdp
 
         if offer_has_video:
-            video_track = SyntheticVideoTrack(self.width, self.height, self.fps)
+            if self.video_source == "ffmpeg":
+                try:
+                    video_track = FFmpegVideoTrack(self.width, self.height, self.fps, ffmpeg_bin=self.ffmpeg_bin)
+                except Exception as exc:
+                    LOGGER.warning("FFmpeg not available (%s), falling back to synthetic video", exc)
+                    video_track = SyntheticVideoTrack(self.width, self.height, self.fps)
+            else:
+                video_track = SyntheticVideoTrack(self.width, self.height, self.fps)
             pc.addTrack(video_track)
         if offer_has_audio and self.audio:
             pc.addTrack(SyntheticAudioTrack())
@@ -625,10 +775,20 @@ class HttpServer:
         answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
 
-        payload = {"type": "answer", "sdp": pc.localDescription.sdp or ""}
-        out = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
+        answer_sdp = (pc.localDescription.sdp or "") if pc.localDescription else ""
+        # Normalize to CRLF for maximum SDP parser compatibility
+        if "\r\n" not in answer_sdp:
+            answer_sdp = answer_sdp.replace("\n", "\r\n")
+        # Basic validation: SDP must start with v=0
+        if not answer_sdp.startswith("v=0"):
+            LOGGER.error("Generated invalid SDP (head=%r)", answer_sdp[:16])
+            return web.Response(status=500, text="invalid sdp")
+        LOGGER.debug("answer SDP head: %s", answer_sdp[:32].replace("\n", "\\n"))
+        payload = {"type": "answer", "sdp": answer_sdp}
         asyncio.create_task(self._cleanup_pc(pc, sink))
-        return web.Response(status=200, text=out, headers={"Content-Type": "plain/text"})
+        # Always respond as base64(JSON) for Creality/go2rtc compatibility
+        out = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
+        return web.Response(status=200, text=out, headers={"Content-Type": "text/plain"})
 
     async def _cleanup_pc(self, pc: RTCPeerConnection, sink: MediaBlackhole):
         await asyncio.sleep(60)
@@ -657,46 +817,103 @@ class HttpServer:
         )
         await response.prepare(request)
 
-        # Optional dependency for encoding JPEGs
-        try:
-            from PIL import Image  # type: ignore
-        except Exception:
-            await response.write(b"MJPEG requires Pillow (PIL) to be installed.\n")
-            await response.write_eof()
-            return response
-
-        video = SyntheticVideoTrack(self.width, self.height, self.fps)
-
-        async def write_frame():
-            frame = await video.recv()
-            # Convert to RGB ndarray
-            rgb = frame.to_ndarray(format="rgb24")
-            # Encode using Pillow
-            img = Image.fromarray(rgb)
-            from io import BytesIO
-
-            buf = BytesIO()
-            img.save(buf, format="JPEG", quality=80)
-            jpg = buf.getvalue()
-
-            header = (
-                f"--{boundary}\r\n"
-                "Content-Type: image/jpeg\r\n"
-                f"Content-Length: {len(jpg)}\r\n\r\n"
-            ).encode("ascii")
-            await response.write(header + jpg + b"\r\n")
-
-        try:
-            while True:
-                await write_frame()
-        except asyncio.CancelledError:
-            pass
-        except (ConnectionResetError, BrokenPipeError):
-            pass
-        finally:
-            with contextlib.suppress(Exception):
+        if self.video_source == "ffmpeg":
+            # Stream JPEG frames produced by ffmpeg directly; wrap into multipart
+            if not shutil.which(self.ffmpeg_bin):
+                await response.write(b"FFmpeg not found on PATH.\n")
                 await response.write_eof()
-        return response
+                return response
+
+            proc = await asyncio.create_subprocess_exec(
+                self.ffmpeg_bin,
+                "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", f"testsrc2=size={self.width}x{self.height}:rate={self.fps}",
+                "-f", "mjpeg", "-q:v", "5", "pipe:1",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            assert proc.stdout is not None
+            buf = bytearray()
+            try:
+                while True:
+                    chunk = await proc.stdout.read(65536)
+                    if not chunk:
+                        break
+                    buf.extend(chunk)
+                    # Extract complete JPEGs and stream them
+                    while True:
+                        # Find SOI and EOI
+                        soi = buf.find(b"\xff\xd8")
+                        if soi == -1:
+                            break
+                        eoi = buf.find(b"\xff\xd9", soi + 2)
+                        if eoi == -1:
+                            break
+                        jpg = bytes(buf[soi:eoi + 2])
+                        del buf[:eoi + 2]
+                        header = (
+                            f"--{boundary}\r\n"
+                            "Content-Type: image/jpeg\r\n"
+                            f"Content-Length: {len(jpg)}\r\n\r\n"
+                        ).encode("ascii")
+                        await response.write(header + jpg + b"\r\n")
+            except (asyncio.CancelledError, ConnectionResetError, BrokenPipeError):
+                pass
+            finally:
+                with contextlib.suppress(Exception):
+                    await response.write_eof()
+                # Terminate ffmpeg
+                try:
+                    if proc.returncode is None:
+                        proc.terminate()
+                        try:
+                            await asyncio.wait_for(proc.wait(), timeout=2.0)
+                        except asyncio.TimeoutError:
+                            proc.kill()
+                except Exception:
+                    pass
+            return response
+        else:
+            # Python fallback: Synthetic + Pillow encoder
+            # Optional dependency for encoding JPEGs
+            try:
+                from PIL import Image  # type: ignore
+            except Exception:
+                await response.write(b"MJPEG requires Pillow (PIL) to be installed.\n")
+                await response.write_eof()
+                return response
+
+            video = SyntheticVideoTrack(self.width, self.height, self.fps)
+
+            async def write_frame():
+                frame = await video.recv()
+                rgb = frame.to_ndarray(format="rgb24")
+                img = Image.fromarray(rgb)
+                from io import BytesIO
+
+                buf2 = BytesIO()
+                img.save(buf2, format="JPEG", quality=80)
+                jpg = buf2.getvalue()
+
+                header = (
+                    f"--{boundary}\r\n"
+                    "Content-Type: image/jpeg\r\n"
+                    f"Content-Length: {len(jpg)}\r\n\r\n"
+                ).encode("ascii")
+                await response.write(header + jpg + b"\r\n")
+
+            try:
+                while True:
+                    await write_frame()
+            except asyncio.CancelledError:
+                pass
+            except (ConnectionResetError, BrokenPipeError):
+                pass
+            finally:
+                with contextlib.suppress(Exception):
+                    await response.write_eof()
+            return response
 
     async def run(self):
         runner = web.AppRunner(self.app)
@@ -760,6 +977,8 @@ async def main_async(args: argparse.Namespace):
         height=args.height,
         fps=args.fps,
         audio=not args.no_audio,
+        video_source=getattr(args, "video_source", "synthetic"),
+        ffmpeg_bin=getattr(args, "ffmpeg_bin", "ffmpeg"),
     )
 
     # WebSocket server for telemetry
@@ -808,6 +1027,33 @@ async def main_async(args: argparse.Namespace):
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
+
+    # Suppress benign aioice Transaction.__retry() InvalidStateError noise when not in debug
+    prev_exc_handler = loop.get_exception_handler()
+
+    def _quiet_asyncio_exceptions(loop: asyncio.AbstractEventLoop, context: dict):
+        try:
+            if not getattr(args, "debug", False):
+                msg = context.get("message", "")
+                exc = context.get("exception")
+                # Detect aioice Transaction retry timeouts that sometimes raise InvalidStateError
+                text = f"{msg} {repr(exc)}"
+                if (
+                    "Transaction.__retry" in text
+                    or "aioice.stun.TransactionTimeout" in text
+                    or ("InvalidStateError" in text and "Transaction" in text)
+                ):
+                    LOGGER.debug("Suppressed benign aioice exception: %s", text)
+                    return
+        except Exception:
+            pass
+        # Delegate to previous handler/default
+        if prev_exc_handler is not None:
+            prev_exc_handler(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
+    loop.set_exception_handler(_quiet_asyncio_exceptions)
     try:
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
@@ -828,6 +1074,9 @@ async def main_async(args: argparse.Namespace):
             await http_srv.shutdown()
         except Exception:
             pass
+        # Restore previous exception handler
+        with contextlib.suppress(Exception):
+            loop.set_exception_handler(prev_exc_handler)
 
 
 def build_argparser() -> argparse.ArgumentParser:
@@ -870,6 +1119,7 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--width", type=int, default=1920)
     p.add_argument("--height", type=int, default=1080)
     p.add_argument("--fps", type=int, default=30)
+    p.add_argument("--low-power", action="store_true", help="Use 640x360 @ 10 fps for low-end hardware")
     p.add_argument("--no-audio", action="store_true")
 
     # temp targets
@@ -884,6 +1134,10 @@ def build_argparser() -> argparse.ArgumentParser:
 
     # logging
     p.add_argument("--debug", action="store_true")
+    # video source selection / ffmpeg integration
+    p.add_argument("--video-source", choices=["synthetic", "ffmpeg"], default="synthetic",
+                   help="Video generator: Python synthetic or FFmpeg testsrc2")
+    p.add_argument("--ffmpeg-bin", default="ffmpeg", help="Path to ffmpeg binary (for --video-source=ffmpeg)")
     return p
 
 
@@ -894,6 +1148,11 @@ def main():
         parser.print_help()
         return
     args = parser.parse_args()
+    # Apply low-power defaults if requested
+    if getattr(args, "low_power", False):
+        if args.width == 1920 and args.height == 1080 and args.fps == 30:
+            args.width, args.height, args.fps = 640, 360, 10
+
     if args.debug:
         LOGGER.setLevel(logging.DEBUG)
         logging.getLogger("aiohttp.server").setLevel(logging.DEBUG)
