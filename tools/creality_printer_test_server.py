@@ -1072,8 +1072,8 @@ async def main_async(args: argparse.Namespace):
             pass
         try:
             await http_srv.shutdown()
-        except Exception:
-            pass
+        except Exception as e:
+            LOGGER.exception("Exception during HTTP server shutdown: %s", e)
         # Restore previous exception handler
         with contextlib.suppress(Exception):
             loop.set_exception_handler(prev_exc_handler)
