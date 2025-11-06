@@ -70,7 +70,10 @@ def _migrate_go2rtc_settings(hass: HomeAssistant, entry: ConfigEntry) -> None:
         # Check if it was stored in entry.data (old location)
         old_port = entry.data.get(CONF_GO2RTC_PORT)
         if old_port:
-            current_options[CONF_GO2RTC_PORT] = old_port
+            try:
+                current_options[CONF_GO2RTC_PORT] = int(old_port)
+            except (ValueError, TypeError):
+                current_options[CONF_GO2RTC_PORT] = DEFAULT_GO2RTC_PORT
             needs_update = True
             _LOGGER.info("Migrated go2rtc_port from entry.data to options")
         else:

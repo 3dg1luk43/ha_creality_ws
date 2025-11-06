@@ -184,6 +184,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             if camera_mode != CAM_MODE_WEBRTC:
                 user_input.pop(CONF_GO2RTC_URL, None)
                 user_input.pop(CONF_GO2RTC_PORT, None)
+            else:
+                # Sanitize number selector result (can be float/str) -> int
+                if user_input.get(CONF_GO2RTC_PORT) is not None:
+                    try:
+                        user_input[CONF_GO2RTC_PORT] = int(user_input[CONF_GO2RTC_PORT])
+                    except (ValueError, TypeError):
+                        user_input[CONF_GO2RTC_PORT] = DEFAULT_GO2RTC_PORT
             
             return self.async_create_entry(title="Printer Configuration", data=user_input)
 

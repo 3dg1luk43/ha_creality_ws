@@ -44,9 +44,9 @@ The integration automatically installs the following Python packages:
 
 **Camera Dependencies:**
 - **K1 family & Ender 3 V3 family cameras**: No additional dependencies required (MJPEG streaming)
-- **K2 family cameras**: Requires Home Assistant's built-in **go2rtc** service for WebRTC streaming
-  - go2rtc is included with Home Assistant core (no HACS installation needed)
-  - Automatically available on `localhost:11984` when Home Assistant is running
+- **K2 family cameras (WebRTC):**
+  - Native WebRTC out of the box is supported only on **Home Assistant Core 2025.11+** (bundled go2rtc version compatible with Creality).
+  - If you're on an older Home Assistant release, configure an external **go2rtc >= 1.9.11** and point the integration to it via the Options dialog (host/port).
 
 ---
 
@@ -75,6 +75,8 @@ If auto-detection doesn't choose your preferred stream, you can force it under t
   - `mjpeg` - Force direct MJPEG stream
   - `webrtc` - Force WebRTC streaming
 
+If your Home Assistant version is older than 2025.11, WebRTC requires an external go2rtc (>= 1.9.11). Set its URL/port in the integration options.
+
 ---
 
 ## Lovelace Card
@@ -100,6 +102,10 @@ Printing
 Processing
 
 ![Processing](img/k1c_processing.png)
+
+Color picker
+
+![Color picker](img/color-picker.png)
 
 ### Resource registration
 
@@ -286,12 +292,12 @@ The integration auto-detects the printer model and creates the appropriate camer
   Remove + re-add the integration or add the resource manually under **Dashboards → Resources** pointing to `/ha_creality_ws/k_printer_card.js`.
 * **WebRTC camera not working**
   If K2 family cameras show fallback images instead of live video:
-  1. **Verify go2rtc is running**: Check `http://localhost:11984` in your browser
-  2. **Check go2rtc status**: Visit `http://localhost:11984/api/streams` to see configured streams
-  3. Ensure the printer's WebRTC signaling endpoint is accessible
-  4. Verify the printer supports WebRTC (K2 family only)
-  5. Check Home Assistant logs for WebRTC negotiation errors
-  6. **Note**: go2rtc is included with Home Assistant core - no additional installation needed
+  1. Check your Home Assistant version:
+     - On **2025.11+**: go2rtc is bundled and compatible. Verify `http://localhost:11984` is reachable and streams are present under `/api/streams`.
+     - On **older versions**: you must run an external go2rtc **>= 1.9.11** and set its host/port in the integration options.
+  2. Ensure the printer's WebRTC signaling endpoint is accessible from go2rtc.
+  3. Verify the printer supports WebRTC (K2 family only).
+  4. Check Home Assistant logs for WebRTC negotiation errors.
 * **K2 camera shows no image**
   - Check that the printer's WebRTC endpoint is accessible
   - Verify the printer model is correctly detected (check logs for "detected K2 family printer")
@@ -335,7 +341,8 @@ Other K-series models may work but are unverified.
 Currently verified on:
 - **Creality K1C** - Full functionality including box temperature and light controls
 - **Creality Ender 3 V3 KE** - Full functionality (no box temperature or light controls, optional camera)
-- **Creality K2 Pro / K2 Plus** - WebRTC camera verified with Home Assistant 2025.11 release
+- **Creality K2 Pro / K2 Plus** - WebRTC camera verified with Home Assistant 2025.11 release (native).
+  - For older Home Assistant versions, verified with external go2rtc 1.9.11+.
 - **Creality K1 (Base)** - Box temperature sensor only (no control), light, MJPEG camera
 
 ---
