@@ -345,12 +345,13 @@ class CrealityWebRTCCamera(_BaseCamera):
         port_val = go2rtc_port if go2rtc_port is not None else DEFAULT_GO2RTC_PORT
         try:
             port_int = int(port_val)
-            if not (1 <= port_int <= 65535):
-                raise ValueError("port out of range")
-            self._go2rtc_port = port_int
-        except Exception:
-            _LOGGER.warning("ha_creality_ws: invalid go2rtc_port %r, using default %s", port_val, DEFAULT_GO2RTC_PORT)
-            self._go2rtc_port = int(DEFAULT_GO2RTC_PORT)
+        except (ValueError, TypeError):
+            _LOGGER.warning("ha_creality_ws: go2rtc_port %r could not be converted to int, using default %s", port_val, DEFAULT_GO2RTC_PORT)
+            port_int = int(DEFAULT_GO2RTC_PORT)
+        if not (1 <= port_int <= 65535):
+            _LOGGER.warning("ha_creality_ws: go2rtc_port %r out of range, using default %s", port_val, DEFAULT_GO2RTC_PORT)
+            port_int = int(DEFAULT_GO2RTC_PORT)
+        self._go2rtc_port = port_int
         self._stream_name: str | None = None
         self._last_error: str | None = None
         # Snapshot throttling to avoid hammering go2rtc /api/frame.jpeg

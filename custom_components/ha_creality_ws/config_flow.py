@@ -189,7 +189,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 if user_input.get(CONF_GO2RTC_PORT) is not None:
                     try:
                         user_input[CONF_GO2RTC_PORT] = int(user_input[CONF_GO2RTC_PORT])
-                    except Exception:
+                    except (ValueError, TypeError):
                         user_input[CONF_GO2RTC_PORT] = DEFAULT_GO2RTC_PORT
             
             return self.async_create_entry(title="Printer Configuration", data=user_input)
