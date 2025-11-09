@@ -2,3 +2,5 @@
 backups/*
 ha_creality_ws.code-workspace
 tools/test_files
+custom_components/ha_creality_ws/__pycache__
+tools/tests/__pycache__

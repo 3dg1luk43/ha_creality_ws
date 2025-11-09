@@ -1,11 +1,5 @@
 # Copilot Instructions for this repository
 
-These instructions tell GitHub Copilot Chat how to work in this repo. Assume changes target a Home Assistant custom integration that talks to Creality K-series printers over a local WebSocket, plus a bundled Lovelace card.
-
-Keep edits minimal, typed, async-safe, and aligned with Home Assistant patterns.
-
-# Copilot Instructions for this repository
-
 These instructions tell GitHub Copilot Chat how to work in this repo. Assume changes target a Home Assistant custom integration that talks to Creality printers over a local WebSocket, plus a bundled Lovelace card.
 
 ## Project overview
@@ -62,8 +56,8 @@ Use `ModelDetection` which reads both `model` and `modelVersion` codes.
   - Ender 3 V3 family: F001 (V3), F002 (V3 Plus), F005 (V3 KE)
   - Creality Hi: F018
 - Capabilities by model:
-  - Box temperature sensor: K1 (except K1 SE), K2, Creality Hi
-  - Box temperature control: K2 Pro and K2 Plus only
+  - Box temperature sensor: K1 (except K1 SE), K2; not present on Creality Hi
+  - Box temperature control: K2 Pro and K2 Plus only; not present on Creality Hi
   - Light: All except K1 SE and Ender 3 V3 family
   - Camera types: WebRTC (K2); MJPEG optional (K1 SE, Ender 3 V3); MJPEG default (others)
 - `resolved_model()` provides a stable model name for device info caching when the friendly name is missing.
@@ -126,21 +120,5 @@ Don’t
 - Don’t alter entity unique_id/name formats.
 - Don’t remove heartbeat or periodic GET scheduling.
 
-
-## PR checklist (for Copilot-generated changes)
-
-- Code compiles and imports under Python 3.11.
-- Async-safe; no blocking calls. Uses HA helpers.
-- Entities zero out properly when `power_is_off` or coordinator unavailable.
-- Logging added only where helpful; no noisy INFO logs in tight loops.
-- No breaking changes to entity identifiers or options.
-- Updated docs/README if user-facing behavior changed.
-- Kept within existing style and ruff rules.
-- Model detection logic is consistent across all platform files.
-- Feature capabilities match documented model specifications.
-- Diagnostic services use async-safe file operations.
-- Service responses include data for UI access when appropriate.
-
----
 
 If in doubt, prefer small, incremental changes and point to where the feature hooks into Coordinator/Client/Entity. Keep the integration simple and local-first.

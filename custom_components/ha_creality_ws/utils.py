@@ -88,7 +88,9 @@ def extract_host_from_zeroconf(info: Any) -> Optional[str]:
             return str(host)
         addrs_raw = info.get("addresses") or info.get("ip_addresses") or info.get("ip_address")
         if isinstance(addrs_raw, (list, tuple)) and addrs_raw:
-            return str(addrs_raw[0])
+            # Prefer IPv4 addresses when present (no ':' in string)
+            v4 = next((a for a in addrs_raw if ":" not in str(a)), None)
+            return str(v4 or addrs_raw[0])
         if isinstance(addrs_raw, str):
             return addrs_raw
         hn = info.get("hostname")
@@ -211,12 +213,10 @@ class ModelDetection:
         # Box temperature control is only available on K2 Pro and K2 Plus
         self.has_box_control = self.is_k2_pro or self.is_k2_plus
 
-        # Box temperature sensor is present on K1 family (except K1 SE), K1 Max, K1C,
-        # K2 family, and Creality Hi. Ender V3 family and K1 SE do not have it.
+        # Box temperature sensor is present on K1 family (except K1 SE) and K2 family.
+        # Not present on Ender V3 family, K1 SE, or Creality Hi.
         self.has_box_sensor = (
-            (self.is_k1_base or self.is_k1c or self.is_k1_max)
-            or self.is_k2_family
-            or self.is_creality_hi
+            (self.is_k1_base or self.is_k1c or self.is_k1_max) or self.is_k2_family
         ) and not self.is_ender_v3_family and not self.is_k1_se
 
         # Light is present on most models except K1 SE and Ender V3 family
