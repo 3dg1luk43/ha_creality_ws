@@ -2,6 +2,5 @@
   "name": "Creality Websocket Integration",
   "render_readme": true,
   "homeassistant": "2024.6.0",
-  "content_in_root": false,
-  "domains": ["ha_creality_ws"]
+  "content_in_root": false
 }
