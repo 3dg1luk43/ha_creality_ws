@@ -1,0 +1,163 @@
+# Copilot Instructions for this repository
+
+These instructions tell GitHub Copilot Chat how to work in this repo. Assume changes target a Home Assistant custom integration that talks to Creality K-series printers over a local WebSocket, plus a bundled Lovelace card.
+
+Keep edits minimal, typed, async-safe, and aligned with Home Assistant patterns.
+
+# Copilot Instructions for this repository
+
+These instructions tell GitHub Copilot Chat how to work in this repo. Assume changes target a Home Assistant custom integration that talks to Creality printers over a local WebSocket, plus a bundled Lovelace card.
+
+## Project overview
+
+- Domain: `ha_creality_ws` (custom_components/ha_creality_ws)
+- Purpose: Low-latency local WebSocket telemetry and control for Creality K-series and compatible printers. Bundles a dependency-free Lovelace card.
+- Connectivity: Local WebSocket (default ws://<host>:9999) with push updates; no polling.
+- Discovery: Zeroconf matches for names containing creality/k1/k2.
+- Python target: 3.11 (ruff target-version py311).
+
+## Repo layout quick map
+
+- `custom_components/ha_creality_ws/__init__.py` – HA setup, wiring coordinator and platforms; caches device info and options
+- `custom_components/ha_creality_ws/coordinator.py` – DataUpdateCoordinator subtype; owns `KClient`; `wait_for_fields` helper
+- `custom_components/ha_creality_ws/ws_client.py` – Resilient WebSocket client, heartbeat, jittered backoff, periodic GETs
+- `custom_components/ha_creality_ws/sensor.py` – Sensors (status, temps, progress, positions, etc.)
+- `custom_components/ha_creality_ws/button.py` – Pause/Resume/Stop controls
+- `custom_components/ha_creality_ws/switch.py` – Light switch and similar
+- `custom_components/ha_creality_ws/number.py` – Number entities (speed/flow/targets; K2 box control only)
+- `custom_components/ha_creality_ws/camera.py` – MJPEG (K1) and WebRTC (K2) camera implementations
+- `custom_components/ha_creality_ws/config_flow.py` – UI config + Options (power switch binding, camera mode, go2rtc)
+- `custom_components/ha_creality_ws/entity.py` – Base entity with zeroing rules and device info
+- `custom_components/ha_creality_ws/utils.py` – Helpers (numeric coercion, parsing, model detection)
+- `custom_components/ha_creality_ws/services.yaml` – Custom HA services
+- `custom_components/ha_creality_ws/manifest.json` – HA manifest (requirements, version, zeroconf)
+- `tools/deploy_to_ha.sh` – Dev-to-HA deploy script with backup and restart
+
+## Design anchors to preserve
+
+- Coordinator availability model: an entity stays available and zeros when the power switch is OFF or the link is stale. Use `KEntity._should_zero()`.
+- Power switch awareness: `KCoordinator.power_is_off()` drives UI zeroing and WS client start/stop.
+- Pause/resume pipeline: queued actions in coordinator (`request_pause`, `request_resume`, `_flush_pending`) with non-optimistic UI.
+- Status derivation: `PrintStatusSensor` maps telemetry to human-readable status. Don’t regress this mapping.
+- Resilient WS client: `KClient` owns heartbeat, jittered backoff, reconnect, and periodic GETs.
+- Local-first, no cloud: Never introduce cloud calls. Keep latency low and updates push-driven.
+- Model-specific feature detection: conditional features by model (box temp sensor/control, light, camera type).
+- Sensor zeroing when printer off: Layer sensors show 0, text sensors show "N/A", status shows "off" when power is off.
+
+## Home Assistant specifics
+
+- Entities subclass `KEntity`; follow CoordinatorEntity pattern; no polling.
+- Use `selector` in config flow options; respect existing option keys.
+- For new services: declare in `services.yaml` and implement async-safe handlers in platform or `__init__.py`.
+- For new simple sensors: prefer adding to `SPECS` in `sensor.py`; ensure `_should_zero()`.
+- Prefer HA unit constants with compatibility fallbacks.
+
+## Model detection and feature management
+
+Use `ModelDetection` which reads both `model` and `modelVersion` codes.
+
+- Detection helpers:
+  - K1 family: K1, K1C, K1 Max (not K1 SE)
+  - K2 family: codes F021 (K2), F012 (K2 Pro), F008 (K2 Plus)
+  - Ender 3 V3 family: F001 (V3), F002 (V3 Plus), F005 (V3 KE)
+  - Creality Hi: F018
+- Capabilities by model:
+  - Box temperature sensor: K1 (except K1 SE), K2, Creality Hi
+  - Box temperature control: K2 Pro and K2 Plus only
+  - Light: All except K1 SE and Ender 3 V3 family
+  - Camera types: WebRTC (K2); MJPEG optional (K1 SE, Ender 3 V3); MJPEG default (others)
+- `resolved_model()` provides a stable model name for device info caching when the friendly name is missing.
+
+## Camera implementation
+
+- MJPEG (K1 family):
+  - Snapshot extraction from MJPEG stream; fallback tiny JPEG when unavailable
+  - Live streaming via `handle_async_mjpeg_stream`
+- WebRTC (K2 family):
+  - Uses HA built-in go2rtc (default http://localhost:11984)
+  - Auto-configure go2rtc stream and forward WebRTC offer/answer
+  - Must use HA WebRTC message format: `{ "type": "answer", "answer": "...SDP..." }`
+  - Snapshot via go2rtc snapshot API when available
+
+## Startup and caching
+
+- On setup, if power isn’t OFF, wait for first connect and briefly for `model`, `modelVersion`, `hostname` using `KCoordinator.wait_for_fields`.
+- Cache device info and feature flags in `ConfigEntry.data`. Re-detect camera type only when missing.
+- Heuristics: if live telemetry exposes `boxTemp/targetBoxTemp/maxBoxTemp` or `lightSw`, promote those capabilities in cache and enable entities immediately.
+
+## Coding conventions
+
+- Python 3.11 with type hints; async for I/O; no blocking
+- Logging: concise; DEBUG for detail, WARNING for visible diagnostics
+- Keep public identifiers stable (unique_id/name formats)
+- Don’t add heavy dependencies or cloud calls
+
+## Dev quick checks
+
+- Lint: ruff configured in repo
+- Manual validation: run HA with the component and observe logs/telemetry
+- Deployment: `tools/deploy_to_ha.sh --run` syncs to the HA test instance
+
+## PR checklist (for Copilot-generated changes)
+
+- Code imports and runs under Python 3.11
+- Async-safe; no blocking calls; uses HA helpers
+- Entities zero out correctly when off/unavailable
+- Logging not noisy; hot paths are quiet
+- No breaking changes to entity IDs or options
+- Model detection consistent and capabilities match spec
+- Update README when user-facing behavior changes
+- Expose new values via sensors: add a spec to `SPECS` or a dedicated sensor class. Ensure zeroing respects `_should_zero()` and that attributes/units are correct.
+- For new controls: add a Button or Switch platform entity, call `KCoordinator.request_*` or `KClient.send_set_retry()` as appropriate.
+- For options: wire through `OptionsFlowHandler` using `selector` and have the coordinator consume the option.
+- For diagnostic services: Use WARNING level logging for visibility, return data in service response for UI access, use async-safe file operations.
+
+## Do and Don’t
+
+Do
+- Keep async, typed, minimal changes.
+- Reuse helpers in `utils.py` and zeroing via `KEntity`.
+- Add ruff-compliant imports ordering and formatting.
+- Include concise docstrings for public classes/methods.
+
+Don’t
+- Don’t block the event loop or add sleep() in sync contexts.
+- Don’t add heavy dependencies or cloud calls.
+- Don’t alter entity unique_id/name formats.
+- Don’t remove heartbeat or periodic GET scheduling.
+
+## Dev quick checks
+
+- Lint: use ruff (configured in `pyproject.toml`).
+- Tests: pytest is configured to look in `tests/` (`-q`). If you add tests, keep them fast and deterministic.
+- Manual validation: since this is a HA integration, spin up HA with this custom component and watch logs for connect/telemetry.
+- Deployment: use `tools/deploy_to_ha.sh --run` to sync dev repo to production HA instance. Always use backup option unless explicitly testing.
+
+## Deployment workflow
+
+- Development happens in `/root/ha_creality_ws` (repository clone)
+- Production testing in `/root/ha_config/custom_components/ha_creality_ws` (SMB mount)
+- Use `tools/deploy_to_ha.sh` to sync changes:
+  - Creates timestamped backup before deployment
+  - Syncs files using temp directory to avoid SMB issues
+  - Removes `__pycache__` directories
+  - Restarts Home Assistant via API
+  - Provides detailed feedback on API call results
+
+## PR checklist (for Copilot-generated changes)
+
+- Code compiles and imports under Python 3.11.
+- Async-safe; no blocking calls. Uses HA helpers.
+- Entities zero out properly when `power_is_off` or coordinator unavailable.
+- Logging added only where helpful; no noisy INFO logs in tight loops.
+- No breaking changes to entity identifiers or options.
+- Updated docs/README if user-facing behavior changed.
+- Kept within existing style and ruff rules.
+- Model detection logic is consistent across all platform files.
+- Feature capabilities match documented model specifications.
+- Diagnostic services use async-safe file operations.
+- Service responses include data for UI access when appropriate.
+
+---
+
+If in doubt, prefer small, incremental changes and point to where the feature hooks into Coordinator/Client/Entity. Keep the integration simple and local-first.

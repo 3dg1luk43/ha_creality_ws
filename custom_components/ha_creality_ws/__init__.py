@@ -128,13 +128,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Wait a bit longer to ensure we get model info
         if not coord.power_is_off():
             ok = await coord.wait_first_connect(timeout=10.0)
-            if ok and coord.data:
+            # After first connect, wait briefly for model fields to appear to reduce flakiness
+            if ok:
+                got_fields = await coord.wait_for_fields(["model", "modelVersion", "hostname"], timeout=6.0)
+            else:
+                got_fields = False
+            if (ok and coord.data) or got_fields:
                 # Store device info in entry data
-                model = coord.data.get("model") or "K by Creality"
-                hostname = coord.data.get("hostname")
-                model_version = coord.data.get("modelVersion")
+                d = coord.data or {}
+                printermodel = ModelDetection(d)
+                model = printermodel.resolved_model() or entry.data.get("_cached_model") or "K by Creality"
+                hostname = d.get("hostname") or entry.data.get("_cached_hostname")
+                model_version = d.get("modelVersion") or entry.data.get("_cached_model_version")
                 
-                printermodel = ModelDetection(coord.data)
                 new_data = dict(entry.data)
                 new_data["_device_info_cached"] = True
                 new_data["_cached_version"] = current_version
@@ -144,11 +150,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 new_data["_cached_has_light"] = printermodel.has_light
                 new_data["_cached_has_box_sensor"] = printermodel.has_box_sensor
                 new_data["_cached_has_box_control"] = printermodel.has_box_control
+                # Heuristic promotions: if telemetry already exposes fields, promote capabilities
+                if any(k in d for k in ("boxTemp", "targetBoxTemp", "maxBoxTemp")):
+                    new_data["_cached_has_box_sensor"] = True
+                if "lightSw" in d:
+                    new_data["_cached_has_light"] = True
                 
                 # Cache max temperature values for temperature control limits
-                new_data["_cached_max_bed_temp"] = coord.data.get("maxBedTemp")
-                new_data["_cached_max_nozzle_temp"] = coord.data.get("maxNozzleTemp")
-                new_data["_cached_max_box_temp"] = coord.data.get("maxBoxTemp")  # May be None for printers without heated chamber
+                new_data["_cached_max_bed_temp"] = d.get("maxBedTemp", entry.data.get("_cached_max_bed_temp"))
+                new_data["_cached_max_nozzle_temp"] = d.get("maxNozzleTemp", entry.data.get("_cached_max_nozzle_temp"))
+                new_data["_cached_max_box_temp"] = d.get("maxBoxTemp", entry.data.get("_cached_max_box_temp"))  # May be None for printers without heated chamber
                 
                 # Re-detect camera type only if missing (not on every update)
                 cached_camera_type = entry.data.get("_cached_camera_type")

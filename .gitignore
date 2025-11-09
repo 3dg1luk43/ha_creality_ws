@@ -1,7 +1,4 @@
-copilot-instructions.md
-webrtc_materials/*
-tools/deploy_*
-tools/client*
-tools/webrtc*
 .venv/*
 backups/*
+ha_creality_ws.code-workspace
+tools/test_files
