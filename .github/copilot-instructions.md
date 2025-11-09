@@ -126,23 +126,6 @@ Don’t
 - Don’t alter entity unique_id/name formats.
 - Don’t remove heartbeat or periodic GET scheduling.
 
-## Dev quick checks
-
-- Lint: use ruff (configured in `pyproject.toml`).
-- Tests: pytest is configured to look in `tests/` (`-q`). If you add tests, keep them fast and deterministic.
-- Manual validation: since this is a HA integration, spin up HA with this custom component and watch logs for connect/telemetry.
-- Deployment: use `tools/deploy_to_ha.sh --run` to sync dev repo to production HA instance. Always use backup option unless explicitly testing.
-
-## Deployment workflow
-
-- Development happens in `/root/ha_creality_ws` (repository clone)
-- Production testing in `/root/ha_config/custom_components/ha_creality_ws` (SMB mount)
-- Use `tools/deploy_to_ha.sh` to sync changes:
-  - Creates timestamped backup before deployment
-  - Syncs files using temp directory to avoid SMB issues
-  - Removes `__pycache__` directories
-  - Restarts Home Assistant via API
-  - Provides detailed feedback on API call results
 
 ## PR checklist (for Copilot-generated changes)
 
