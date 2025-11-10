@@ -88,7 +88,9 @@ def extract_host_from_zeroconf(info: Any) -> Optional[str]:
             return str(host)
         addrs_raw = info.get("addresses") or info.get("ip_addresses") or info.get("ip_address")
         if isinstance(addrs_raw, (list, tuple)) and addrs_raw:
-            return str(addrs_raw[0])
+            # Prefer IPv4 addresses when present (no ':' in string)
+            v4 = next((a for a in addrs_raw if ":" not in str(a)), None)
+            return str(v4 or addrs_raw[0])
         if isinstance(addrs_raw, str):
             return addrs_raw
         hn = info.get("hostname")
@@ -113,13 +115,18 @@ def extract_host_from_zeroconf(info: Any) -> Optional[str]:
     return None
 
 class ModelDetection:
-    """Detect printer model and capabilities from telemetry data."""
+    """Detect printer model and capabilities from telemetry data.
+
+    Looks at both "model" (friendly) and "modelVersion" (board code like F012).
+    Provides capability flags and a resolved model name if possible.
+    """
     
     def __init__(self, coord_data):
-        self.model = (coord_data or {}).get("model") or ""
+        d = coord_data or {}
+        self.model = d.get("model") or ""
         self.model_l = str(self.model).lower()
-        # Note: modelVersion could be used for more reliable detection
-        # but requires known model/mainboard version mapping
+        self.model_version = d.get("modelVersion") or ""
+        self.model_ver_u = str(self.model_version).upper()
         
         # Individual printer model detection
         # Detect specific K1 variants first so the base detector can exclude them
@@ -139,25 +146,21 @@ class ModelDetection:
             and not (self.is_k1_se or self.is_k1_max or self.is_k1c)
         )
         
-        # K2 Base - "F021"
-        self.is_k2_base = "F021" in self.model
-        
-        # K2 Pro - "F012"
-        self.is_k2_pro = "F012" in self.model
-        
-        # K2 Plus - "F008"
-        self.is_k2_plus = "F008" in self.model
+        # K2 Base/Pro/Plus via board codes (appear in modelVersion)
+        self.is_k2_base = ("F021" in self.model) or ("F021" in self.model_ver_u)
+        self.is_k2_pro = ("F012" in self.model) or ("F012" in self.model_ver_u)
+        self.is_k2_plus = ("F008" in self.model) or ("F008" in self.model_ver_u)
         
         # Ender-3 V3 KE - "F005"
         self.is_ender_v3_ke = (
-            "F005" in self.model or
-            "ender-3 v3 ke" in self.model_l
+            ("F005" in self.model) or ("F005" in self.model_ver_u) or
+            ("ender-3 v3 ke" in self.model_l)
         )
         
         # Ender-3 V3 Plus - "F002"
         self.is_ender_v3_plus = (
-            "F002" in self.model or
-            "ender-3 v3 plus" in self.model_l
+            ("F002" in self.model) or ("F002" in self.model_ver_u) or
+            ("ender-3 v3 plus" in self.model_l)
         )
         
         # Ender-3 V3 - "F001"
@@ -169,15 +172,15 @@ class ModelDetection:
         )
         self.is_ender_v3 = (
             is_not_variant and (
-                "F001" in self.model or
-                "ender-3 v3" in self.model_l
+                ("F001" in self.model) or ("F001" in self.model_ver_u) or
+                ("ender-3 v3" in self.model_l)
             )
         )
         
         # Creality Hi - "F018"
         self.is_creality_hi = (
-            "F018" in self.model or
-            "hi" in self.model_l
+            ("F018" in self.model) or ("F018" in self.model_ver_u) or
+            ("hi" in self.model_l)
         )
         
         # Family groupings
@@ -210,12 +213,49 @@ class ModelDetection:
         # Box temperature control is only available on K2 Pro and K2 Plus
         self.has_box_control = self.is_k2_pro or self.is_k2_plus
 
-        # Box temperature sensor is present on K1 family (except K1 SE), K1 Max, K1C,
-        # and K2 family. Ender V3 family, K1 SE, and Creality Hi do not have it.
+        # Box temperature sensor is present on K1 family (except K1 SE) and K2 family.
+        # Not present on Ender V3 family, K1 SE, or Creality Hi.
         self.has_box_sensor = (
-            (self.is_k1_base or self.is_k1c or self.is_k1_max)
-            or self.is_k2_family
+            (self.is_k1_base or self.is_k1c or self.is_k1_max) or self.is_k2_family
         ) and not self.is_ender_v3_family and not self.is_k1_se
 
         # Light is present on most models except K1 SE and Ender V3 family
         self.has_light = not (self.is_k1_se or self.is_ender_v3_family)
+
+    # ---- Resolved/canonical model name helpers ----
+    def canonical_model(self) -> str | None:
+        """Return a canonical model name if derivable from codes.
+
+        When the friendly model is missing, use modelVersion codes.
+        """
+        # K2 family by codes
+        if self.is_k2_pro:
+            return "K2 Pro"
+        if self.is_k2_plus:
+            return "K2 Plus"
+        if self.is_k2_base:
+            return "K2"
+        # Ender 3 V3 family by codes
+        if self.is_ender_v3_ke:
+            return "Ender 3 V3 KE"
+        if self.is_ender_v3_plus:
+            return "Ender 3 V3 Plus"
+        if self.is_ender_v3:
+            return "Ender 3 V3"
+        # Creality Hi
+        if self.is_creality_hi:
+            return "Creality Hi"
+        return None
+
+    def resolved_model(self) -> str:
+        """Best-effort model string for device_info caching/UI.
+
+        Prefer the printer-provided friendly "model", falling back to canonical
+        mapping from codes, and lastly a generic label.
+        """
+        if self.model:
+            return str(self.model)
+        can = self.canonical_model()
+        if can:
+            return can
+        return "K by Creality"

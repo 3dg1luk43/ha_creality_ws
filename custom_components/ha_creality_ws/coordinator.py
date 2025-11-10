@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
-from typing import Any
+import asyncio
+from typing import Any, Iterable
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .ws_client import KClient
 from .const import DOMAIN, STALE_AFTER_SECS
@@ -58,6 +59,32 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         
     async def wait_first_connect(self, timeout: float = 5.0) -> bool:
         return await self.client.wait_first_connect(timeout=timeout)
+    
+    async def wait_for_fields(self, fields: Iterable[str], timeout: float = 6.0) -> bool:
+        """Wait until all given telemetry fields appear in self.data or timeout.
+
+        Args:
+            fields: Iterable of keys expected to be present in telemetry dict.
+            timeout: Max seconds to wait.
+
+        Returns:
+            True if all fields were observed before timeout, False otherwise.
+        """
+        try:
+            end = self.hass.loop.time() + max(0.0, float(timeout))
+            needed = {str(f) for f in fields}
+            # Fast path check
+            if needed.issubset((self.data or {}).keys()):
+                return True
+            # Poll lightly; on_message updates self.data frequently when streaming starts
+            while self.hass.loop.time() < end:
+                if needed.issubset((self.data or {}).keys()):
+                    return True
+                await asyncio.sleep(0.2)
+        except Exception:
+            # Never raise from a helper wait; just indicate timeout/False.
+            pass
+        return False
         
     async def async_handle_power_change(self) -> None:
         """Start/stop WS client when the power switch toggles."""

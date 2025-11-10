@@ -521,8 +521,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
     # Core sensors
     ents.append(PrintStatusSensor(coord))
 
-    # Add box temperature if supported by model
+    # Add box temperature if supported by model. Also allow live-telemetry fallback if cache missing.
     has_box_sensor = entry.data.get("_cached_has_box_sensor", False)
+    live = coord.data or {}
+    if not has_box_sensor:
+        # Heuristics: if boxTemp or targetBoxTemp appears, expose the sensor.
+        if any(k in live for k in ("boxTemp", "targetBoxTemp", "maxBoxTemp")):
+            has_box_sensor = True
     
     for spec in SPECS:
         if spec.get("uid") == "box_temperature":
