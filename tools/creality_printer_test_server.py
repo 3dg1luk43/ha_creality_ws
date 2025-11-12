@@ -78,6 +78,7 @@ MODEL_CONFIGS: dict[str, dict[str, Any]] = {
     "e3v3": {"name": "F001", "box_sensor": False, "box_control": False, "light": False, "camera": "mjpeg"},
     "e3v3ke": {"name": "F005", "box_sensor": False, "box_control": False, "light": False, "camera": "mjpeg"},
     "e3v3plus": {"name": "F002", "box_sensor": False, "box_control": False, "light": False, "camera": "mjpeg"},
+    # Creality Hi (F018): no box sensor/control, light only
     "crealityhi": {"name": "F018", "box_sensor": False, "box_control": False, "light": True, "camera": "mjpeg"},
 }
 

@@ -128,13 +128,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Wait a bit longer to ensure we get model info
         if not coord.power_is_off():
             ok = await coord.wait_first_connect(timeout=10.0)
-            if ok and coord.data:
+            # After first connect, wait briefly for model fields to appear to reduce flakiness
+            if ok:
+                got_fields = await coord.wait_for_fields(["model", "modelVersion", "hostname"], timeout=6.0)
+            else:
+                got_fields = False
+            if (ok and coord.data) or got_fields:
                 # Store device info in entry data
-                model = coord.data.get("model") or "K by Creality"
-                hostname = coord.data.get("hostname")
-                model_version = coord.data.get("modelVersion")
+                d = coord.data or {}
+                printermodel = ModelDetection(d)
+                model = printermodel.resolved_model() or entry.data.get("_cached_model") or "K by Creality"
+                hostname = d.get("hostname") or entry.data.get("_cached_hostname")
+                model_version = d.get("modelVersion") or entry.data.get("_cached_model_version")
                 
-                printermodel = ModelDetection(coord.data)
                 new_data = dict(entry.data)
                 new_data["_device_info_cached"] = True
                 new_data["_cached_version"] = current_version
@@ -144,11 +150,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 new_data["_cached_has_light"] = printermodel.has_light
                 new_data["_cached_has_box_sensor"] = printermodel.has_box_sensor
                 new_data["_cached_has_box_control"] = printermodel.has_box_control
+                # Heuristic promotions: if telemetry already exposes fields, promote capabilities
+                if any(k in d for k in ("boxTemp", "targetBoxTemp", "maxBoxTemp")):
+                    new_data["_cached_has_box_sensor"] = True
+                if "lightSw" in d:
+                    new_data["_cached_has_light"] = True
                 
                 # Cache max temperature values for temperature control limits
-                new_data["_cached_max_bed_temp"] = coord.data.get("maxBedTemp")
-                new_data["_cached_max_nozzle_temp"] = coord.data.get("maxNozzleTemp")
-                new_data["_cached_max_box_temp"] = coord.data.get("maxBoxTemp")  # May be None for printers without heated chamber
+                new_data["_cached_max_bed_temp"] = d.get("maxBedTemp", entry.data.get("_cached_max_bed_temp"))
+                new_data["_cached_max_nozzle_temp"] = d.get("maxNozzleTemp", entry.data.get("_cached_max_nozzle_temp"))
+                new_data["_cached_max_box_temp"] = d.get("maxBoxTemp", entry.data.get("_cached_max_box_temp"))  # May be None for printers without heated chamber
                 
                 # Re-detect camera type only if missing (not on every update)
                 cached_camera_type = entry.data.get("_cached_camera_type")
@@ -427,3 +438,45 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await card_register.async_unregister()
 
     return unload_ok
+
+
+async def async_remove_config_entry_device(hass: HomeAssistant, entry: ConfigEntry, device) -> bool:
+    """Remove a device from the device registry when requested by the user.
+
+    Returning True allows Home Assistant to remove the device and any associated
+    entities for this config entry. We don't keep any external resources tied
+    to the device (streams, files, etc.), so no extra cleanup is required here.
+    """
+    try:
+        _LOGGER.info(
+            "ha_creality_ws: request to remove device %s for entry %s",
+            getattr(device, 'id', device),
+            entry.entry_id,
+        )
+
+        # If this device has our identifier (DOMAIN, host), clear cached data
+        # so that re-creating the device starts from a clean slate.
+        host: str | None = None
+        for ident in getattr(device, 'identifiers', set()):
+            if isinstance(ident, tuple) and len(ident) == 2 and ident[0] == DOMAIN:
+                host = ident[1]
+                break
+
+        if host:
+            # Drop all cached_* fields from entry.data
+            new_data = dict(entry.data)
+            removed_keys = []
+            for k in list(new_data.keys()):
+                if k.startswith("_cached_") or k == "_device_info_cached":
+                    removed_keys.append(k)
+                    new_data.pop(k, None)
+            if removed_keys:
+                hass.config_entries.async_update_entry(entry, data=new_data)
+                _LOGGER.info(
+                    "ha_creality_ws: cleared cached data on device removal for host=%s: %s",
+                    host,
+                    ", ".join(sorted(removed_keys)),
+                )
+    except Exception:
+        _LOGGER.exception("ha_creality_ws: cleanup during device removal failed")
+    return True

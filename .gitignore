@@ -1,11 +1,13 @@
-copilot-instructions.md
-webrtc_materials/*
-tools/deploy_*
-tools/client*
-tools/webrtc*
 .venv/*
 backups/*
+<<<<<<< HEAD
 custom_components/ha_creality_ws/__pycache__/*
 ha_creality_ws.code-workspace
 tools/tests/__pycache__
 tools/test_files
+=======
+ha_creality_ws.code-workspace
+tools/test_files
+custom_components/ha_creality_ws/__pycache__
+tools/tests/__pycache__
+>>>>>>> 909e8e9f4f022889b6ae4043365fc0b54a8135a9

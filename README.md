@@ -28,36 +28,28 @@ This custom [Home Assistant](https://www.home-assistant.io/) integration provide
 
 ### HACS (recommended)
 
-1. Add this repo as a [custom repository](https://hacs.xyz/docs/faq/custom_repositories/) (type: **Integration**).
-2. Install **Creality WebSocket Integration**.
-3. **Restart** Home Assistant.
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=3dg1luk43&repository=ha_creality_ws&category=integration)
+
+- This integration is available in HACS by default. Click the badge above to open it directly in HACS.
+- If needed, you can add it manually as a custom repository: https://github.com/3dg1luk43/ha_creality_ws
+- After install, **Restart** Home Assistant.
 
 ### Manual
 
 1. Copy `custom_components/ha_creality_ws` into `<config>/custom_components/`.
 2. **Restart** Home Assistant.
 
-### Dependencies
-
-The integration automatically installs the following Python packages:
-- `websockets>=10.4` - For WebSocket communication with printers
-
-**Camera Dependencies:**
-- **K1 family & Ender 3 V3 family cameras**: No additional dependencies required (MJPEG streaming)
-- **K2 family cameras (WebRTC):**
-  - Native WebRTC out of the box is supported only on **Home Assistant Core 2025.11+** (bundled go2rtc version compatible with Creality).
-  - If you're on an older Home Assistant release, configure an external **go2rtc >= 1.9.11** and point the integration to it via the Options dialog (host/port).
-
----
-
 ## Configuration
 
 ### 1) Add the integration (UI)
 
-1. **Settings → Devices & Services → Add Integration**
-   Select **Creality WebSocket Integration**.
-2. Enter printer hostname/IP and a friendly name.
-3. Zeroconf discovery is supported; if mDNS works on your network, it will appear automatically.
+[![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=ha_creality_ws)
+
+- Or go to **Settings → Devices & Services**
+- Click **Add Integration**
+- Search for **Creality WebSocket Integration**
+- Enter the printer hostname/IP and a friendly name
+- Zeroconf is supported; devices may auto-discover via mDNS
 
 ### 2) Optional: bind a power switch
 
@@ -76,6 +68,17 @@ If auto-detection doesn't choose your preferred stream, you can force it under t
   - `webrtc` - Force WebRTC streaming
 
 If your Home Assistant version is older than 2025.11, WebRTC requires an external go2rtc (>= 1.9.11). Set its URL/port in the integration options.
+
+### Dependencies
+
+The integration automatically installs the following Python packages:
+- `websockets>=10.4` - For WebSocket communication with printers
+
+**Camera Dependencies:**
+- **K1 family & Ender 3 V3 family cameras**: No additional dependencies required (MJPEG streaming)
+- **K2 family cameras (WebRTC):**
+  - Native WebRTC out of the box is supported only on **Home Assistant Core 2025.11+** (bundled go2rtc version compatible with Creality).
+  - If you're on an older Home Assistant release, configure an external **go2rtc >= 1.9.11** and point the integration to it via the Options dialog (host/port).
 
 ---
 
@@ -333,6 +336,19 @@ The integration auto-detects the printer model and creates the appropriate camer
 - **Creality Hi** - No box temperature, light, MJPEG camera
 
 Other K-series models may work but are unverified.
+
+---
+
+## Model Detection Reliability
+
+Printers can take a few telemetry frames before reporting their friendly `model`, `modelVersion`, and `hostname`. To avoid flakiness during onboarding the integration:
+
+* Waits briefly for core fields (`model`, `modelVersion`, `hostname`) before caching device info.
+* Falls back to board codes (`modelVersion` codes like F012/F021/F008/F001/F002/F005/F018) to resolve a stable model name when the friendly string is empty.
+* Promotes capabilities heuristically if telemetry exposes fields early (e.g., `boxTemp`, `maxBoxTemp`, `targetBoxTemp`, `lightSw`).
+* Ensures existing installations keep their cached capabilities and camera mode without regression.
+
+This logic reduces first-time setup races and prevents empty model names in the device registry.
 
 ---
 

@@ -15,6 +15,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
     
     # Light switch only if model supports it
     has_light = entry.data.get("_cached_has_light", True)
+    if not has_light:
+        # Fallback: if telemetry already exposes lightSw field, allow switch.
+        if "lightSw" in (coord.data or {}):
+            has_light = True
     
     ents = []
     for key, (name, field) in MAP.items():
