@@ -44,7 +44,6 @@ from .const import (
     DEFAULT_GO2RTC_PORT,
 )
 from .entity import KEntity
-from .utils import ModelDetection
 
 _LOGGER = logging.getLogger(__name__)
 

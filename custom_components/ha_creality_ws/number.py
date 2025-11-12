@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-from datetime import timedelta
-from homeassistant.helpers.event import async_track_time_interval  # type: ignore[import]
 
 from homeassistant.components.number import NumberEntity, NumberMode, NumberDeviceClass
 
@@ -26,8 +23,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
     ents.append(NozzleTargetNumber(coord))
     ents.append(BedTargetNumber(coord, bed_index=0))
     
-    # Box temperature control (K2 Pro/Plus only)
-    has_box_control = entry.data.get("_cached_has_box_control", False)
+    # Chamber temperature control (K2 Pro/Plus only)
+    has_box_control = entry.data.get("_cached_has_chamber_control", entry.data.get("_cached_has_box_control", False))
     if coord.data.get("maxBoxTemp") and has_box_control:
         ents.append(BoxTargetNumber(coord))
     
@@ -158,7 +155,7 @@ class BedTargetNumber(KEntity, NumberEntity):
 
 
 class BoxTargetNumber(KEntity, NumberEntity):
-    _attr_name = "Box Target"
+    _attr_name = "Chamber Target"
     _attr_icon = "mdi:thermometer"
     _attr_mode = NumberMode.BOX
     _attr_native_unit_of_measurement = UNIT_CELSIUS

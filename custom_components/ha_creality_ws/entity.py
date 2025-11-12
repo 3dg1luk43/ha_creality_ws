@@ -53,7 +53,7 @@ class KEntity(CoordinatorEntity):
     def _get_cached_max_temps(self) -> dict[str, float | None]:
         """
         Get cached max temperature values from config entry.
-        Returns dict with max_bed_temp, max_nozzle_temp, max_box_temp keys.
+    Returns dict with max_bed_temp, max_nozzle_temp, max_box_temp keys.
         Falls back to live data if cached values are not available.
         """
         try:
@@ -64,7 +64,8 @@ class KEntity(CoordinatorEntity):
                     return {
                         "max_bed_temp": entry_obj.data.get("_cached_max_bed_temp"),
                         "max_nozzle_temp": entry_obj.data.get("_cached_max_nozzle_temp"),
-                        "max_box_temp": entry_obj.data.get("_cached_max_box_temp"),
+                        # Prefer new chamber cache, fallback to legacy box cache
+                        "max_box_temp": entry_obj.data.get("_cached_max_chamber_temp", entry_obj.data.get("_cached_max_box_temp")),
                     }
         except Exception:
             pass

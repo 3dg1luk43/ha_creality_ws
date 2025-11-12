@@ -112,8 +112,11 @@ class KPrinterCard extends HTMLElement {
       name: "3D Printer",
       camera: "", status: "", progress: "", time_left: "",
       nozzle: "", bed: "", box: "",
+      // Optional power switch entity and visibility flag for a Power button
+      power: "",
+      show_power_button: true,
       layer: "", total_layers: "",
-  light: "", pause_btn: "", resume_btn: "", stop_btn: "",
+      light: "", pause_btn: "", resume_btn: "", stop_btn: "",
       // Theme customization options
       theme: {
         // Button backgrounds
@@ -146,6 +149,8 @@ class KPrinterCard extends HTMLElement {
   setConfig(config) {
     const defaultConfig = KPrinterCard.getStubConfig();
     this._cfg = { ...defaultConfig, ...(config || {}) };
+    // Init optimistic state overrides map
+    if (!this._optimisticStates) this._optimisticStates = {};
     
     // Generate card ID for theme persistence
     this._cardId = generateCardId(this._cfg);
@@ -188,6 +193,11 @@ class KPrinterCard extends HTMLElement {
       // Apply theme first, then update
       this._applyTheme();
       this._update();
+      // Schedule a follow-up update shortly after initial attach to absorb entity states once Home Assistant populates them
+      clearTimeout(this._initialUpdateTimer);
+      this._initialUpdateTimer = setTimeout(() => {
+        try { this._update(); } catch (_) {}
+      }, 150);
     }
   }
   getCardSize() { return 3; }
@@ -289,6 +299,11 @@ class KPrinterCard extends HTMLElement {
       .chip.ok     { --chip-bg: var(--resume-bg, rgba(76, 175, 80, .90));  --chip-fg: var(--resume-icon, #fff); }
       .chip.light-on  { --chip-bg: var(--light-on-bg, rgba(255, 235, 59, .95)); --chip-fg: var(--light-icon-on, #000); }
       .chip.light-off { --chip-bg: var(--light-off-bg, rgba(150,150,150,.35)); --chip-fg: var(--light-icon-off, #000); }
+      .chip.power-on  { --chip-bg: var(--power-on-bg, rgba(76, 175, 80, .90));  --chip-fg: var(--power-icon-on, #fff); }
+      .chip.power-off { --chip-bg: var(--power-off-bg, rgba(150,150,150,.35)); --chip-fg: var(--power-icon-off, #000); }
+  .chip.unknown   { --chip-bg: rgba(128,128,128,.14); --chip-fg: var(--primary-text-color); }
+      /* Keep power at the far right among chips */
+      .chips #power { order: 999; }
 
       /* telemetry row – single line, same right padding, tighter pills */
       .telemetry {
@@ -333,6 +348,7 @@ class KPrinterCard extends HTMLElement {
             <button class="chip ok"     id="resume" title="Resume"><ha-icon icon="mdi:play"></ha-icon></button>
             <button class="chip danger" id="stop"   title="Stop"><ha-icon icon="mdi:stop"></ha-icon></button>
             <button class="chip"        id="light"  title="Light"><ha-icon icon="mdi:lightbulb"></ha-icon></button>
+            <button class="chip"        id="power"  title="Power"><ha-icon icon="mdi:power"></ha-icon></button>
           </div>
         </div>
 
@@ -368,10 +384,14 @@ class KPrinterCard extends HTMLElement {
       }
     });
 
-    this._root.getElementById("pause")?.addEventListener("click", () => this._pressButtonEntity(this._cfg.pause_btn) );
-    this._root.getElementById("resume")?.addEventListener("click", () => this._pressButtonEntity(this._cfg.resume_btn) );
-    this._root.getElementById("stop")?.addEventListener("click", () => this._pressButtonEntity(this._cfg.stop_btn) );
-    this._root.getElementById("light")?.addEventListener("click", () => {
+    this._root.getElementById("power")?.addEventListener("click", () => {
+      const eid = this._resolveEntityId(this._cfg.power, ["switch"]);
+      this._toggleEntity(eid);
+    });
+      this._root.getElementById("pause")?.addEventListener("click", () => this._pressButtonEntity(this._cfg.pause_btn) );
+      this._root.getElementById("resume")?.addEventListener("click", () => this._pressButtonEntity(this._cfg.resume_btn) );
+      this._root.getElementById("stop")?.addEventListener("click", () => this._pressButtonEntity(this._cfg.stop_btn) );
+      this._root.getElementById("light")?.addEventListener("click", () => {
       const eid = this._resolveEntityId(this._cfg.light, ["light", "switch"]);
       this._toggleEntity(eid);
     });
@@ -388,7 +408,16 @@ class KPrinterCard extends HTMLElement {
     const st = this._hass.states[eid];
     const domain = (eid.split(".")[0] || "").toLowerCase();
     if (domain === "switch" || domain === "light") {
-      await this._hass.callService(domain, st?.state === "on" ? "turn_off" : "turn_on", { entity_id: eid });
+      const next = st?.state === "on" ? "off" : "on";
+      // Only apply optimistic UI to the power switch; Light strictly reflects HA state
+      const resolvedPower = this._resolveEntityId(this._cfg.power, ["switch"]);
+      if (resolvedPower && eid === resolvedPower) {
+        const now = Date.now();
+        this._optimisticStates = this._optimisticStates || {};
+        this._optimisticStates[eid] = { state: next, until: now + 2000 };
+        this._update();
+      }
+      await this._hass.callService(domain, next === "on" ? "turn_on" : "turn_off", { entity_id: eid });
     } else {
       await this._hass.callService("homeassistant", "toggle", { entity_id: eid });
     }
@@ -404,16 +433,36 @@ class KPrinterCard extends HTMLElement {
         const candidate = `${dom}.${id}`;
         if (this._hass.states[candidate]) return candidate;
       }
+    } else if (parts.length === 1) {
+      const id = parts[0];
+      for (const dom of preferredDomains) {
+        const candidate = `${dom}.${id}`;
+        if (this._hass.states[candidate]) return candidate;
+      }
     }
     return eid;
   }
 
   _update() {
     if (!this._root) return;
-    const g = (eid) => this._hass?.states?.[eid]?.state;
-    const gObj = (eid) => this._hass?.states?.[eid];
-    const gNum = (eid) => Number(g(eid));
-    const fmtState = (st) => {
+    const now = Date.now();
+    // Purge expired optimistic entries
+    if (this._optimisticStates) {
+      for (const [key, val] of Object.entries(this._optimisticStates)) {
+        if (!val || val.until <= now) delete this._optimisticStates[key];
+      }
+    }
+    const g = (eid) => {
+      if (!eid) return undefined;
+      const ov = this._optimisticStates?.[eid];
+      if (ov && ov.until > now && (eid.startsWith("switch.") || eid.startsWith("light."))) {
+        return ov.state;
+      }
+      return this._hass?.states?.[eid]?.state;
+    };
+      const gObj = (eid) => this._hass?.states?.[eid];
+      const gNum = (eid) => Number(g(eid));
+      const fmtState = (st) => {
       if (!st) return "—";
       const v = st.state;
       if (v === undefined || v === null) return "—";
@@ -448,13 +497,18 @@ class KPrinterCard extends HTMLElement {
     const layer = (g(this._cfg.layer) ?? "") + "";
     const totalLayers = (g(this._cfg.total_layers) ?? "") + "";
     const resolvedLight = this._resolveEntityId(this._cfg.light, ["light","switch"]);
-    const lightState = g(resolvedLight);
+    const lightState = this._hass?.states?.[resolvedLight]?.state;
+    const resolvedPower = this._resolveEntityId(this._cfg.power, ["switch"]);
+    const powerState = g(resolvedPower);
 
     const st = normStr(status);
     const isPrinting = ["printing","resuming","pausing"].includes(st);
     const isPaused = st === "paused";
     const showStop = isPrinting || isPaused || st === "self-testing";
-    const showLight = !["off","unknown"].includes(st);
+    // Show Light chip only when the light entity exists in HA state and power (if configured) is not OFF
+    const showLight = Boolean(resolvedLight && this._hass?.states?.[resolvedLight]) && !(resolvedPower && powerState === "off");
+    // Show the Power button whenever configured, independent of printer status
+    const showPower = Boolean(this._cfg.show_power_button) && Boolean(this._cfg.power);
 
     // Title/status
     this._root.getElementById("name").textContent = name;
@@ -478,10 +532,26 @@ class KPrinterCard extends HTMLElement {
     this._root.getElementById("resume").hidden = !isPaused;
     this._root.getElementById("stop").hidden = !showStop;
 
-    const lightBtn = this._root.getElementById("light");
-    lightBtn.hidden = !showLight || !resolvedLight;
-      lightBtn.classList.toggle("light-on", lightState === "on");
-      lightBtn.classList.toggle("light-off", lightState !== "on");
+    const powerBtn = this._root.getElementById("power");
+    if (powerBtn) {
+      powerBtn.hidden = !showPower;
+      // Track last known switch state so UI doesn't flip to neutral when HA hasn't provided a state yet
+      this._lastPowerState = this._lastPowerState || null;
+      if (powerState === "on" || powerState === "off") {
+        this._lastPowerState = powerState;
+      }
+      const isOn = powerState === "on" || (!powerState && this._lastPowerState === "on");
+      const isOff = powerState === "off" || (!powerState && this._lastPowerState === "off");
+      const isUnknown = !isOn && !isOff;
+      powerBtn.classList.toggle("power-on", isOn);
+      powerBtn.classList.toggle("power-off", isOff);
+      powerBtn.classList.toggle("unknown", isUnknown);
+    }
+      const lightBtn = this._root.getElementById("light");
+      lightBtn.hidden = !showLight;
+      const lightOn = lightState === "on";
+      lightBtn.classList.toggle("light-on", lightOn);
+      lightBtn.classList.toggle("light-off", !lightOn);
 
       // Telemetry
     this._root.getElementById("nozzle").textContent = nozzleStr;
@@ -856,7 +926,9 @@ class KPrinterCardEditor extends HTMLElement {
       "time_left": "Sensor showing remaining print time (seconds)",
       "nozzle": "Sensor showing nozzle temperature",
       "bed": "Sensor showing bed temperature",
-      "box": "Sensor showing enclosure temperature (optional)",
+      "box": "Sensor showing chamber/enclosure temperature (optional)",
+      "power": "Optional power switch entity for the printer (shows a Power button when set)",
+      "show_power_button": "Show the Power button when a power switch entity is configured",
       "layer": "Sensor showing current print layer",
       "total_layers": "Sensor showing total print layers",
       "light": "Switch entity for printer light control",
@@ -874,6 +946,8 @@ class KPrinterCardEditor extends HTMLElement {
       { name: "nozzle",       selector: { entity: { domain: "sensor" } } },
       { name: "bed",          selector: { entity: { domain: "sensor" } } },
       { name: "box",          selector: { entity: { domain: "sensor" } } },
+      { name: "power",        selector: { entity: { domain: "switch" } } },
+      { name: "show_power_button", selector: { boolean: {} } },
       { name: "layer",        selector: { entity: { domain: "sensor" } } },
       { name: "total_layers", selector: { entity: { domain: "sensor" } } },
       { name: "light",        selector: { entity: { domain: "switch" } } },
@@ -891,7 +965,9 @@ class KPrinterCardEditor extends HTMLElement {
       "time_left": "Time Left Sensor",
       "nozzle": "Nozzle Temperature Sensor",
       "bed": "Bed Temperature Sensor",
-      "box": "Enclosure Temperature Sensor",
+      "box": "Chamber Temperature Sensor",
+      "power": "Power Switch",
+      "show_power_button": "Show Power Button",
       "layer": "Current Layer Sensor",
       "total_layers": "Total Layers Sensor",
       "light": "Light Switch",

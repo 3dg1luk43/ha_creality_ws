@@ -20,6 +20,7 @@ These instructions tell GitHub Copilot Chat how to work in this repo. Assume cha
 - `custom_components/ha_creality_ws/switch.py` – Light switch and similar
 - `custom_components/ha_creality_ws/number.py` – Number entities (speed/flow/targets; K2 box control only)
 - `custom_components/ha_creality_ws/camera.py` – MJPEG (K1) and WebRTC (K2) camera implementations
+- `custom_components/ha_creality_ws/image.py` – Image platform exposing current print preview (K1 family)
 - `custom_components/ha_creality_ws/config_flow.py` – UI config + Options (power switch binding, camera mode, go2rtc)
 - `custom_components/ha_creality_ws/entity.py` – Base entity with zeroing rules and device info
 - `custom_components/ha_creality_ws/utils.py` – Helpers (numeric coercion, parsing, model detection)
@@ -37,6 +38,7 @@ These instructions tell GitHub Copilot Chat how to work in this repo. Assume cha
 - Local-first, no cloud: Never introduce cloud calls. Keep latency low and updates push-driven.
 - Model-specific feature detection: conditional features by model (box temp sensor/control, light, camera type).
 - Sensor zeroing when printer off: Layer sensors show 0, text sensors show "N/A", status shows "off" when power is off.
+- Lovelace card behavior: chips/buttons render instantly with optimistic UI; Power chip pinned far-right and only visible when configured; Light chip visibility reacts to power state and status without reload.
 
 ## Home Assistant specifics
 
@@ -45,6 +47,7 @@ These instructions tell GitHub Copilot Chat how to work in this repo. Assume cha
 - For new services: declare in `services.yaml` and implement async-safe handlers in platform or `__init__.py`.
 - For new simple sensors: prefer adding to `SPECS` in `sensor.py`; ensure `_should_zero()`.
 - Prefer HA unit constants with compatibility fallbacks.
+- Image platform: subclass `ImageEntity`; call `ImageEntity.__init__(self, hass)`; set `image_last_updated` when new bytes fetched; return placeholder bytes when content is unavailable.
 
 ## Model detection and feature management
 
@@ -73,11 +76,26 @@ Use `ModelDetection` which reads both `model` and `modelVersion` codes.
   - Must use HA WebRTC message format: `{ "type": "answer", "answer": "...SDP..." }`
   - Snapshot via go2rtc snapshot API when available
 
+## Image (print preview) implementation
+
+- K1 family:
+  - Expose an `image` entity named "Current Print Preview" with unique_id `<host>-current_print_preview`.
+  - Fetch PNG from `http://<host>/downloads/original/current_print_image.png` using HA's `async_get_clientsession` with short timeouts.
+  - Show content only for statuses: self-testing, printing, completed (derive from the same telemetry/status rules as `PrintStatusSensor`).
+  - When not eligible or fetch fails, return a built-in neutral PNG placeholder; cache last successful image to avoid flashing.
+- Other models:
+  - Keep the entity as a placeholder; do not fetch until we confirm model-specific URLs via diagnostics.
+- Diagnostics:
+  - Cache all accessed HTTP URLs on the coordinator and include them in the diagnostic dump as `http_urls_accessed`.
+- Entity attributes:
+  - Expose `preview_reason` (ok | not_printing | unsupported_model | fetch_failed) and `source_url` to aid support.
+
 ## Startup and caching
 
 - On setup, if power isn’t OFF, wait for first connect and briefly for `model`, `modelVersion`, `hostname` using `KCoordinator.wait_for_fields`.
 - Cache device info and feature flags in `ConfigEntry.data`. Re-detect camera type only when missing.
 - Heuristics: if live telemetry exposes `boxTemp/targetBoxTemp/maxBoxTemp` or `lightSw`, promote those capabilities in cache and enable entities immediately.
+- Cache of accessed HTTP URLs: record printer-local HTTP endpoints we hit (e.g., preview image) for diagnostics; never call cloud.
 
 ## Coding conventions
 
@@ -85,6 +103,12 @@ Use `ModelDetection` which reads both `model` and `modelVersion` codes.
 - Logging: concise; DEBUG for detail, WARNING for visible diagnostics
 - Keep public identifiers stable (unique_id/name formats)
 - Don’t add heavy dependencies or cloud calls
+- Frontend (card):
+  - Keep config keys backward-compatible; labels may evolve (box→chamber) but entity IDs/keys remain stable.
+  - Use entity resolution helpers to support ambiguous IDs across domains (e.g., `light/switch`).
+  - Implement optimistic UI for snappy feedback on toggles; apply a short-lived override and re-render.
+  - Avoid forced page reloads; react to HA state updates and local optimistic overrides.
+  - Maintain consistent chip layout; pin Power chip to the far right via CSS ordering.
 
 ## Dev quick checks
 
@@ -103,6 +127,7 @@ Use `ModelDetection` which reads both `model` and `modelVersion` codes.
 - Model detection consistent and capabilities match spec
 - Update README when user-facing behavior changes
 - Expose new values via sensors: add a spec to `SPECS` or a dedicated sensor class. Ensure zeroing respects `_should_zero()` and that attributes/units are correct.
+- For image/preview features: gate content by status; use placeholders when unavailable; update diagnostics with accessed URLs.
 - For new controls: add a Button or Switch platform entity, call `KCoordinator.request_*` or `KClient.send_set_retry()` as appropriate.
 - For options: wire through `OptionsFlowHandler` using `selector` and have the coordinator consume the option.
 - For diagnostic services: Use WARNING level logging for visibility, return data in service response for UI access, use async-safe file operations.
@@ -120,6 +145,22 @@ Don’t
 - Don’t add heavy dependencies or cloud calls.
 - Don’t alter entity unique_id/name formats.
 - Don’t remove heartbeat or periodic GET scheduling.
+
+
+## Recent updates (2025-11-12)
+
+- Lovelace card
+  - Added optional Power chip (config: `power`, `show_power_button`); resolves entity across domains; optimistic toggle; pinned to far right.
+  - Light chip now responds instantly to Power changes (show/hide) without reload; uses optimistic overrides.
+  - Ensured Power chip styling reflects actual entity state only when state is known.
+- Image platform
+  - New `image.py` exposing "Current Print Preview" for K1 family.
+  - Returns placeholder when not printing/unsupported/fetch fails; records `http_urls_accessed` for diagnostics.
+  - Fixed ImageEntity initialization (`ImageEntity.__init__(self, hass)`) and updates `image_last_updated` on new bytes.
+- Diagnostics
+  - Expanded diagnostic dump with accessed HTTP URLs to help confirm model-specific paths.
+- Terminology/compat
+  - Continued preserving back-compat for "box" → "chamber" by keeping stable unique IDs and protocol fields while updating labels.
 
 
 If in doubt, prefer small, incremental changes and point to where the feature hooks into Coordinator/Client/Entity. Keep the integration simple and local-first.
