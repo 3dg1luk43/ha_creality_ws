@@ -113,7 +113,7 @@ class KPrinterCard extends HTMLElement {
       camera: "", status: "", progress: "", time_left: "",
       nozzle: "", bed: "", box: "",
       layer: "", total_layers: "",
-      light: "", pause_btn: "", resume_btn: "", stop_btn: "",
+  light: "", pause_btn: "", resume_btn: "", stop_btn: "",
       // Theme customization options
       theme: {
         // Button backgrounds
@@ -371,7 +371,10 @@ class KPrinterCard extends HTMLElement {
     this._root.getElementById("pause")?.addEventListener("click", () => this._pressButtonEntity(this._cfg.pause_btn) );
     this._root.getElementById("resume")?.addEventListener("click", () => this._pressButtonEntity(this._cfg.resume_btn) );
     this._root.getElementById("stop")?.addEventListener("click", () => this._pressButtonEntity(this._cfg.stop_btn) );
-    this._root.getElementById("light")?.addEventListener("click", () => this._toggleEntity(this._cfg.light) );
+    this._root.getElementById("light")?.addEventListener("click", () => {
+      const eid = this._resolveEntityId(this._cfg.light, ["light", "switch"]);
+      this._toggleEntity(eid);
+    });
 
     this._update();
   }
@@ -391,21 +394,61 @@ class KPrinterCard extends HTMLElement {
     }
   }
 
+  _resolveEntityId(eid, preferredDomains = []) {
+    if (!eid || !this._hass) return eid;
+    if (this._hass.states[eid]) return eid;
+    const parts = String(eid).split(".");
+    if (parts.length === 2) {
+      const id = parts[1];
+      for (const dom of preferredDomains) {
+        const candidate = `${dom}.${id}`;
+        if (this._hass.states[candidate]) return candidate;
+      }
+    }
+    return eid;
+  }
+
   _update() {
     if (!this._root) return;
     const g = (eid) => this._hass?.states?.[eid]?.state;
+    const gObj = (eid) => this._hass?.states?.[eid];
     const gNum = (eid) => Number(g(eid));
+    const fmtState = (st) => {
+      if (!st) return "—";
+      const v = st.state;
+      if (v === undefined || v === null) return "—";
+      const s = String(v);
+      if (s === "unknown" || s === "unavailable") return "—";
+      // Prefer HA's built-in formatter to honor per-entity precision and units
+      if (this._hass && typeof this._hass.formatEntityState === 'function') {
+        try { return this._hass.formatEntityState(st); } catch (_) {}
+      }
+      // Fallback: number-aware formatting with (suggested_)display_precision when present
+      const unit = st.attributes?.unit_of_measurement;
+      const n = Number(s);
+      if (!Number.isNaN(n) && Number.isFinite(n)) {
+        const dp = (typeof st.attributes?.display_precision === 'number') ? st.attributes.display_precision
+                 : (typeof st.attributes?.suggested_display_precision === 'number') ? st.attributes.suggested_display_precision
+                 : (unit && /°|c|f/i.test(unit)) ? 1
+                 : 2;
+        const out = n.toFixed(Math.max(0, Math.min(6, dp)));
+        return unit ? `${out} ${unit}` : out;
+      }
+      return unit ? `${s} ${unit}` : s;
+    };
+    const fmtWithUnit = (eid) => fmtState(gObj(eid));
 
     const name = this._cfg.name || "3D Printer";
     const status = g(this._cfg.status) ?? "unknown";
     const pct = clamp(Number.isFinite(gNum(this._cfg.progress)) ? gNum(this._cfg.progress) : 0, 0, 100);
     const timeLeft = gNum(this._cfg.time_left) || 0;
-    const nozzle = gNum(this._cfg.nozzle);
-    const bed = gNum(this._cfg.bed);
-    const box = gNum(this._cfg.box);
+    const nozzleStr = fmtWithUnit(this._cfg.nozzle);
+    const bedStr = fmtWithUnit(this._cfg.bed);
+    const boxStr = fmtWithUnit(this._cfg.box);
     const layer = (g(this._cfg.layer) ?? "") + "";
     const totalLayers = (g(this._cfg.total_layers) ?? "") + "";
-    const lightState = g(this._cfg.light);
+    const resolvedLight = this._resolveEntityId(this._cfg.light, ["light","switch"]);
+    const lightState = g(resolvedLight);
 
     const st = normStr(status);
     const isPrinting = ["printing","resuming","pausing"].includes(st);
@@ -436,17 +479,14 @@ class KPrinterCard extends HTMLElement {
     this._root.getElementById("stop").hidden = !showStop;
 
     const lightBtn = this._root.getElementById("light");
-    lightBtn.hidden = !showLight;
-    lightBtn.classList.toggle("light-on", lightState === "on");
-    lightBtn.classList.toggle("light-off", lightState !== "on");
+    lightBtn.hidden = !showLight || !resolvedLight;
+      lightBtn.classList.toggle("light-on", lightState === "on");
+      lightBtn.classList.toggle("light-off", lightState !== "on");
 
-    // Telemetry
-    const n = Number.isFinite(nozzle) ? `${nozzle.toFixed(1)} °C` : "—";
-    const b = Number.isFinite(bed)    ? `${bed.toFixed(1)} °C`    : "—";
-    const bx = Number.isFinite(box)   ? `${box.toFixed(1)} °C`    : "—";
-    this._root.getElementById("nozzle").textContent = n;
-    this._root.getElementById("bed").textContent    = b;
-    this._root.getElementById("box").textContent    = bx;
+      // Telemetry
+    this._root.getElementById("nozzle").textContent = nozzleStr;
+    this._root.getElementById("bed").textContent    = bedStr;
+    this._root.getElementById("box").textContent    = boxStr;
     this._root.getElementById("time").textContent   = fmtTimeLeft(timeLeft);
     this._root.getElementById("layers").textContent = `${layer || "?"}/${totalLayers || "?"}`;
   }

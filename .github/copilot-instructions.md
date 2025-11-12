@@ -91,6 +91,7 @@ Use `ModelDetection` which reads both `model` and `modelVersion` codes.
 - Lint: ruff configured in repo
 - Manual validation: run HA with the component and observe logs/telemetry
 - Deployment: `tools/deploy_to_ha.sh --run` syncs to the HA test instance
+ - Diagnostic samples: sample WebSocket diagnostic JSONs are stored under `tools/test_files/ws_diagnostic_dumps/` for reference when adding or validating fields
 
 ## PR checklist (for Copilot-generated changes)
 

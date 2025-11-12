@@ -25,9 +25,10 @@ from .const import (
 from .coordinator import KCoordinator
 from .frontend import CrealityCardRegistration
 from .utils import ModelDetection
+from homeassistant.helpers import entity_registry as er  # type: ignore[import]
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS: list[str] = ["sensor", "switch", "camera", "button", "number"]
+PLATFORMS: list[str] = ["sensor", "switch", "camera", "button", "number", "fan", "light"]
 
 # Import integration version from manifest
 import json
@@ -239,6 +240,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     cancel_power_watch = _watch_power_switch(power_switch)
     entry.async_on_unload(cancel_power_watch)
+
+    # --- Remove legacy entities (migration) ---
+    try:
+        reg = er.async_get(hass)
+        host = coord.client._host
+        # Old unique_ids to remove
+        legacy = [
+            ("switch", f"{host}-light"),
+            ("number", f"{host}-model_fan_pct"),
+            ("number", f"{host}-case_fan_pct"),
+            ("number", f"{host}-side_fan_pct"),
+        ]
+        for domain_name, unique in legacy:
+            ent_id = reg.async_get_entity_id(domain_name, DOMAIN, unique)
+            if ent_id:
+                reg.async_remove(ent_id)
+    except Exception as exc:
+        _LOGGER.debug("Legacy entity cleanup skipped: %s", exc)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
