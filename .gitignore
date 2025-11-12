@@ -5,3 +5,7 @@ tools/client*
 tools/webrtc*
 .venv/*
 backups/*
+custom_components/ha_creality_ws/__pycache__/*
+ha_creality_ws.code-workspace
+tools/tests/__pycache__
+tools/test_files
