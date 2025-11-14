@@ -210,14 +210,18 @@ class ModelDetection:
         )
         
         # Feature detection
-        # Box temperature control is only available on K2 Pro and K2 Plus
-        self.has_box_control = self.is_k2_pro or self.is_k2_plus
+        # Chamber temperature control is only available on K2 Pro and K2 Plus
+        self.has_chamber_control = self.is_k2_pro or self.is_k2_plus
+        # Back-compat alias
+        self.has_box_control = self.has_chamber_control
 
-        # Box temperature sensor is present on K1 family (except K1 SE) and K2 family.
+        # Chamber temperature sensor is present on K1 family (except K1 SE) and K2 family.
         # Not present on Ender V3 family, K1 SE, or Creality Hi.
-        self.has_box_sensor = (
+        self.has_chamber_sensor = (
             (self.is_k1_base or self.is_k1c or self.is_k1_max) or self.is_k2_family
         ) and not self.is_ender_v3_family and not self.is_k1_se
+        # Back-compat alias
+        self.has_box_sensor = self.has_chamber_sensor
 
         # Light is present on most models except K1 SE and Ender V3 family
         self.has_light = not (self.is_k1_se or self.is_ender_v3_family)

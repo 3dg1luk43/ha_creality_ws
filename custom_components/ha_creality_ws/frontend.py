@@ -1,5 +1,4 @@
 import logging
-import shutil
 from pathlib import Path
 from homeassistant.core import HomeAssistant
 

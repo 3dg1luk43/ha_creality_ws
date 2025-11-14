@@ -6,7 +6,7 @@ from .utils import extract_host_from_zeroconf as util_extract_host_from_zeroconf
 import voluptuous as vol
 from homeassistant import config_entries #type: ignore[import]
 from homeassistant.data_entry_flow import FlowResult #type: ignore[import]
-from homeassistant.helpers import config_validation as cv, selector #type: ignore[import]
+from homeassistant.helpers import selector #type: ignore[import]
 from homeassistant.helpers.aiohttp_client import async_get_clientsession #type: ignore[import]
 from .const import (
     DOMAIN,
@@ -14,7 +14,6 @@ from .const import (
     CONF_NAME,
     DEFAULT_NAME,
     WS_PORT,
-    MJPEG_URL_TEMPLATE,
     WEBRTC_URL_TEMPLATE,
     CONF_POWER_SWITCH,
     CONF_CAMERA_MODE,

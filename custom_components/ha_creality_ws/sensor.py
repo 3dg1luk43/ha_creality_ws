@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import json
 from typing import Any, Callable
 from .utils import parse_position as _parse_position, safe_float as _safe_float
 
@@ -9,10 +10,7 @@ from homeassistant.components.sensor import (  # type: ignore[import]
     SensorStateClass,
 )
 from .entity import KEntity
-from datetime import timedelta
-from homeassistant.helpers.event import async_track_time_interval  # type: ignore[import]
 from .const import DOMAIN
-from .utils import ModelDetection
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -70,9 +68,9 @@ SPECS: list[dict[str, Any]] = [
         "state_class": SensorStateClass.MEASUREMENT,
     },
     {
-        "uid": "box_temperature",
-        "name": "Box Temperature",
-        "field": "boxTemp",
+        "uid": "box_temperature",  # keep uid stable for existing entity IDs
+        "name": "Chamber Temperature",
+        "field": "boxTemp",  # protocol field remains boxTemp
         "device_class": SensorDeviceClass.TEMPERATURE,
         "unit": U_C,
         "attrs": lambda d: _attr_dict(
@@ -130,8 +128,8 @@ SPECS: list[dict[str, Any]] = [
         "uid": "position_x",
         "name": "Position X",
         "field": "__pos_x__",
-        "device_class": None,
-        "unit": "mm",
+        "device_class": SensorDeviceClass.DISTANCE,
+        "unit": U_MM,
         "attrs": lambda d: {},
         "state_class": SensorStateClass.MEASUREMENT,
     },
@@ -139,8 +137,8 @@ SPECS: list[dict[str, Any]] = [
         "uid": "position_y",
         "name": "Position Y",
         "field": "__pos_y__",
-        "device_class": None,
-        "unit": "mm",
+        "device_class": SensorDeviceClass.DISTANCE,
+        "unit": U_MM,
         "attrs": lambda d: {},
         "state_class": SensorStateClass.MEASUREMENT,
     },
@@ -148,8 +146,8 @@ SPECS: list[dict[str, Any]] = [
         "uid": "position_z",
         "name": "Position Z",
         "field": "__pos_z__",
-        "device_class": None,
-        "unit": "mm",
+        "device_class": SensorDeviceClass.DISTANCE,
+        "unit": U_MM,
         "attrs": lambda d: {},
         "state_class": SensorStateClass.MEASUREMENT,
     },
@@ -331,6 +329,7 @@ class UsedMaterialLengthSensor(KEntity, SensorEntity):
     _attr_name = "Used Material Length"
     _attr_icon = "mdi:counter"
     _attr_native_unit_of_measurement = U_CM
+    _attr_device_class = SensorDeviceClass.DISTANCE
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator):
@@ -388,6 +387,7 @@ class PrintLeftTimeSensor(KEntity, SensorEntity):
 class RealTimeFlowSensor(KEntity, SensorEntity):
     _attr_name = "Real-Time Flow"
     _attr_icon = "mdi:cube-send"
+    # Use engineering unit mm³/s directly; omit device_class to avoid HA validation warnings.
     _attr_native_unit_of_measurement = "mm³/s"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
@@ -462,7 +462,6 @@ class ObjectCountSensor(KEntity, SensorEntity):
         # Handle JSON string format (from diagnostic logs)
         if isinstance(objs, str):
             try:
-                import json
                 parsed_objs = json.loads(objs)
                 if isinstance(parsed_objs, list):
                     return len(parsed_objs)
@@ -521,8 +520,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
     # Core sensors
     ents.append(PrintStatusSensor(coord))
 
-    # Add box temperature if supported by model. Also allow live-telemetry fallback if cache missing.
-    has_box_sensor = entry.data.get("_cached_has_box_sensor", False)
+    # Add chamber temperature if supported by model. Also allow live-telemetry fallback if cache missing.
+    has_box_sensor = entry.data.get("_cached_has_chamber_sensor", entry.data.get("_cached_has_box_sensor", False))
     live = coord.data or {}
     if not has_box_sensor:
         # Heuristics: if boxTemp or targetBoxTemp appears, expose the sensor.
@@ -547,4 +546,100 @@ async def async_setup_entry(hass, entry, async_add_entities):
         KPrintControlSensor(coord),
     ])
 
+    # --- Max temperature sensors (non-editable, from cached/live capability limits) ---
+    # Pull cached values first
+    cached = None
+    try:
+        cached = coord.hass.config_entries.async_get_entry(getattr(coord, "_config_entry_id", None)).data  # type: ignore[assignment]
+    except Exception:
+        cached = None
+
+    def _cached_or_live(key: str):
+        if cached and (key in cached or f"_cached_{key}" in cached):
+            # keys in entry use _cached_max_* naming; coordinator/live uses max* keys
+            if key == "max_bed_temp":
+                return cached.get("_cached_max_bed_temp")
+            if key == "max_nozzle_temp":
+                return cached.get("_cached_max_nozzle_temp")
+            if key == "max_box_temp":
+                return cached.get("_cached_max_chamber_temp", cached.get("_cached_max_box_temp"))
+        d = coord.data or {}
+        if key == "max_bed_temp":
+            return d.get("maxBedTemp")
+        if key == "max_nozzle_temp":
+            return d.get("maxNozzleTemp")
+        if key == "max_box_temp":
+            return d.get("maxBoxTemp")
+        return None
+
+    max_noz = _cached_or_live("max_nozzle_temp")
+    max_bed = _cached_or_live("max_bed_temp")
+    max_box = _cached_or_live("max_box_temp")
+
+    if max_noz is not None:
+        ents.append(KMaxTempSensor(coord, name="Max Nozzle Temperature", uid="max_nozzle_temp", key="max_nozzle_temp"))
+    if max_bed is not None:
+        ents.append(KMaxTempSensor(coord, name="Max Bed Temperature", uid="max_bed_temp", key="max_bed_temp"))
+    # Only expose chamber max if model supports chamber sensor/control or we detect a value
+    if has_box_sensor and max_box is not None:
+        ents.append(KMaxTempSensor(coord, name="Max Chamber Temperature", uid="max_box_temp", key="max_box_temp"))
+
     async_add_entities(ents)
+
+
+class KMaxTempSensor(KEntity, SensorEntity):
+    """Non-editable sensor exposing maximum temperature limits from device telemetry/cache.
+
+    Does not zero when the printer is off/unavailable; similar to the System model sensor behavior.
+    """
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator, name: str, uid: str, key: str):
+        super().__init__(coordinator, name, uid)
+        self._key = key  # one of: max_nozzle_temp, max_bed_temp, max_box_temp
+        # Use Celsius unit
+        try:
+            # Prefer UnitOfTemperature if available
+            from homeassistant.const import UnitOfTemperature  # type: ignore[import]
+            self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+        except Exception:
+            from homeassistant.const import TEMP_CELSIUS  # type: ignore[import]
+            self._attr_native_unit_of_measurement = TEMP_CELSIUS
+
+    def _read_cached_or_live(self) -> float | None:
+        # From entry cache
+        try:
+            entry_id = getattr(self.coordinator, "_config_entry_id", None)
+            if entry_id:
+                entry = self.coordinator.hass.config_entries.async_get_entry(entry_id)
+                if entry and entry.data.get("_device_info_cached"):
+                    if self._key == "max_nozzle_temp":
+                        return entry.data.get("_cached_max_nozzle_temp")
+                    if self._key == "max_bed_temp":
+                        return entry.data.get("_cached_max_bed_temp")
+                    if self._key == "max_box_temp":
+                        # Prefer new chamber cache with legacy fallback
+                        return entry.data.get("_cached_max_chamber_temp", entry.data.get("_cached_max_box_temp"))
+        except Exception:
+            # Ignore cache read errors and fall back to live telemetry.
+            pass
+        # Live telemetry fallback
+        d = self.coordinator.data or {}
+        if self._key == "max_nozzle_temp":
+            return d.get("maxNozzleTemp")
+        if self._key == "max_bed_temp":
+            return d.get("maxBedTemp")
+        if self._key == "max_box_temp":
+            return d.get("maxBoxTemp")
+        return None
+
+    @property
+    def native_value(self) -> float | None:
+        # Do NOT zero when printer is off; these are capability constants
+        v = self._read_cached_or_live()
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None

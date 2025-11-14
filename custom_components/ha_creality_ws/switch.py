@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from homeassistant.components.switch import SwitchEntity
+from homeassistant.helpers import entity_registry as er  # type: ignore[import]
 
 from .entity import KEntity
 from .const import DOMAIN
@@ -24,6 +25,14 @@ async def async_setup_entry(hass, entry, async_add_entities):
     for key, (name, field) in MAP.items():
         if key == "light" and not has_light:
             continue
+        # Only create the legacy light switch if it already exists in the registry (migration safety)
+        if key == "light":
+            reg = er.async_get(hass)
+            legacy_uid = f"{coord.client._host}-light"
+            existing = reg.async_get_entity_id("switch", DOMAIN, legacy_uid)
+            if not existing:
+                # No legacy switch to migrate; skip creating to avoid duplicate with new light entity
+                continue
         ents.append(KSimpleSwitch(coord, name, field, key))
     
     async_add_entities(ents)
@@ -31,6 +40,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
 class KSimpleSwitch(KEntity, SwitchEntity):
     _attr_icon = "mdi:toggle-switch"
+    # Keep legacy light switch but disable by default in registry now that native light exists
+    _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator, name: str, field: str, unique_id: str):
         super().__init__(coordinator, name, unique_id)

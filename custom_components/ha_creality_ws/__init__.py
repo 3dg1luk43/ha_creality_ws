@@ -1,7 +1,10 @@
 from __future__ import annotations
 import logging
 import json
+import os
 from datetime import datetime, timedelta
+import re
+from urllib.parse import urljoin, urlparse
 from typing import Callable, List, Optional, Any
 
 from homeassistant.config_entries import ConfigEntry #type: ignore[import]
@@ -25,13 +28,13 @@ from .const import (
 from .coordinator import KCoordinator
 from .frontend import CrealityCardRegistration
 from .utils import ModelDetection
+from homeassistant.helpers import entity_registry as er  # type: ignore[import]
+from homeassistant.helpers.aiohttp_client import async_get_clientsession  # type: ignore[import]
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS: list[str] = ["sensor", "switch", "camera", "button", "number"]
+PLATFORMS: list[str] = ["sensor", "switch", "camera", "button", "number", "fan", "light", "image"]
 
 # Import integration version from manifest
-import json
-import os
 
 async def _get_integration_version(hass: HomeAssistant) -> str:
     """Get current integration version from manifest.json"""
@@ -148,18 +151,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 new_data["_cached_hostname"] = hostname
                 new_data["_cached_model_version"] = model_version
                 new_data["_cached_has_light"] = printermodel.has_light
+                # Prefer chamber_* keys; mirror to legacy box_* for back-compat
+                new_data["_cached_has_chamber_sensor"] = printermodel.has_chamber_sensor
+                new_data["_cached_has_chamber_control"] = printermodel.has_chamber_control
                 new_data["_cached_has_box_sensor"] = printermodel.has_box_sensor
                 new_data["_cached_has_box_control"] = printermodel.has_box_control
                 # Heuristic promotions: if telemetry already exposes fields, promote capabilities
                 if any(k in d for k in ("boxTemp", "targetBoxTemp", "maxBoxTemp")):
-                    new_data["_cached_has_box_sensor"] = True
+                    new_data["_cached_has_chamber_sensor"] = True
+                    new_data["_cached_has_box_sensor"] = True  # legacy mirror
                 if "lightSw" in d:
                     new_data["_cached_has_light"] = True
                 
                 # Cache max temperature values for temperature control limits
                 new_data["_cached_max_bed_temp"] = d.get("maxBedTemp", entry.data.get("_cached_max_bed_temp"))
                 new_data["_cached_max_nozzle_temp"] = d.get("maxNozzleTemp", entry.data.get("_cached_max_nozzle_temp"))
-                new_data["_cached_max_box_temp"] = d.get("maxBoxTemp", entry.data.get("_cached_max_box_temp"))  # May be None for printers without heated chamber
+                # Cache chamber max; mirror to legacy box for back-compat
+                new_data["_cached_max_chamber_temp"] = d.get("maxBoxTemp", entry.data.get("_cached_max_chamber_temp"))
+                new_data["_cached_max_box_temp"] = new_data["_cached_max_chamber_temp"]
                 
                 # Re-detect camera type only if missing (not on every update)
                 cached_camera_type = entry.data.get("_cached_camera_type")
@@ -193,6 +202,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if not new_data.get("_cached_model"):
                 new_data["_cached_model"] = "K by Creality"
                 new_data["_cached_has_light"] = True
+                new_data["_cached_has_chamber_sensor"] = False
+                new_data["_cached_has_chamber_control"] = False
+                # Legacy mirrors
                 new_data["_cached_has_box_sensor"] = False
                 new_data["_cached_has_box_control"] = False
                 new_data["_cached_camera_type"] = "mjpeg"
@@ -240,6 +252,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     cancel_power_watch = _watch_power_switch(power_switch)
     entry.async_on_unload(cancel_power_watch)
 
+    # --- Remove legacy entities (migration) ---
+    try:
+        reg = er.async_get(hass)
+        host = coord.client._host
+        # Old unique_ids to remove
+        legacy = [
+            ("switch", f"{host}-light"),
+            ("number", f"{host}-model_fan_pct"),
+            ("number", f"{host}-case_fan_pct"),
+            ("number", f"{host}-side_fan_pct"),
+        ]
+        for domain_name, unique in legacy:
+            ent_id = reg.async_get_entity_id(domain_name, DOMAIN, unique)
+            if ent_id:
+                reg.async_remove(ent_id)
+    except Exception as exc:
+        _LOGGER.debug("Legacy entity cleanup skipped: %s", exc)
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
     # Register diagnostic service (only once per integration)
@@ -275,23 +305,23 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
                 # Static list of supported models and headline capabilities for quick reference
                 "supported_models": {
                     "k1_family": [
-                        {"model": "K1", "box_sensor": True, "box_control": False, "light": True, "camera": "mjpeg"},
-                        {"model": "K1C", "box_sensor": True, "box_control": False, "light": True, "camera": "mjpeg"},
-                        {"model": "K1 SE", "box_sensor": False, "box_control": False, "light": False, "camera": "mjpeg_optional"},
-                        {"model": "K1 Max", "box_sensor": True, "box_control": False, "light": True, "camera": "mjpeg"}
+                        {"model": "K1", "chamber_sensor": True, "chamber_control": False, "light": True, "camera": "mjpeg"},
+                        {"model": "K1C", "chamber_sensor": True, "chamber_control": False, "light": True, "camera": "mjpeg"},
+                        {"model": "K1 SE", "chamber_sensor": False, "chamber_control": False, "light": False, "camera": "mjpeg_optional"},
+                        {"model": "K1 Max", "chamber_sensor": True, "chamber_control": False, "light": True, "camera": "mjpeg"}
                     ],
                     "k2_family": [
-                        {"model": "K2", "box_sensor": True, "box_control": False, "light": True, "camera": "webrtc"},
-                        {"model": "K2 Pro", "box_sensor": True, "box_control": True, "light": True, "camera": "webrtc"},
-                        {"model": "K2 Plus", "box_sensor": True, "box_control": True, "light": True, "camera": "webrtc"}
+                        {"model": "K2", "chamber_sensor": True, "chamber_control": False, "light": True, "camera": "webrtc"},
+                        {"model": "K2 Pro", "chamber_sensor": True, "chamber_control": True, "light": True, "camera": "webrtc"},
+                        {"model": "K2 Plus", "chamber_sensor": True, "chamber_control": True, "light": True, "camera": "webrtc"}
                     ],
                     "ender_3_v3_family": [
-                        {"model": "Ender 3 V3", "box_sensor": False, "box_control": False, "light": False, "camera": "mjpeg_optional"},
-                        {"model": "Ender 3 V3 KE", "box_sensor": False, "box_control": False, "light": False, "camera": "mjpeg_optional"},
-                        {"model": "Ender 3 V3 Plus", "box_sensor": False, "box_control": False, "light": False, "camera": "mjpeg_optional"}
+                        {"model": "Ender 3 V3", "chamber_sensor": False, "chamber_control": False, "light": False, "camera": "mjpeg_optional"},
+                        {"model": "Ender 3 V3 KE", "chamber_sensor": False, "chamber_control": False, "light": False, "camera": "mjpeg_optional"},
+                        {"model": "Ender 3 V3 Plus", "chamber_sensor": False, "chamber_control": False, "light": False, "camera": "mjpeg_optional"}
                     ],
                     "other": [
-                        {"model": "Creality Hi", "box_sensor": False, "box_control": False, "light": True, "camera": "mjpeg"}
+                        {"model": "Creality Hi", "chamber_sensor": False, "chamber_control": False, "light": True, "camera": "mjpeg"}
                     ]
                 },
                 "printers": {}
@@ -314,11 +344,11 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
                         "model_version": cfg_entry.data.get("_cached_model_version") if cfg_entry else None,
                         "camera_type": cfg_entry.data.get("_cached_camera_type") if cfg_entry else None,
                         "has_light": cfg_entry.data.get("_cached_has_light") if cfg_entry else None,
-                        "has_box_sensor": cfg_entry.data.get("_cached_has_box_sensor") if cfg_entry else None,
-                        "has_box_control": cfg_entry.data.get("_cached_has_box_control") if cfg_entry else None,
+                        "has_chamber_sensor": cfg_entry.data.get("_cached_has_chamber_sensor", cfg_entry.data.get("_cached_has_box_sensor")) if cfg_entry else None,
+                        "has_chamber_control": cfg_entry.data.get("_cached_has_chamber_control", cfg_entry.data.get("_cached_has_box_control")) if cfg_entry else None,
                         "max_bed_temp": cfg_entry.data.get("_cached_max_bed_temp") if cfg_entry else None,
                         "max_nozzle_temp": cfg_entry.data.get("_cached_max_nozzle_temp") if cfg_entry else None,
-                        "max_box_temp": cfg_entry.data.get("_cached_max_box_temp") if cfg_entry else None,
+                        "max_chamber_temp": cfg_entry.data.get("_cached_max_chamber_temp", cfg_entry.data.get("_cached_max_box_temp")) if cfg_entry else None,
                     } if cfg_entry else {},
                 }
 
@@ -333,11 +363,43 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
                     "last_rx_monotonic": client.last_rx_monotonic(),
                 }
 
+                # Attempt a minimal crawl of the printer web UI to collect resource URLs
+                try:
+                    host = coord.client._host
+                    urls_cache = getattr(coord, "_http_urls_accessed", None)
+                    if urls_cache is None:
+                        urls_cache = set()
+                        setattr(coord, "_http_urls_accessed", urls_cache)
+
+                    session = async_get_clientsession(hass)
+                    for scheme in ("https", "http"):
+                        base = f"{scheme}://{host}/"
+                        try:
+                            # Record the base URL attempt
+                            urls_cache.add(base)
+                            # Allow self-signed certs on local printers
+                            ssl_opt = False if scheme == "https" else None
+                            async with session.get(base, timeout=5, ssl=ssl_opt) as resp:  # type: ignore[arg-type]
+                                if resp.status == 200:
+                                    txt = await resp.text(errors="ignore")
+                                    # Extract href/src URLs (shallow)
+                                    for m in re.findall(r"(?:src|href)=[\"']([^\"']+)[\"']", txt, re.IGNORECASE):
+                                        absu = urljoin(base, m)
+                                        pu = urlparse(absu)
+                                        if pu.scheme in ("http", "https") and pu.hostname == host:
+                                            urls_cache.add(absu)
+                        except Exception:
+                            # Ignore crawl failures; we still record base URL
+                            pass
+                except Exception:
+                    _LOGGER.debug("Diagnostic URL crawl skipped due to error", exc_info=True)
+
                 printer_data = {
                     "host": client._host,
                     "available": coord.available,
                     "power_is_off": coord.power_is_off(),
                     "power_switch_entity": getattr(coord, "_power_switch_entity", None),
+                    "http_urls_accessed": sorted(list(getattr(coord, "_http_urls_accessed", set()))) if hasattr(coord, "_http_urls_accessed") else [],
                     "paused_flag": coord.paused_flag(),
                     "pending_pause": coord.pending_pause(),
                     "pending_resume": coord.pending_resume(),
@@ -357,8 +419,6 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
                     "is_k1_family": printermodel.is_k1_family,
                     "is_k1_base": printermodel.is_k1_base,
                     "is_k1c": printermodel.is_k1c,
-                    "is_k1_base": printermodel.is_k1_base,
-                    "is_k1c": printermodel.is_k1c,
                     "is_k1_se": printermodel.is_k1_se,
                     "is_k1_max": printermodel.is_k1_max,
                     "is_k2_family": printermodel.is_k2_family,
@@ -372,8 +432,8 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
                 # Add feature detection (matching sensor.py logic)
                 printer_data["feature_detection"] = {
                     "has_light": printermodel.has_light,
-                    "has_box_sensor": printermodel.has_box_sensor,
-                    "has_box_control": printermodel.has_box_control,
+                    "has_chamber_sensor": printermodel.has_chamber_sensor,
+                    "has_chamber_control": printermodel.has_chamber_control,
                     "camera_type": "webrtc" if printermodel.is_k2_family else 
                                   "mjpeg_optional" if (printermodel.is_k1_se or printermodel.is_ender_v3_family) else 
                                   "mjpeg"
@@ -386,11 +446,11 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
             
             
             # Log the diagnostic data to make it visible in Home Assistant logs (using WARNING level for visibility)
-            _LOGGER.warning("=== CREALITY DIAGNOSTIC DATA START ===" + json_output + "=== CREALITY DIAGNOSTIC DATA END ===")
+            _LOGGER.warning("=== CREALITY DIAGNOSTIC DATA START ===\n%s\n=== CREALITY DIAGNOSTIC DATA END ===", json_output)
             
-            # Create a persistent notification with summary (without await since it's not async)
-            from homeassistant.components.persistent_notification import async_create
-            async_create(
+            # Create a persistent notification with summary
+            from homeassistant.components.persistent_notification import async_create as pn_async_create
+            await pn_async_create(
                 hass,
                 title="Creality Diagnostic Data",
                 message=f"Diagnostic data collected for {len(diagnostic_data['printers'])} printer(s). Data size: {len(json_output)} bytes. Check the logs for the full JSON data.",

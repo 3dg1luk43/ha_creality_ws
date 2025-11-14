@@ -6,7 +6,7 @@
 
 # Creality WebSocket Integration for Home Assistant
 
-This custom [Home Assistant](https://www.home-assistant.io/) integration provides **native, low-latency WebSocket control and telemetry** for Creality K-series and compatible 3D printers. It exposes live state, sensors, controls, and a camera stream. A **standalone Lovelace card** (no external card dependencies) is included.
+This custom [Home Assistant](https://www.home-assistant.io/) integration provides **native, low-latency WebSocket control and telemetry** for Creality K‑series and compatible 3D printers. It exposes live state, sensors, controls, a camera stream, and a printer‑local **Current Print Preview** image. A **standalone Lovelace card** (no external card dependencies) is bundled.
 
 ---
 
@@ -17,6 +17,7 @@ This custom [Home Assistant](https://www.home-assistant.io/) integration provide
 * **States:** `idle`, `printing`, `paused`, `stopped`, `completed`, `error`, `self-testing`.
 * **Optional power switch binding** to a `switch` entity for accurate "Off" handling.
 * **Entities:** status, progress, time left, temperatures (nozzle/bed/chamber), current layer/total layers, etc.
+* **Image (print preview):** shows the current model image for all supported printers when available; falls back to a tiny placeholder when not applicable.
 * **Controls:** pause, resume, stop, light toggle.
 * **Camera:** auto-detects stream type by model (MJPEG or WebRTC).
 * **Lovelace card**: dependency-free, uses HA fonts, progress ring, contextual chips, telemetry pills.
@@ -163,6 +164,19 @@ Then remove the `?v=` the next time.
 
 ---
 
+## Image: Current Print Preview
+
+The integration adds an `image` entity named "Current Print Preview" for all supported printers:
+
+- Tries the printer‑local PNG at `/downloads/original/current_print_image.png` (HTTPS first, then HTTP), with short timeouts.
+- Only fetches when it makes sense (e.g., self‑testing or printing with a file name); otherwise shows a small placeholder PNG.
+- Caches the last successful image to avoid flicker; never calls any cloud service.
+- Records each attempted printer‑local HTTP(S) URL in diagnostics to aid support.
+
+Tip: You can use the built‑in Image card or any card that supports `image` entities to display it on dashboards.
+
+---
+
 ## Card Usage
 
 The card's element tag is **`custom:k-printer-card`**.
@@ -196,6 +210,10 @@ stop_btn: button.k1c_stop_print
   * **Resume** shown when `paused`.
   * **Stop** shown when `printing|paused|self-testing`.
   * **Light** toggles the configured `switch`/`light` entity.
+
+Power & Light specifics:
+- Power (optional chip) offers a snappy, short‑lived optimistic toggle and is pinned to the far right for consistency.
+- Light strictly mirrors the Home Assistant entity state to avoid desync; it doesn’t use optimistic overrides.
 * Tapping the header opens **more-info** for `camera` (fallbacks: `status`, `progress`).
 
 ---
@@ -348,6 +366,8 @@ Printers can take a few telemetry frames before reporting their friendly `model`
 * Promotes capabilities heuristically if telemetry exposes fields early (e.g., `boxTemp`, `maxBoxTemp`, `targetBoxTemp`, `lightSw`).
 * Ensures existing installations keep their cached capabilities and camera mode without regression.
 
+Terminology note: UI labels may say "Chamber" instead of "Box" in some places; entity IDs and protocol fields remain stable for backward compatibility.
+
 This logic reduces first-time setup races and prevents empty model names in the device registry.
 
 ---
@@ -383,6 +403,7 @@ The service will return the complete diagnostic data in the response that you ca
 - **Feature detection results** showing which features are enabled/disabled
 - **Printer status information** (availability, power state, etc.)
 - **Home Assistant and integration version information**
+- **Printer‑local HTTP URLs accessed** (e.g., preview fetch attempts) for support diagnostics
 
 ### What's Included
 
@@ -392,6 +413,7 @@ The diagnostic file contains:
 - Feature detection results (camera type, light, box temperature, etc.)
 - Connection status and timing information
 - Integration configuration details
+ - Cache of local HTTP(S) URLs the integration accessed (no cloud)
 
 ### Sharing Diagnostic Data
 

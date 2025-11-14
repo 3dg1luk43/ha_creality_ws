@@ -9,7 +9,7 @@ import time
 from typing import Any, Awaitable, Callable, Optional
 
 import websockets
-from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError, ConnectionClosed
+from websockets.exceptions import ConnectionClosedOK, ConnectionClosed
 
 from .const import (
     RETRY_MIN_BACKOFF,

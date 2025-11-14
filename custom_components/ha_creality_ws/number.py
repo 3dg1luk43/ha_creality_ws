@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
-from datetime import timedelta
-from homeassistant.helpers.event import async_track_time_interval  # type: ignore[import]
 
-from homeassistant.components.number import NumberEntity, NumberMode
+from homeassistant.components.number import NumberEntity, NumberMode, NumberDeviceClass
 
 # unit compat across HA versions
 try:
@@ -15,6 +12,7 @@ except Exception:  # older cores
 
 from .const import DOMAIN
 from .entity import KEntity
+from homeassistant.helpers import entity_registry as er  # type: ignore[import]
 
 async def async_setup_entry(hass, entry, async_add_entities):
     coord = hass.data[DOMAIN][entry.entry_id]
@@ -25,15 +23,24 @@ async def async_setup_entry(hass, entry, async_add_entities):
     ents.append(NozzleTargetNumber(coord))
     ents.append(BedTargetNumber(coord, bed_index=0))
     
-    # Box temperature control (K2 Pro/Plus only)
-    has_box_control = entry.data.get("_cached_has_box_control", False)
+    # Chamber temperature control (K2 Pro/Plus only)
+    has_box_control = entry.data.get("_cached_has_chamber_control", entry.data.get("_cached_has_box_control", False))
     if coord.data.get("maxBoxTemp") and has_box_control:
         ents.append(BoxTargetNumber(coord))
     
-    # Fan controls
-    ents.append(_FanPctNumber(coord, "Model Fan %", "modelFanPct", "model_fan_pct", channel=0))
-    ents.append(_FanPctNumber(coord, "Case Fan %", "caseFanPct", "case_fan_pct", channel=1))
-    ents.append(_FanPctNumber(coord, "Side Fan %", "auxiliaryFanPct", "side_fan_pct", channel=2))
+    # Fan controls (legacy). Only create if entity already exists to avoid duplicates with native fan platform.
+    reg = er.async_get(hass)
+    host = coord.client._host
+    legacy_uids = [
+        ("model_fan_pct", "modelFanPct", "Model Fan %", 0),
+        ("case_fan_pct", "caseFanPct", "Case Fan %", 1),
+        ("side_fan_pct", "auxiliaryFanPct", "Side Fan %", 2),
+    ]
+    for uid, field, name, ch in legacy_uids:
+        unique = f"{host}-{uid}"
+        existing = reg.async_get_entity_id("number", DOMAIN, unique)
+        if existing:
+            ents.append(_FanPctNumber(coord, name, field, uid, channel=ch))
 
     async_add_entities(ents)
 
@@ -82,6 +89,7 @@ class NozzleTargetNumber(KEntity, NumberEntity):
     _attr_icon = "mdi:thermometer"
     _attr_mode = NumberMode.BOX
     _attr_native_unit_of_measurement = UNIT_CELSIUS
+    _attr_device_class = NumberDeviceClass.TEMPERATURE
     _attr_native_min_value = 0.0
     _attr_native_step = 1.0
 
@@ -115,6 +123,7 @@ class BedTargetNumber(KEntity, NumberEntity):
     _attr_icon = "mdi:radiator"
     _attr_mode = NumberMode.BOX
     _attr_native_unit_of_measurement = UNIT_CELSIUS
+    _attr_device_class = NumberDeviceClass.TEMPERATURE
     _attr_native_min_value = 0.0
     _attr_native_step = 1.0
 
@@ -146,10 +155,11 @@ class BedTargetNumber(KEntity, NumberEntity):
 
 
 class BoxTargetNumber(KEntity, NumberEntity):
-    _attr_name = "Box Target"
+    _attr_name = "Chamber Target"
     _attr_icon = "mdi:thermometer"
     _attr_mode = NumberMode.BOX
     _attr_native_unit_of_measurement = UNIT_CELSIUS
+    _attr_device_class = NumberDeviceClass.TEMPERATURE
     _attr_native_min_value = 0.0
     _attr_native_step = 1.0
 
@@ -190,6 +200,8 @@ class BoxTargetNumber(KEntity, NumberEntity):
 
 # ---------- Fan percent via M106 (0%→off) ----------
 class _FanPctNumber(KEntity, NumberEntity):
+    # Legacy fan controls; native fan platform replaces these. Keep disabled by default for new setups.
+    _attr_entity_registry_enabled_default = False
     _attr_native_unit_of_measurement = UNIT_PERCENT
     _attr_mode = NumberMode.SLIDER
     _attr_native_min_value = 0.0
