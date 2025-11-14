@@ -14,7 +14,6 @@ import aiohttp  # type: ignore[import]
 
 from .const import DOMAIN
 from .entity import KEntity
-from .utils import ModelDetection
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -123,6 +122,7 @@ class CurrentPrintPreviewImage(KEntity, ImageEntity):
                 if urls is not None:
                     urls.add(url)
             except Exception:
+                # Ignore errors when updating diagnostics URL cache; non-critical.
                 pass
             try:
                 ssl_opt = False if url.startswith("https://") else None

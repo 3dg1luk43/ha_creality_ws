@@ -168,7 +168,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 new_data["_cached_max_nozzle_temp"] = d.get("maxNozzleTemp", entry.data.get("_cached_max_nozzle_temp"))
                 # Cache chamber max; mirror to legacy box for back-compat
                 new_data["_cached_max_chamber_temp"] = d.get("maxBoxTemp", entry.data.get("_cached_max_chamber_temp"))
-                new_data["_cached_max_box_temp"] = new_data.get("_cached_max_chamber_temp")
+                new_data["_cached_max_box_temp"] = new_data["_cached_max_chamber_temp"]
                 
                 # Re-detect camera type only if missing (not on every update)
                 cached_camera_type = entry.data.get("_cached_camera_type")
@@ -446,7 +446,7 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
             
             
             # Log the diagnostic data to make it visible in Home Assistant logs (using WARNING level for visibility)
-            _LOGGER.warning("=== CREALITY DIAGNOSTIC DATA START ===" + json_output + "=== CREALITY DIAGNOSTIC DATA END ===")
+            _LOGGER.warning("=== CREALITY DIAGNOSTIC DATA START ===\n%s\n=== CREALITY DIAGNOSTIC DATA END ===", json_output)
             
             # Create a persistent notification with summary
             from homeassistant.components.persistent_notification import async_create as pn_async_create

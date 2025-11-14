@@ -623,6 +623,7 @@ class KMaxTempSensor(KEntity, SensorEntity):
                         # Prefer new chamber cache with legacy fallback
                         return entry.data.get("_cached_max_chamber_temp", entry.data.get("_cached_max_box_temp"))
         except Exception:
+            # Ignore cache read errors and fall back to live telemetry.
             pass
         # Live telemetry fallback
         d = self.coordinator.data or {}
