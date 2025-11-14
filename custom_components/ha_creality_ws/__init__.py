@@ -450,7 +450,9 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
             
             # Create a persistent notification with summary
             from homeassistant.components.persistent_notification import async_create as pn_async_create
-            await pn_async_create(
+            # persistent_notification.async_create is a normal async function in HA, but guard by not awaiting
+            # in case the imported alias returns a non-awaitable (defensive for older versions or stubs).
+            pn_async_create(
                 hass,
                 title="Creality Diagnostic Data",
                 message=f"Diagnostic data collected for {len(diagnostic_data['printers'])} printer(s). Data size: {len(json_output)} bytes. Check the logs for the full JSON data.",
