@@ -387,8 +387,8 @@ class PrintLeftTimeSensor(KEntity, SensorEntity):
 class RealTimeFlowSensor(KEntity, SensorEntity):
     _attr_name = "Real-Time Flow"
     _attr_icon = "mdi:cube-send"
+    # Use engineering unit mm³/s directly; omit device_class to avoid HA validation warnings.
     _attr_native_unit_of_measurement = "mm³/s"
-    _attr_device_class = SensorDeviceClass.VOLUME_FLOW_RATE
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator):

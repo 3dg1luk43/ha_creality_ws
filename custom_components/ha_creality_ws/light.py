@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from homeassistant.components.light import LightEntity  # type: ignore[import]
+from homeassistant.components.light import LightEntity, ColorMode  # type: ignore[import]
 
 from .const import DOMAIN
 from .entity import KEntity
@@ -24,6 +24,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
 class _KLight(KEntity, LightEntity):
     _attr_name = "Light"
     _attr_icon = "mdi:lightbulb"
+    _attr_supported_color_modes = {ColorMode.ONOFF}
+    _attr_color_mode = ColorMode.ONOFF
 
     # Native light entity should be enabled by default
     _attr_entity_registry_enabled_default = True

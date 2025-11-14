@@ -37,7 +37,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
 
 class CurrentPrintPreviewImage(KEntity, ImageEntity):
-    """Image entity for the G-code preview of the current print (K1 family)."""
+    """Image entity for the G-code preview of the current print.
+
+    This entity will attempt the printer-local preview URL used by K1 devices
+    but will try the same path for any model. If the URL is unavailable the
+    entity returns a small placeholder PNG and records the failure in
+    `preview_reason`.
+    """
 
     _attr_name = "Current Print Preview"
     _attr_content_type = "image/png"
@@ -88,11 +94,9 @@ class CurrentPrintPreviewImage(KEntity, ImageEntity):
             self._last_source_url = None
             return self._last_image or _PNG_PLACEHOLDER
 
-        md = ModelDetection(self.coordinator.data)
-        if not md.is_k1_family:
-            self._last_reason = "unsupported_model"
-            self._last_source_url = None
-            return self._last_image or _PNG_PLACEHOLDER
+        # Attempt the standard preview URLs for any model. Some printers may
+        # expose the same path even when not K1-family devices. Fall back to
+        # placeholder when unavailable.
 
         now = time.monotonic()
         if self._last_image is not None and (now - self._last_fetch_ts) < self._min_fetch_interval:

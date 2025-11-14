@@ -12,7 +12,7 @@
   "requirements": [
     "websockets>=10.4"
   ],
-  "version": "0.6.4",
+  "version": "0.6.5",
   "zeroconf": [
     { "type": "_http._tcp.local.", "name": "*creality*" },
     { "type": "_workstation._tcp.local.", "name": "*creality*" },
