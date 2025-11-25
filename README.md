@@ -375,11 +375,12 @@ This logic reduces first-time setup races and prevents empty model names in the 
 ## Status / Testing
 
 Currently verified on:
-- **Creality K1C** - Full functionality including box temperature and light controls
-- **Creality Ender 3 V3 KE** - Full functionality (no box temperature or light controls, optional camera)
+- **Creality K1C** - Full functionality including box temperature and light controls (@me)
+- **Creality Ender 3 V3 KE** - Full functionality (no box temperature or light controls, optional camera) (@Graf17)
 - **Creality K2 Pro / K2 Plus** - WebRTC camera verified with Home Assistant 2025.11 release (native).
-  - For older Home Assistant versions, verified with external go2rtc 1.9.11+.
+  - For older Home Assistant versions, verified with external go2rtc 1.9.11+. (@hawky358 & sammyke007)
 - **Creality K1 (Base)** - Box temperature sensor only (no control), light, MJPEG camera
+- **Creality Hi** - Fully working (forum user @TheDon)
 
 ---
 
