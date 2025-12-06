@@ -21,12 +21,14 @@ These instructions tell GitHub Copilot Chat how to work in this repo. Assume cha
 - `custom_components/ha_creality_ws/number.py` – Number entities (speed/flow/targets; K2 box control only)
 - `custom_components/ha_creality_ws/camera.py` – MJPEG (K1) and WebRTC (K2) camera implementations
 - `custom_components/ha_creality_ws/image.py` – Image platform exposing current print preview (K1 family)
+- `custom_components/ha_creality_ws/light.py` – Light platform (printer chamber light)
+- `custom_components/ha_creality_ws/fan.py` – Fan platform (model/case/side fans)
 - `custom_components/ha_creality_ws/config_flow.py` – UI config + Options (power switch binding, camera mode, go2rtc)
 - `custom_components/ha_creality_ws/entity.py` – Base entity with zeroing rules and device info
 - `custom_components/ha_creality_ws/utils.py` – Helpers (numeric coercion, parsing, model detection)
 - `custom_components/ha_creality_ws/services.yaml` – Custom HA services
 - `custom_components/ha_creality_ws/manifest.json` – HA manifest (requirements, version, zeroconf)
-- `tools/deploy_to_ha.sh` – Dev-to-HA deploy script with backup and restart
+- `tools/test_files/deploy_to_ha.sh` – Dev-to-HA deploy script with backup and restart
 
 ## Design anchors to preserve
 

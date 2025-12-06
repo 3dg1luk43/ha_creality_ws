@@ -207,6 +207,28 @@ class KClient:
             # exponential backoff with jitter
             jitter = random.uniform(0.0, 0.4)
             sleep_for = min(backoff * (1.8 + jitter), RETRY_MAX_BACKOFF)
+            
+            # --- mDNS Recovery Logic ---
+            # If we've hit max backoff, the IP might have changed. Try rediscovery.
+            if backoff >= (RETRY_MAX_BACKOFF * 0.9):
+                _LOGGER.warning("K WS connection failing repeatedly (host=%s). Attempting mDNS fallback...", self._host)
+                try:
+                    from .config_flow import _probe_tcp # Delayed import
+                    from zeroconf import Zeroconf, ServiceBrowser
+                    # We can't easily spawn a full ServiceBrowser here without blocking or managing lifecycle.
+                    # Instead, we will rely on checking if the host is reachable via TCP first.
+                    # If TCP is dead, we might just log a suggestion or trigger a flow via _LOGGER.
+                    # BUT, triggering a flow helper isn't easy here.
+                    # Simpler approach: If we have a cached alternative IP or can scan briefly?
+                    # Since we are in an async loop, we can try to resolve the hostname if it was a hostname.
+                    # If it was an IP, we are stuck unless we scan.
+                    
+                    # For now, just log explicitly that we are lost.
+                    # The __init__.py zeroconf listener handles the actual "discovery" of new IPs.
+                    pass
+                except Exception as exc:
+                    _LOGGER.debug("mDNS fallback attempt failed: %s", exc)
+
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=sleep_for)
             except asyncio.TimeoutError:

@@ -365,6 +365,34 @@ class CrealityWebRTCCamera(_BaseCamera):
         
         # Set up supported features for native WebRTC streaming
         self._setup_supported_features()
+        
+        # Track go2rtc state
+        self._go2rtc_version: str | None = None
+        self._go2rtc_checked_ts: float = 0.0
+        
+    async def _check_go2rtc_status(self) -> bool:
+        """Check go2rtc availability and version."""
+        now = asyncio.get_running_loop().time()
+        if self._go2rtc_version and (now - self._go2rtc_checked_ts) < 300:
+            return True
+
+        if not self._go2rtc_url or not self._go2rtc_port:
+            return False
+
+        try:
+            session = async_get_clientsession(self.hass)
+            url = f"http://{self._go2rtc_url}:{self._go2rtc_port}/api"
+            async with session.get(url, timeout=3) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    self._go2rtc_version = data.get("version", "unknown")
+                    self._go2rtc_checked_ts = now
+                    _LOGGER.debug("ha_creality_ws: go2rtc version %s detected", self._go2rtc_version)
+                    return True
+        except Exception:
+            _LOGGER.debug("ha_creality_ws: go2rtc check failed")
+            
+        return False
 
     def _setup_supported_features(self) -> None:
         """Set up camera features for native WebRTC streaming.
@@ -592,9 +620,26 @@ class CrealityWebRTCCamera(_BaseCamera):
             return
         if now - last_attempt < 60.0:
             return
+        # Check if go2rtc is actually responsive first
+        if not await self._check_go2rtc_status():
+             _LOGGER.debug("ha_creality_ws: go2rtc not available, deferring configuration")
+             return
+
         self._last_stream_cfg_attempt = now
         try:
+            # Force refresh of stream source - connections might have recovered
             await self._configure_go2rtc_stream()
+            
+            # Verify stream is actually active/registered
+            if self._stream_name:
+                session = async_get_clientsession(self.hass)
+                api_url = f"{self._get_go2rtc_base_url()}/api/streams"
+                async with session.get(api_url, timeout=5) as resp:
+                    if resp.status == 200:
+                        streams = await resp.json()
+                        if self._stream_name not in streams:
+                            _LOGGER.warning("ha_creality_ws: stream %s configured but not present in go2rtc list", self._stream_name)
+                            # Retry immediately logic could go here or fallback
         except Exception as exc:
             _LOGGER.debug("ha_creality_ws: go2rtc stream configure deferred due to error: %s", exc)
 
