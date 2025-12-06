@@ -35,6 +35,18 @@ This custom [Home Assistant](https://www.home-assistant.io/) integration provide
 - If needed, you can add it manually as a custom repository: https://github.com/3dg1luk43/ha_creality_ws
 - After install, **Restart** Home Assistant.
 
+### Installing Pre-release Builds
+
+To install a specific pre-release version via HACS:
+
+1. Open **HACS**.
+2. Navigate to the **Creality WebSocket Integration**.
+3. Click the three-dot menu (⋮) at the top right and select **Redownload**.
+4. In the version dropdown, toggle **Show beta versions** if needed, then select the latest pre-release version.
+5. Click **Download**.
+6. **Restart** Home Assistant.
+7. Hard refresh your browser (Ctrl+F5) to ensure the frontend card updates.
+
 ### Manual
 
 1. Copy `custom_components/ha_creality_ws` into `<config>/custom_components/`.
