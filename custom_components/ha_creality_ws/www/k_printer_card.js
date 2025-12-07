@@ -605,6 +605,7 @@ class KPrinterCard extends HTMLElement {
       light: {
         hidden: !showLight,
         class: lightState === "on" ? "light-on" : "light-off",
+        icon: this._cfg.light_btn_icon || "mdi:lightbulb",
         title: "Light"
       },
       power: {
@@ -1101,11 +1102,11 @@ class KPrinterCardEditor extends HTMLElement {
       { name: "nozzle", selector: { entity: { domain: "sensor" } } },
       { name: "bed", selector: { entity: { domain: "sensor" } } },
       { name: "box", selector: { entity: { domain: "sensor" } } },
-      { name: "power", selector: { entity: { domain: "switch" } } },
+      { name: "power", selector: { entity: { domain: ["switch", "input_boolean"] } } },
       { name: "show_power_button", selector: { boolean: {} } },
       { name: "layer", selector: { entity: { domain: "sensor" } } },
       { name: "total_layers", selector: { entity: { domain: "sensor" } } },
-      { name: "light", selector: { entity: { domain: "switch" } } },
+      { name: "light", selector: { entity: { domain: ["switch", "light"] } } },
       { name: "pause_btn", selector: { entity: { domain: "button" } } },
       { name: "resume_btn", selector: { entity: { domain: "button" } } },
       { name: "stop_btn", selector: { entity: { domain: "button" } } },
