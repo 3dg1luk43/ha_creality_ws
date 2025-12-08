@@ -153,7 +153,10 @@ class KPrinterCard extends HTMLElement {
       resume_btn_icon: "",
       stop_btn_icon: "",
       light_btn_icon: "",
-      power_btn_icon: ""
+      power_btn_icon: "",
+
+      // Feature toggles
+      hide_box_temp: false
     };
   }
   static getConfigElement() {
@@ -374,7 +377,7 @@ class KPrinterCard extends HTMLElement {
         <div class="telemetry">
           <div class="pill"><ha-icon icon="mdi:printer-3d-nozzle-heat"></ha-icon><span id="nozzle"></span></div>
           <div class="pill"><ha-icon icon="mdi:heating-coil"></ha-icon><span id="bed"></span></div>
-          <div class="pill"><ha-icon icon="mdi:thermometer"></ha-icon><span id="box"></span></div>
+          <div class="pill" id="box-pill"><ha-icon icon="mdi:thermometer"></ha-icon><span id="box"></span></div>
           <div class="pill"><ha-icon icon="mdi:progress-clock"></ha-icon><span id="time"></span></div>
           <div class="pill"><ha-icon icon="mdi:layers-triple"></ha-icon><span id="layers"></span></div>
         </div>
@@ -678,6 +681,16 @@ class KPrinterCard extends HTMLElement {
     this._root.getElementById("box").textContent = boxStr;
     this._root.getElementById("time").textContent = fmtTimeLeft(timeLeft);
     this._root.getElementById("layers").textContent = `${layer || "?"}/${totalLayers || "?"}`;
+
+    // Toggle Chamber Temp visibility
+    const boxPill = this._root.getElementById("box-pill");
+    if (boxPill) {
+      if (this._cfg.hide_box_temp) {
+        boxPill.style.display = "none";
+      } else {
+        boxPill.style.display = "";
+      }
+    }
   }
 }
 customElements.define(CARD_TAG, KPrinterCard);
@@ -1171,6 +1184,7 @@ class KPrinterCardEditor extends HTMLElement {
     const themeSettingsSchema = [
       { name: "button_order", selector: { text: {} }, label: "Button Order (pause, resume, stop, light, power, custom)" },
       { name: "custom_btn_hidden", selector: { boolean: {} }, label: "Hide Custom Button" },
+      { name: "hide_box_temp", selector: { boolean: {} }, label: "Hide Chamber Temperature" },
       { name: "pause_btn_icon", selector: { icon: {} }, label: "Pause Icon Override" },
       { name: "resume_btn_icon", selector: { icon: {} }, label: "Resume Icon Override" },
       { name: "stop_btn_icon", selector: { icon: {} }, label: "Stop Icon Override" },
