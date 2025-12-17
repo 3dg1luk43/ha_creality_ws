@@ -66,10 +66,17 @@ To install a specific pre-release version via HACS:
 
 ### 2) Optional: bind a power switch
 
-If your printer power is controlled by a smart plug/switch, bind it so the integration can assert `off` and zero the sensors.
+If your printer power is controlled by a smart plug/switch, enable power detection so the integration can accurately reflect "Off" status and zero sensors when power is disabled.
 
 * **Settings → Devices & Services →** your printer **→ Configure**
-  Choose the `switch` entity. Submit.
+* Enable the **Power Switch** toggle
+* Select your smart plug/switch entity (supports `switch`, `input_boolean`, and `light` domains)
+* Submit
+
+**Behavior:**
+- When **enabled**: The integration monitors your switch entity. If it's OFF, the printer status shows as "Off" and all sensors zero out. Reconnection attempts use adaptive backoff (respects power state).
+- When **disabled**: The integration doesn't monitor any switch. All sensors update normally based on WebSocket telemetry.
+- **Safe defaults**: Existing users will auto-migrate on first load. If you previously had a power switch configured, it will be re-enabled automatically.
 
 ### 3) Optional: camera mode
 
@@ -86,6 +93,7 @@ If your Home Assistant version is older than 2025.11, WebRTC requires an externa
 
 The integration automatically installs the following Python packages:
 - `websockets>=10.4` - For WebSocket communication with printers
+- `go2rtc-client>=0.1.0` - For WebRTC camera stream coordination
 
 **Camera Dependencies:**
 - **K1 family & Ender 3 V3 family cameras**: No additional dependencies required (MJPEG streaming)
@@ -129,7 +137,7 @@ Color picker
   The integration registers the resource automatically with cache-busting:
 
   ```
-  /ha_creality_ws/k_printer_card.js?v=1   (type: module)
+  /ha_creality_ws/k_printer_card.js   (type: module)
   ```
 
   If you ever remove/re-add the integration or migrate dashboards, verify it under:
@@ -208,6 +216,7 @@ box: sensor.k1c_box_temperature
 layer: sensor.k1c_working_layer
 total_layers: sensor.k1c_total_layers
 light: switch.k1c_light
+power: switch.printer_power  # Optional
 pause_btn: button.k1c_pause_print
 resume_btn: button.k1c_resume_print
 stop_btn: button.k1c_stop_print
@@ -221,12 +230,14 @@ stop_btn: button.k1c_stop_print
   * **Pause** shown when `printing|resuming|pausing`.
   * **Resume** shown when `paused`.
   * **Stop** shown when `printing|paused|self-testing`.
-  * **Light** toggles the configured `switch`/`light` entity.
+  * **Light** toggles the configured `switch`/`light` entity; shows/hides based on Power state and printer status.
+  * **Power** (optional) offers a snappy, short-lived optimistic toggle; pinned to the far right when configured.
 
-Power & Light specifics:
-- Power (optional chip) offers a snappy, short‑lived optimistic toggle and is pinned to the far right for consistency.
-- Light strictly mirrors the Home Assistant entity state to avoid desync; it doesn’t use optimistic overrides.
-* Tapping the header opens **more-info** for `camera` (fallbacks: `status`, `progress`).
+**Configuration Notes:**
+- `power` is optional; omit it to hide the power chip.
+- Light chip visibility automatically reacts to power state and printer status without reload.
+- Light strictly mirrors entity state (doesn't use optimistic overrides) to avoid desync.
+- Tapping the header opens **more-info** for `camera` (fallbacks: `status`, `progress`).
 
 ---
 
@@ -319,8 +330,10 @@ The integration auto-detects the printer model and creates the appropriate camer
 * **Controls do nothing**
   Confirm the `pause_btn`, `resume_btn`, `stop_btn` entities exist and are `button.*`. The card calls `button.press`.
   Confirm the light entity domain is `switch` or `light`.
-* **Wrong states when powered off**
-  Set the **Power Switch** in the integration's Configure dialog.
+* **Sensors stay zeroed when printer is on**
+  Enable the **Power Switch** in the integration's Configure dialog. If power is OFF but your printer is actually on, disable the power switch to stop the integration from zeroing sensors.
+* **Connection takes too long when power is OFF**
+  If you have **Power Switch** enabled and the printer is OFF, the integration waits 60 seconds between connection attempts (to save resources). This is intentional. Enable power detection so the integration can react immediately when power returns.
 * **Resource missing in storage mode**
   Remove + re-add the integration or add the resource manually under **Dashboards → Resources** pointing to `/ha_creality_ws/k_printer_card.js`.
 * **WebRTC camera not working**
