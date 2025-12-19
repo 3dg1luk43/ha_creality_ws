@@ -312,8 +312,10 @@ The integration auto-detects the printer model and creates the appropriate camer
 - **K1 SE**: Camera is optional accessory (gracefully handles when not present).
 - **Ender 3 V3 family**: Camera is optional accessory (gracefully handles when not present).
 - **Creality Hi**: Camera included. Works with all Home Assistant camera cards.
+- **K1C (Classic)**: MJPEG camera included.
 
 **WebRTC Cameras:**
+- **K1C (2025)**: Native WebRTC streaming (auto-detected via telemetry).
 - **K2 family** (K2, K2 Pro, K2 Plus): Native WebRTC streaming using Home Assistant's built-in go2rtc service.
   - Uses go2rtc for WebRTC streaming
   - Configures go2rtc to connect to the printer's WebRTC signaling endpoint
@@ -362,6 +364,7 @@ The integration auto-detects the printer model and creates the appropriate camer
 ### K1 Family
 - **K1** - Box temperature sensor only (no control), light, MJPEG camera
 - **K1C** - Box temperature sensor only (no control), light, MJPEG camera  
+- **K1C (2025)** - Box temperature sensor only (no control), light, WebRTC camera (auto-detected)  
 - **K1 SE** - No box temperature, no light, optional MJPEG camera
 - **K1 Max** - Box temperature sensor only (no control), light, MJPEG camera
 

@@ -219,8 +219,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 
                 # Re-detect camera type only if missing (not on every update)
                 cached_camera_type = entry.data.get("_cached_camera_type")
+                cached_camera_type = entry.data.get("_cached_camera_type")
                 if not cached_camera_type:
-                    new_data["_cached_camera_type"] = "webrtc" if printermodel.is_k2_family else (
+                    new_data["_cached_camera_type"] = "webrtc" if (printermodel.is_k2_family or printermodel.supports_webrtc) else (
                         "mjpeg_optional" if (printermodel.is_k1_se or printermodel.is_ender_v3_family) else "mjpeg"
                     )
                     _LOGGER.info("Camera type detected: %s", new_data["_cached_camera_type"])
@@ -473,7 +474,10 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
                     "is_k2_pro": printermodel.is_k2_pro,
                     "is_k2_plus": printermodel.is_k2_plus,
                     "is_ender_v3_family": printermodel.is_ender_v3_family,
-                    "is_creality_hi": printermodel.is_creality_hi
+                    "is_k2_plus": printermodel.is_k2_plus,
+                    "is_ender_v3_family": printermodel.is_ender_v3_family,
+                    "is_creality_hi": printermodel.is_creality_hi,
+                    "supports_webrtc": printermodel.supports_webrtc
                 }
                 
                 # Add feature detection (matching sensor.py logic)
@@ -481,7 +485,7 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
                     "has_light": printermodel.has_light,
                     "has_chamber_sensor": printermodel.has_chamber_sensor,
                     "has_chamber_control": printermodel.has_chamber_control,
-                    "camera_type": "webrtc" if printermodel.is_k2_family else 
+                    "camera_type": "webrtc" if (printermodel.is_k2_family or printermodel.supports_webrtc) else 
                                   "mjpeg_optional" if (printermodel.is_k1_se or printermodel.is_ender_v3_family) else 
                                   "mjpeg"
                 }

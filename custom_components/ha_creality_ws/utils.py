@@ -178,6 +178,9 @@ class ModelDetection:
         self.model_version = d.get("modelVersion") or ""
         self.model_ver_u = str(self.model_version).upper()
         
+        # Check for explicit WebRTC support flag (present in 2025 models)
+        self.supports_webrtc = bool(d.get("webrtcSupport") == 1)
+        
         # Individual printer model detection
         # Detect specific K1 variants first so the base detector can exclude them
         # K1 SE - "K1 SE"
