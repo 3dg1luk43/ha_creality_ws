@@ -245,25 +245,17 @@ class KClient:
 
                 self._ws = None
                 self._ws_ready.clear()
-                
-                # We reset backoff inside the success block now, so no need for the
-                # "reset if > 5s" logic here, which was flaky.
                 pass
 
-            # --- Backoff/Retry Logic ---
-            # For non-power-switch users: use fixed interval for consistent detection
-            # For power-switch users: use exponential backoff
-            if use_fixed_retry:
+            # If no power switch AND we've failed > 5 times, assume printer is off -> slow poll
+            if use_fixed_retry and connect_failures >= 5:
                 sleep_for = fixed_retry_interval
             else:
+                # Exponential backoff for first few failures (or always if power switch is used)
                 jitter = random.uniform(0.0, 0.4)
                 sleep_for = min(backoff * (RETRY_BACKOFF_MULTIPLIER + jitter), max_backoff)
             
-            # --- mDNS Recovery Logic ---
-            # If we've hit max backoff, the IP might have changed. Try rediscovery.
-            # Only if NOT powered off (which is handled above)
-            # AND only if we haven't tried recently (prevent mDNS spam)
-            if not use_fixed_retry and backoff >= (RETRY_MAX_BACKOFF * 0.9):
+            if (not use_fixed_retry or connect_failures < 5) and backoff >= (RETRY_MAX_BACKOFF * 0.9):
                 now = time.monotonic()
                 if now - self._last_mdns_attempt > 3.0: # 3 seconds
                     self._last_mdns_attempt = now
@@ -282,7 +274,7 @@ class KClient:
             except asyncio.TimeoutError:
                 pass
             
-            if not use_fixed_retry:
+            if not use_fixed_retry or connect_failures < 5:
                 backoff = min(sleep_for, max_backoff)
 
         _LOGGER.debug("K WS loop exited host=%s", self._host)
@@ -292,24 +284,17 @@ class KClient:
         try:
             await asyncio.sleep(5.0)
             if self._ws and not self._stop.is_set():
-               # We can't easily access the local 'backoff' variable in _loop.
-               # Instead, we rely on the fact that if we disconnect AFTER 5s, 
-               # the next loop starts with existing backoff? 
-               # Actually, the logic in _loop preserves 'backoff' across iterations.
-               # To reset it, we need a way to signal or just let natural flow work?
-               # Wait, if I removed `backoff = RETRY_MIN_BACKOFF` from the success block, 
-               # it NEVER resets? That's bad.
-               # Re-thinking: We want to resets backoff IF connection was successful for a while.
-               # Since 'backoff' is local to _loop, I can't modify it from here.
-               # I'll rely on a flag? Or move backoff to instance?
-               # Simpler: In _loop, record connect time. On disconnect, if (now - connect_time) > 5s, reset backoff.
                pass
         except Exception:
             pass
 
     async def _heartbeat(self):
-        """Benign probe on silent connects and a WS-level ping keeps NAT/state alive."""
+        """Monitor connection health by checking RX activity.
+        Some printers do not implementation WebSocket Pings correctly, so we use
+        application-level staleness check (Watchdog) instead.
+        """
         try:
+            # Initial probe on silence (e.g. after fresh connect)
             await asyncio.sleep(PROBE_ON_SILENCE_SECS)
             if self._stop.is_set():
                 return
@@ -326,11 +311,21 @@ class KClient:
                 ws = self._ws
                 if not ws:
                     break
-                try:
-                    pong = await ws.ping()
-                    await asyncio.wait_for(pong, timeout=5.0)
-                except Exception:
-                    _LOGGER.debug("K WS ping failed; forcing reconnect host=%s", self._host)
+                
+                now = time.monotonic()
+                silence_duration = now - self._last_rx
+
+                # If connection is quiet, try to provoke a response w/ benign command
+                if silence_duration > HEARTBEAT_SECS:
+                    _LOGGER.debug("K WS quiet for %.1fs, sending probe", silence_duration)
+                    try:
+                        await self._send_json({"method": "get", "params": {"ReqPrinterPara": 1}})
+                    except Exception:
+                        pass
+                
+                # If STILL no data for too long (3x heartbeat), assume dead and reconnect
+                if silence_duration > (HEARTBEAT_SECS * 3):
+                    _LOGGER.warning("K WS connection dead (no RX for %.1fs); reconnecting", silence_duration)
                     try:
                         await ws.close()
                     except Exception:

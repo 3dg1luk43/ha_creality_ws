@@ -131,7 +131,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await coord.async_start()
         # If printer is OFF, we intentionally don't wait for connectivity.
         if not coord.power_is_off():
-            ok = await coord.wait_first_connect(timeout=8.0)
+            # Initial grace period is ~5 retries (~15-20s). Wait enough to cover it.
+            ok = await coord.wait_first_connect(timeout=15.0)
             if not ok:
                 _LOGGER.warning("Initial connect not confirmed; will retry in background")
     except Exception as exc:
