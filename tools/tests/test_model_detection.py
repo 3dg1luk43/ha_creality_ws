@@ -28,7 +28,7 @@ CASES = [
         "resolved_model": "K2 Pro"
     }),
     ({"model": "", "modelVersion": "F021"}, {  # K2 base
-        "is_k2_base": True, "is_k2_family": True, "has_box_sensor": True, "has_box_control": False,
+        "is_k2_base": True, "is_k2_family": True, "has_box_sensor": True, "has_box_control": True,
         "resolved_model": "K2"
     }),
     ({"model": "", "modelVersion": "F008"}, {  # K2 Plus

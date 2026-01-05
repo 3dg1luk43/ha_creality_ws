@@ -19,9 +19,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Unavailable State**: Entities now report as `unavailable` when the printer is powered off via the configured switch (static model info remains available).
 - **Documentation**: Updated README to reflect K2 chamber support and K1C 2025 camera limitations.
 
-### Fixed
-- **Chamber Temp Limit**: Removed arbitrary 40°C limit check on chamber temperature setting.
-
 ## [0.7.1] - 2026-01-04
 > [List of issues (0.7.1)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.7.1
 
