@@ -3,6 +3,7 @@ import logging
 import asyncio
 import json
 import os
+import time
 from datetime import datetime, timedelta
 import re
 from urllib.parse import urljoin, urlparse
@@ -16,12 +17,20 @@ from homeassistant.helpers.event import ( #type: ignore[import]
     async_track_state_change_event,
 )
 import voluptuous as vol #type: ignore[import]
+from homeassistant.helpers import entity_registry as er
 from homeassistant.components.persistent_notification import async_create as pn_async_create #type: ignore[import]
 from .const import (
     DOMAIN, 
     STALE_AFTER_SECS, 
     CONF_POWER_SWITCH,
     CONF_POWER_SWITCH_ENABLED,
+    CONF_CAMERA_MODE,
+    CONF_POLLING_RATE,
+    CONF_NOTIFY_DEVICE,
+    CONF_NOTIFY_COMPLETED,
+    CONF_NOTIFY_ERROR,
+    CONF_NOTIFY_MINUTES_TO_END,
+    CONF_MINUTES_TO_END_VALUE,
     CONF_GO2RTC_URL,
     CONF_GO2RTC_PORT,
     DEFAULT_GO2RTC_URL,
@@ -384,9 +393,17 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
                     "entry_id": entry_id,
                     "title": getattr(cfg_entry, "title", None),
                     "options": {
-                        "power_switch": cfg_entry.options.get(CONF_POWER_SWITCH) if cfg_entry else None,
-                        "go2rtc_url": cfg_entry.options.get(CONF_GO2RTC_URL) if cfg_entry else None,
-                        "go2rtc_port": cfg_entry.options.get(CONF_GO2RTC_PORT) if cfg_entry else None,
+                        "power_switch": cfg_entry.options.get(CONF_POWER_SWITCH),
+                        "power_switch_enabled": cfg_entry.options.get(CONF_POWER_SWITCH_ENABLED),
+                        "camera_mode": cfg_entry.options.get(CONF_CAMERA_MODE),
+                        "polling_rate": cfg_entry.options.get(CONF_POLLING_RATE),
+                        "notify_device": cfg_entry.options.get(CONF_NOTIFY_DEVICE),
+                        "notify_completed": cfg_entry.options.get(CONF_NOTIFY_COMPLETED),
+                        "notify_error": cfg_entry.options.get(CONF_NOTIFY_ERROR),
+                        "notify_minutes_to_end": cfg_entry.options.get(CONF_NOTIFY_MINUTES_TO_END),
+                        "minutes_to_end_value": cfg_entry.options.get(CONF_MINUTES_TO_END_VALUE),
+                        "go2rtc_url": cfg_entry.options.get(CONF_GO2RTC_URL),
+                        "go2rtc_port": cfg_entry.options.get(CONF_GO2RTC_PORT),
                     } if cfg_entry else {},
                     "cached": {
                         "model": cfg_entry.data.get("_cached_model") if cfg_entry else None,
@@ -411,6 +428,10 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
                     "connected_once": getattr(client._connected_once, "is_set", lambda: False)(),
                     "task_running": bool(client._task and not client._task.done()),
                     "last_rx_monotonic": client.last_rx_monotonic(),
+                    "reconnect_count": client.reconnect_count,
+                    "msg_count": client.msg_count,
+                    "last_error": client.last_error,
+                    "uptime_seconds": (time.monotonic() - client.uptime_start) if client.uptime_start > 0 and client._ws else 0,
                 }
 
                 # Attempt a minimal crawl of the printer web UI to collect resource URLs
@@ -491,6 +512,21 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
                                   "mjpeg_optional" if (printermodel.is_k1_se or printermodel.is_ender_v3_family) else 
                                   "mjpeg"
                 }
+
+                # Dump actual HA entities
+                ent_reg = er.async_get(hass)
+                # er.async_entries_for_config_entry returns list of RegistryEntry
+                entity_entries = er.async_entries_for_config_entry(ent_reg, entry_id)
+                entities_dump = []
+                for e in entity_entries:
+                    st = hass.states.get(e.entity_id)
+                    entities_dump.append({
+                        "entity_id": e.entity_id,
+                        "name": e.name or e.original_name,
+                        "state": st.state if st else None,
+                        "attributes": dict(st.attributes) if st else None
+                    })
+                printer_data["entities"] = entities_dump
                 
                 diagnostic_data["printers"][entry_id] = printer_data
             

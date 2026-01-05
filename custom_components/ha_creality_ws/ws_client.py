@@ -57,6 +57,12 @@ class KClient:
         # NEW: event that indicates a live socket is present
         self._ws_ready = asyncio.Event()
 
+        # Diagnostics / Metrics
+        self.reconnect_count = 0
+        self.msg_count = 0
+        self.last_error: Optional[str] = None
+        self.uptime_start = 0.0
+
     # ---------- lifecycle ----------
     async def start(self) -> None:
         if self._task and not self._task.done():
@@ -169,6 +175,8 @@ class KClient:
                     # Store connect time to calculate duration later
                     connect_ts = time.monotonic()
                     self._last_rx = time.monotonic()
+                    self.uptime_start = time.monotonic()
+                    self.reconnect_count += 1
                     
                     # Reset failure counters on successful connection
                     connect_failures = 0
@@ -209,6 +217,7 @@ class KClient:
                         if isinstance(payload, dict):
                             merged = coerce_numbers(payload)
                             self._state.update(merged)
+                            self.msg_count += 1
                             try:
                                 await self._on_message(dict(self._state))
                             except Exception:
@@ -236,6 +245,7 @@ class KClient:
                         _LOGGER.warning("K WS connection failed host=%s (printer likely off, retrying silently)", self._host)
                     else:
                         _LOGGER.debug("K WS connection error host=%s err=%s (attempt=%d)", self._host, exc, connect_failures)
+                self.last_error = str(exc)
             finally:
                 # cleanup on disconnect
                 for t in (self._hb_task, self._tick_task):
