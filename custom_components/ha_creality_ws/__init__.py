@@ -359,7 +359,7 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
                         {"model": "K1 Max", "chamber_sensor": True, "chamber_control": False, "light": True, "camera": "mjpeg"}
                     ],
                     "k2_family": [
-                        {"model": "K2", "chamber_sensor": True, "chamber_control": False, "light": True, "camera": "webrtc"},
+                        {"model": "K2", "chamber_sensor": True, "chamber_control": True, "light": True, "camera": "webrtc"},
                         {"model": "K2 Pro", "chamber_sensor": True, "chamber_control": True, "light": True, "camera": "webrtc"},
                         {"model": "K2 Plus", "chamber_sensor": True, "chamber_control": True, "light": True, "camera": "webrtc"}
                     ],

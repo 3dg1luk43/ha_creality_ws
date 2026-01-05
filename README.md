@@ -364,12 +364,12 @@ The integration auto-detects the printer model and creates the appropriate camer
 ### K1 Family
 - **K1** - Box temperature sensor only (no control), light, MJPEG camera
 - **K1C** - Box temperature sensor only (no control), light, MJPEG camera  
-- **K1C (2025)** - Box temperature sensor only (no control), light, WebRTC camera (auto-detected)  
+- **K1C (2025)** - Box temperature sensor only (no control), light. **Camera currently NOT supported** (dependency issues with go2rtc).  
 - **K1 SE** - No box temperature, no light, optional MJPEG camera
 - **K1 Max** - Box temperature sensor only (no control), light, MJPEG camera
 
 ### K2 Family
-- **K2** - Box temperature sensor only (no control), light, WebRTC camera
+- **K2** - Box temperature sensor & control, light, WebRTC camera
 - **K2 Pro** - Box temperature sensor & control, light, WebRTC camera
 - **K2 Plus** - Box temperature sensor & control, light, WebRTC camera
 

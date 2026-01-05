@@ -24,7 +24,15 @@ from .const import (
     CONF_GO2RTC_URL,
     CONF_GO2RTC_PORT,
     DEFAULT_GO2RTC_URL,
+    DEFAULT_GO2RTC_URL,
     DEFAULT_GO2RTC_PORT,
+    CONF_NOTIFY_DEVICE,
+    CONF_NOTIFY_COMPLETED,
+    CONF_NOTIFY_ERROR,
+    CONF_NOTIFY_MINUTES_TO_END,
+    CONF_MINUTES_TO_END_VALUE,
+    CONF_POLLING_RATE,
+    DEFAULT_POLLING_RATE,
 )
 from .utils import ModelDetection
 
@@ -264,7 +272,16 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         # Build schema - show go2rtc options if WebRTC mode is selected or if in auto mode
         show_go2rtc = current_camera_mode in (CAM_MODE_WEBRTC, CAM_MODE_AUTO)
         
+        # Get notification & performance settings
+        notify_device = self._entry.options.get(CONF_NOTIFY_DEVICE)
+        notify_completed = self._entry.options.get(CONF_NOTIFY_COMPLETED, False)
+        notify_error = self._entry.options.get(CONF_NOTIFY_ERROR, False)
+        notify_minutes_to_end = self._entry.options.get(CONF_NOTIFY_MINUTES_TO_END, False)
+        minutes_to_end_value = self._entry.options.get(CONF_MINUTES_TO_END_VALUE, 5)
+        polling_rate = self._entry.options.get(CONF_POLLING_RATE, DEFAULT_POLLING_RATE)
+
         # Build schema (entity selector always present; default only when enabled to avoid None validation)
+
         schema_dict: dict[str, Any] = {
             vol.Optional(
                 CONF_HOST,
@@ -316,6 +333,22 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     selector.NumberSelectorConfig(min=1, max=65535, mode=selector.NumberSelectorMode.BOX)
                 ),
             })
+
+        # Add Notification & Performance settings
+        schema_dict.update({
+             vol.Optional(CONF_POLLING_RATE, default=polling_rate): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=60, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="sec")
+            ),
+             vol.Optional(CONF_NOTIFY_DEVICE, description={"suggested_value": notify_device} if notify_device else None): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="notify") # "notify" domain or mobile_app? usually notify
+            ),
+             vol.Optional(CONF_NOTIFY_COMPLETED, default=notify_completed): selector.BooleanSelector(),
+             vol.Optional(CONF_NOTIFY_ERROR, default=notify_error): selector.BooleanSelector(),
+             vol.Optional(CONF_NOTIFY_MINUTES_TO_END, default=notify_minutes_to_end): selector.BooleanSelector(),
+             vol.Optional(CONF_MINUTES_TO_END_VALUE, default=minutes_to_end_value): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=1, max=60, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="min")
+            ),
+        })
         
         schema = vol.Schema(schema_dict)
         return self.async_show_form(

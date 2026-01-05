@@ -4,7 +4,17 @@ import asyncio
 from typing import Any, Iterable
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .ws_client import KClient
-from .const import DOMAIN, STALE_AFTER_SECS
+from .const import (
+    DOMAIN, 
+    STALE_AFTER_SECS,
+    CONF_NOTIFY_DEVICE,
+    CONF_NOTIFY_COMPLETED,
+    CONF_NOTIFY_ERROR,
+    CONF_NOTIFY_MINUTES_TO_END,
+    CONF_MINUTES_TO_END_VALUE,
+    CONF_POLLING_RATE,
+    DEFAULT_POLLING_RATE,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -22,6 +32,22 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_power_off: bool = False
         self._config_entry_id: str | None = None  # Will be set after entry is created
         
+        # Notification & Performance
+        self._notify_device = None
+        self._notify_completed = False
+        self._notify_error = False
+        self._notify_minutes_to_end = False
+        self._minutes_to_end_value = 5
+        self._polling_rate = DEFAULT_POLLING_RATE
+        self._last_update_ts = 0.0
+        
+        # Notification state tracking
+        self._last_print_state = None
+        self._notified_minutes_to_end = False
+
+        if self._config_entry_id:
+             self._load_options()
+
         # Only enable power detection if a switch is configured
         if self._power_switch_entity:
             self.client._check_power_status = self.power_is_off
@@ -30,6 +56,24 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                          self._power_switch_entity, "OFF" if self._last_power_off else "ON")
         else:
             _LOGGER.debug("No power switch configured; connection will retry continuously")
+
+    def _load_options(self):
+        if not self._config_entry_id:
+            return
+        entry = self.hass.config_entries.async_get_entry(self._config_entry_id)
+        if not entry:
+            return
+            
+        options = entry.options
+        self._notify_device = options.get(CONF_NOTIFY_DEVICE)
+        self._notify_completed = options.get(CONF_NOTIFY_COMPLETED, False)
+        self._notify_error = options.get(CONF_NOTIFY_ERROR, False)
+        self._notify_minutes_to_end = options.get(CONF_NOTIFY_MINUTES_TO_END, False)
+        self._minutes_to_end_value = options.get(CONF_MINUTES_TO_END_VALUE, 5)
+        self._polling_rate = options.get(CONF_POLLING_RATE, DEFAULT_POLLING_RATE)
+        
+        # Pass polling rate to client if relevant, or handle here
+        _LOGGER.debug(f"Loaded options: Polling Rate={self._polling_rate}s, Notify Device={self._notify_device}")
 
     def set_power_switch(self, entity_id: str | None) -> None:
         """Accept updates from options; make it thread-safe to notify."""
@@ -47,6 +91,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.client._check_power_status = None
             self._last_power_off = False
             _LOGGER.info("Power switch disabled; connection will retry continuously")
+        
+        # Reload options too
+        self._load_options()
         
         self._notify_listeners_threadsafe()
         
@@ -251,5 +298,106 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._flush_pending()
         except Exception:
             _LOGGER.exception("flush_pending failed")
+
+        # --- Notifications ---
+        await self._check_notifications(payload)
         
+        # --- Throttling ---
+        now = self.hass.loop.time()
+        if self._polling_rate > 0:
+            if (now - self._last_update_ts) < self._polling_rate:
+                return # Skip listener update
+        
+        self._last_update_ts = now
         self.async_update_listeners()
+
+    async def _check_notifications(self, payload: dict[str, Any]):
+        """Check logic for sending notifications."""
+        if not self._notify_device:
+            return
+
+        d = self.data or {}
+        fname = d.get("printFileName")
+        progress = d.get("printProgress") or d.get("dProgress")
+        
+        # Reset state if new file or printer stopped/idle
+        current_state = d.get("state")
+        
+        # Check if we started a new print (filename changed)
+        # Store last filename in instance to compare
+        if getattr(self, "_last_filename", None) != fname:
+            self._last_filename = fname
+            self._notified_completed = False
+            self._notified_minutes_to_end = False
+            self._last_error_code = 0
+        
+        if not fname:
+            return
+
+        # 1) Completion
+        try:
+             prog_val = int(progress) if progress is not None else 0
+        except (ValueError, TypeError):
+             prog_val = 0
+             
+        if self._notify_completed:
+            # If progress is 100% OR state is specific for completion?
+            # Using progress >= 100 is most reliable according to sensor logic
+            if prog_val >= 100 and not getattr(self, "_notified_completed", False):
+                 await self._send_notification(f"Print '{fname}' completed successfully!")
+                 self._notified_completed = True
+
+        # 2) Error
+        if self._notify_error:
+            err = d.get("err", {})
+            try:
+                code = int(err.get("errcode", 0))
+            except (ValueError, TypeError):
+                code = 0
+                
+            last_code = getattr(self, "_last_error_code", 0)
+            
+            if code != 0 and code != last_code:
+                key = err.get("key", 0)
+                msg = f"Printer Error {code} (Key: {key}) occurred during '{fname}'"
+                await self._send_notification(msg)
+            
+            self._last_error_code = code
+
+        # 3) Minutes to end
+        if self._notify_minutes_to_end:
+            left_s = d.get("printTimeLeft")
+            if left_s is not None:
+                try:
+                    left_min = float(left_s) / 60.0
+                    target_min = self._minutes_to_end_value
+                    
+                    if 0 < left_min <= target_min and not getattr(self, "_notified_minutes_to_end", False):
+                        await self._send_notification(f"Print '{fname}' finishing in {int(left_min)} minutes.")
+                        self._notified_minutes_to_end = True
+                    # If time jumps up significantly (e.g. > target + 2m), reset flag?
+                    elif left_min > (target_min + 2):
+                         self._notified_minutes_to_end = False
+                except Exception:
+                    pass
+
+    async def _send_notification(self, message: str):
+         """Send a notification to the configured device."""
+         service_data = {"message": message, "title": "Creality Printer"}
+         target = self._notify_device
+         
+         # domain usually "notify" or "mobile_app" (via notify.mobile_app_...)
+         # If the user picked an entity from "notify" domain
+         # target is the entity ID, e.g. notify.mobile_app_iphone
+         
+         domain = "notify"
+         service = "notify"
+         
+         # If entity_id is provided, we might need to parse it
+         if target.startswith("notify."):
+             service = target.replace("notify.", "")
+             # call notify.service_name
+             try:
+                 await self.hass.services.async_call(domain, service, service_data)
+             except Exception as e:
+                 _LOGGER.error("Failed to send notification: %s", e)
