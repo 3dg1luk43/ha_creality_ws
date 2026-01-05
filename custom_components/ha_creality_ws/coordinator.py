@@ -20,7 +20,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
-    def __init__(self, hass, host: str, power_switch: str | None = None):
+    def __init__(self, hass, host: str, power_switch: str | None = None, config_entry_id: str | None = None):
         super().__init__(hass, _LOGGER, name=f"{DOMAIN}@{host}", update_interval=None)
         self.client = KClient(host, self._handle_message)
         self.data: dict[str, Any] = {}
@@ -30,7 +30,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._pending_pause = False
         self._pending_resume = False
         self._last_power_off: bool = False
-        self._config_entry_id: str | None = None  # Will be set after entry is created
+        self._config_entry_id: str | None = config_entry_id  # Will be set after entry is created
         
         # Notification & Performance
         self._notify_device = None

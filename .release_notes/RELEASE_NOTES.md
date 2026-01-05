@@ -20,7 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Documentation**: Updated README to reflect K2 chamber support and K1C 2025 camera limitations.
 
 ### Fixed
-- **Liveness Detection**: Reduced power-off check interval from 60s to 10s for faster power-on detection. Non-power-switch users now use fixed 10s retry interval for consistent detection.
+- **Liveness Detection**: Improved connection retry behavior. Power-off check interval reduced to 60s. Non-power-switch users use fixed 60s retry for low-overhead detection.
+- **Log Noise**: Connection warnings now limited to first 3 failures; subsequent failures are debug-only to prevent log spam when printer is off.
 
 ## [0.7.1] - 2026-01-04
 > [List of issues (0.7.1)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.7.1

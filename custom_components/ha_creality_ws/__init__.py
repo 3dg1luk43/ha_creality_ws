@@ -125,7 +125,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.info("Power switch config: enabled=%s, entity=%s, effective=%s", 
                  power_switch_enabled, power_switch, effective_power_switch)
     
-    coord = KCoordinator(hass, host=host, power_switch=effective_power_switch)
+    coord = KCoordinator(hass, host=host, power_switch=effective_power_switch, config_entry_id=entry.entry_id)
 
     try:
         await coord.async_start()
@@ -280,7 +280,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Periodic state checker
     def _interval_check(_now) -> None:
         coord.check_stale()
-        hass.loop.call_soon_threadsafe(coord.async_update_listeners)
+        # Do not force listener updates here; rely on coordinator's internal logic (throttled)
+        # hass.loop.call_soon_threadsafe(coord.async_update_listeners)
     
     cancel_interval = async_track_time_interval(
         hass, _interval_check, timedelta(seconds=max(5, STALE_AFTER_SECS // 3))
