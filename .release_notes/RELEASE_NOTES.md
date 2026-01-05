@@ -9,19 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > [List of issues (0.8.0)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.8.0
 
 ### Added
-- **Notifications**: Added configurable notifications for print completion, errors, and time remaining (Options Flow).
+- **Diagnostics Service**: Enhanced `diagnostic_dump` service to include WebSocket connection health stats (`reconnect_count`, `msg_count`, `last_error`, `uptime`).
+- **Notifications**: Added configurable notifications for print completion, errors, and time remaining (configurable via Options Flow).
 - **Chamber Control for K2**: Enabled chamber temperature control for the base "K2" model.
-- **Polling Rate**: New option to configure polling rate to reduce CPU usage. Throttling only applies **when the printer is actively printing**; idle/error states update immediately. Device liveness detection remains unaffected.
+- **Polling Rate**: New option to configure polling rate to reduce CPU usage. Throttling only applies **when the printer is actively printing**; idle/error states update immediately.
 - **Translations**: Added `strings.json` and `en.json` for localization support.
 - **Device Class**: Added `duration` device class to "Print Job Time" and "Print Time Left" sensors.
 
 ### Changed
-- **Unavailable State**: Entities now report as `unavailable` when the printer is powered off via the configured switch (static model info remains available).
-- **Documentation**: Updated README to reflect K2 chamber support and K1C 2025 camera limitations.
+- **Unavailable State**: Entities now report as `unavailable` when the printer is known to be powered off via the configured switch (static model info remains available).
+- **Documentation**: Updated README to reflect K2 chamber support, K1C 2025 camera capabilities, and power switch configuration.
 
 ### Fixed
-- **Liveness Detection**: Improved connection retry behavior. Power-off check interval reduced to 60s. Non-power-switch users use fixed 60s retry for low-overhead detection.
-- **Log Noise**: Connection warnings now limited to first 3 failures; subsequent failures are debug-only to prevent log spam when printer is off.
+- **Connection Stability**: Slightly improved liveness detection and retry behavior.
+  - Power-off check interval reduced to 10s (was 60s) for faster power-on detection.
+  - Non-power-switch users utilize gradual backoff for initial failures (up to 5 attempts), transitioning to a fixed 60s retry mechanism for long-term idle detection.
+  - Added application-level probes to detect and recover from stale WebSocket connections.
+- **Log Noise**: Connection warnings are now limited to the first 3 failures; subsequent failures are logged as debug only to prevent spam when the printer is intentionally off.
 
 ## [0.7.1] - 2026-01-04
 > [List of issues (0.7.1)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.7.1
