@@ -302,11 +302,12 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # --- Notifications ---
         await self._check_notifications(payload)
         
-        # --- Throttling ---
+        # --- Conditional Throttling (printing only) ---
+        # Always update immediately when NOT printing; throttle entity updates only when printing
         now = self.hass.loop.time()
-        if self._polling_rate > 0:
+        if self._polling_rate > 0 and self._is_printing():
             if (now - self._last_update_ts) < self._polling_rate:
-                return # Skip listener update
+                return  # Skip listener update to reduce CPU usage while printing
         
         self._last_update_ts = now
         self.async_update_listeners()

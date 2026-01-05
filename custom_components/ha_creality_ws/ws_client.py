@@ -136,19 +136,22 @@ class KClient:
     async def _loop(self) -> None:
         backoff = RETRY_MIN_BACKOFF
         connect_failures = 0
-        # Use faster backoff if power detection is disabled (allows quick retries when printer turns on)
-        max_backoff = RETRY_MAX_BACKOFF if self._check_power_status else 30.0  # 30s max when no power detection
+        # For power-switch users: use standard backoff
+        # For non-power-switch users: use fixed short retry interval for continuous detection
+        use_fixed_retry = not self._check_power_status
+        fixed_retry_interval = 60.0  # Fixed 60s retry when no power switch configured
+        max_backoff = RETRY_MAX_BACKOFF if self._check_power_status else fixed_retry_interval
         
         while not self._stop.is_set():
             # --- Power Saving Check (Start of Loop) ---
-            # If printer is known to be powered off, sleep and skip connection attempt
+            # If printer is known to be powered off, sleep briefly and skip connection attempt
             if self._check_power_status and self._check_power_status():
                  _LOGGER.debug("Printer power is OFF; sleeping 60s before next check host=%s", self._host)
                  # Reset backoff so we start fresh when power returns
                  backoff = RETRY_MIN_BACKOFF
                  connect_failures = 0
                  try:
-                     await asyncio.wait_for(self._stop.wait(), timeout=60.0)
+                     await asyncio.wait_for(self._stop.wait(), timeout=10.0)
                  except asyncio.TimeoutError:
                      pass
                  continue
@@ -220,9 +223,6 @@ class KClient:
                 
                 # Check power status before logging loud errors.
                 # If power is OFF, we treat it as expected (debug only).
-                # But wait... we check power at TOP of loop.
-                # This catch block is for when connect() fails or connection drops.
-                # If it drops, it might be because user turned it off 1 second ago.
                 is_off = self._check_power_status and self._check_power_status()
                 
                 if is_off:
@@ -230,13 +230,12 @@ class KClient:
                 elif self._is_benign_close(exc):
                     _LOGGER.debug("K WS closed host=%s reason=%s", self._host, exc)
                 else:
-                    # Downgrade to WARNING for first few failures
+                    # Log a single warning after 3 failures (confirms it's not transient)
+                    # All other failures are debug-only to avoid log spam
                     if connect_failures <= 3:
-                        _LOGGER.warning("K WS connection error host=%s err=%s (Failures=%d)", self._host, exc, connect_failures)
+                        _LOGGER.warning("K WS connection failed host=%s (printer likely off, retrying silently)", self._host)
                     else:
-                        # After 3 failures, only log every 5th time (or just DEBUG)
-                        # We'll stick to debug to eliminate noise for long downtimes
-                        _LOGGER.debug("K WS connection error host=%s err=%s (Failures=%d - suppressed)", self._host, exc, connect_failures)
+                        _LOGGER.debug("K WS connection error host=%s err=%s (attempt=%d)", self._host, exc, connect_failures)
             finally:
                 # cleanup on disconnect
                 for t in (self._hb_task, self._tick_task):
@@ -251,15 +250,20 @@ class KClient:
                 # "reset if > 5s" logic here, which was flaky.
                 pass
 
-            # exponential backoff with jitter (use max_backoff based on power detection enabled)
-            jitter = random.uniform(0.0, 0.4)
-            sleep_for = min(backoff * (RETRY_BACKOFF_MULTIPLIER + jitter), max_backoff)
+            # --- Backoff/Retry Logic ---
+            # For non-power-switch users: use fixed interval for consistent detection
+            # For power-switch users: use exponential backoff
+            if use_fixed_retry:
+                sleep_for = fixed_retry_interval
+            else:
+                jitter = random.uniform(0.0, 0.4)
+                sleep_for = min(backoff * (RETRY_BACKOFF_MULTIPLIER + jitter), max_backoff)
             
             # --- mDNS Recovery Logic ---
             # If we've hit max backoff, the IP might have changed. Try rediscovery.
             # Only if NOT powered off (which is handled above)
             # AND only if we haven't tried recently (prevent mDNS spam)
-            if backoff >= (RETRY_MAX_BACKOFF * 0.9):
+            if not use_fixed_retry and backoff >= (RETRY_MAX_BACKOFF * 0.9):
                 now = time.monotonic()
                 if now - self._last_mdns_attempt > 3.0: # 3 seconds
                     self._last_mdns_attempt = now
@@ -278,7 +282,8 @@ class KClient:
             except asyncio.TimeoutError:
                 pass
             
-            backoff = min(sleep_for, max_backoff)
+            if not use_fixed_retry:
+                backoff = min(sleep_for, max_backoff)
 
         _LOGGER.debug("K WS loop exited host=%s", self._host)
 

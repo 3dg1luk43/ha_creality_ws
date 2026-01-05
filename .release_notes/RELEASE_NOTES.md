@@ -11,13 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Notifications**: Added configurable notifications for print completion, errors, and time remaining (Options Flow).
 - **Chamber Control for K2**: Enabled chamber temperature control for the base "K2" model.
-- **Polling Rate**: New option to configure polling rate (throttling) to reduce CPU usage.
+- **Polling Rate**: New option to configure polling rate to reduce CPU usage. Throttling only applies **when the printer is actively printing**; idle/error states update immediately. Device liveness detection remains unaffected.
 - **Translations**: Added `strings.json` and `en.json` for localization support.
 - **Device Class**: Added `duration` device class to "Print Job Time" and "Print Time Left" sensors.
 
 ### Changed
 - **Unavailable State**: Entities now report as `unavailable` when the printer is powered off via the configured switch (static model info remains available).
 - **Documentation**: Updated README to reflect K2 chamber support and K1C 2025 camera limitations.
+
+### Fixed
+- **Liveness Detection**: Reduced power-off check interval from 60s to 10s for faster power-on detection. Non-power-switch users now use fixed 10s retry interval for consistent detection.
 
 ## [0.7.1] - 2026-01-04
 > [List of issues (0.7.1)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.7.1
