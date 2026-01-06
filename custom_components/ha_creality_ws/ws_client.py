@@ -300,7 +300,7 @@ class KClient:
 
     async def _heartbeat(self):
         """Monitor connection health by checking RX activity.
-        Some printers do not implementation WebSocket Pings correctly, so we use
+        Some printers do not implement WebSocket Pings correctly, so we use
         application-level staleness check (Watchdog) instead.
         """
         try:
@@ -331,6 +331,7 @@ class KClient:
                     try:
                         await self._send_json({"method": "get", "params": {"ReqPrinterPara": 1}})
                     except Exception:
+                        # Connection may be dead; ignore send errors, rely on staleness detection
                         pass
                 
                 # If STILL no data for too long (3x heartbeat), assume dead and reconnect
