@@ -497,8 +497,6 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
                     "is_k2_pro": printermodel.is_k2_pro,
                     "is_k2_plus": printermodel.is_k2_plus,
                     "is_ender_v3_family": printermodel.is_ender_v3_family,
-                    "is_k2_plus": printermodel.is_k2_plus,
-                    "is_ender_v3_family": printermodel.is_ender_v3_family,
                     "is_creality_hi": printermodel.is_creality_hi,
                     "supports_webrtc": printermodel.supports_webrtc
                 }
