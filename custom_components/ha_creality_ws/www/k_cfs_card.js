@@ -13,6 +13,10 @@ class KCFSCard extends HTMLElement {
     };
   }
 
+  static getConfigElement() {
+    return document.createElement(EDITOR_TAG);
+  }
+
   setConfig(config) {
     this._cfg = { ...KCFSCard.getStubConfig(), ...config };
     if (!this._root) {
@@ -160,6 +164,7 @@ class KCFSCard extends HTMLElement {
     const boxSensors = Object.keys(states).filter(eid => 
       eid.startsWith("sensor.") && 
       eid.includes("cfs_box_") && 
+      !eid.includes("_slot_") &&
       (printerHost ? eid.includes(printerHost.replace(/\./g, '_')) : true)
     ).sort();
 
@@ -171,40 +176,46 @@ class KCFSCard extends HTMLElement {
     // Group slots by box
     const boxes = {};
     boxSensors.forEach(eid => {
-      const match = eid.match(/cfs_box_(\d+)/);
+      const match = eid.match(/cfs_box_(\d+)_/);
       if (match) {
         const boxId = parseInt(match[1]);
         if (!boxes[boxId]) boxes[boxId] = { id: boxId, slots: [] };
         
         const stateObj = states[eid];
-        boxes[boxId].temp = stateObj.attributes.temperature;
-        boxes[boxId].humidity = stateObj.attributes.humidity;
+        if (eid.endsWith("_temp")) boxes[boxId].temp = stateObj.state;
+        if (eid.endsWith("_humidity")) boxes[boxId].humidity = stateObj.state;
       }
     });
 
     const slotSensors = Object.keys(states).filter(eid => 
       eid.startsWith("sensor.") && 
-      eid.includes("cfs_slot_") && 
+      eid.includes("_slot_") && 
       (printerHost ? eid.includes(printerHost.replace(/\./g, '_')) : true)
     ).sort();
 
     slotSensors.forEach(eid => {
-      const match = eid.match(/cfs_slot_(\d+)_(\d+)/);
+      const match = eid.match(/cfs_box_(\d+)_slot_(\d+)_/);
       if (match) {
         const boxId = parseInt(match[1]);
         const slotId = parseInt(match[2]);
         if (boxes[boxId]) {
           const stateObj = states[eid];
-          boxes[boxId].slots[slotId] = {
-            id: slotId,
-            boxId: boxId,
-            name: stateObj.state,
-            type: stateObj.attributes.type,
-            color: stateObj.attributes.color,
-            percent: stateObj.attributes.percent,
-            selected: stateObj.attributes.selected,
-            entity_id: eid
-          };
+          if (!boxes[boxId].slots[slotId]) {
+            boxes[boxId].slots[slotId] = {
+              id: slotId,
+              boxId: boxId,
+              entity_id: eid // placeholder for main info entity
+            };
+          }
+          
+          if (eid.endsWith("_filament")) {
+            boxes[boxId].slots[slotId].name = stateObj.state;
+            boxes[boxId].slots[slotId].type = stateObj.attributes.type;
+            boxes[boxId].slots[slotId].selected = stateObj.attributes.selected;
+            boxes[boxId].slots[slotId].entity_id = eid; // Use filament sensor for more-info
+          }
+          if (eid.endsWith("_color")) boxes[boxId].slots[slotId].color = stateObj.state;
+          if (eid.endsWith("_percent")) boxes[boxId].slots[slotId].percent = stateObj.state;
         }
       }
     });
@@ -293,6 +304,120 @@ class KCFSCard extends HTMLElement {
 }
 
 customElements.define(CARD_TAG, KCFSCard);
+
+class KCFSCardEditor extends HTMLElement {
+  set hass(hass) {
+    this._hass = hass;
+    if (this._form) {
+      this._form.hass = hass;
+    }
+  }
+
+  setConfig(config) {
+    this._cfg = { ...KCFSCard.getStubConfig(), ...config };
+    this._render();
+  }
+
+  connectedCallback() {
+    this._render();
+  }
+
+  _render() {
+    if (!this._root) {
+      this._root = this.attachShadow({ mode: "open" });
+    }
+
+    const style = `
+      .editor-container { padding: 16px; }
+      .tabs { display: flex; border-bottom: 1px solid var(--divider-color); margin-bottom: 16px; }
+      .tab { padding: 8px 16px; cursor: pointer; border-bottom: 2px solid transparent; }
+      .tab.active { border-bottom-color: var(--primary-color); color: var(--primary-color); }
+      .tab-content { display: none; }
+      .tab-content.active { display: block; }
+      .input-helper { font-size: 0.9em; color: var(--secondary-text-color); margin-top: 4px; padding: 0 8px; }
+    `;
+
+    this._root.innerHTML = `
+      <style>${style}</style>
+      <div class="editor-container">
+        <div class="tabs">
+          <div class="tab active" data-tab="entities">Entities</div>
+          <div class="tab" data-tab="theme">Theme</div>
+        </div>
+        <div class="tab-content active" id="entities-tab">
+          <ha-form id="form"></ha-form>
+          <div class="input-helper"><b>Printer Host:</b> Use the same IP/Host as configured in the integration. It filters the CFS sensors (e.g. 192_168_1_50).</div>
+        </div>
+        <div class="tab-content" id="theme-tab">
+          <ha-form id="theme-form"></ha-form>
+        </div>
+      </div>
+    `;
+
+    this._setupTabs();
+    this._setupEntitiesForm();
+    this._setupThemeForm();
+  }
+
+  _setupTabs() {
+    const tabs = this._root.querySelectorAll(".tab");
+    const contents = this._root.querySelectorAll(".tab-content");
+    tabs.forEach((tab) => {
+      tab.onclick = () => {
+        tabs.forEach((t) => t.classList.remove("active"));
+        contents.forEach((c) => c.classList.remove("active"));
+        tab.classList.add("active");
+        this._root.getElementById(`${tab.dataset.tab}-tab`).classList.add("active");
+      };
+    });
+  }
+
+  _setupEntitiesForm() {
+    this._form = this._root.getElementById("form");
+    this._form.hass = this._hass;
+    this._form.data = this._cfg;
+    this._form.schema = [
+      { name: "name", selector: { text: {} } },
+      { name: "printer_host", selector: { text: {} } },
+    ];
+    this._form.computeLabel = (s) => ({
+      name: "Card Title",
+      printer_host: "Printer Host (IP/Unique ID)",
+    }[s.name] || s.name);
+
+    this._form.addEventListener("value-changed", (ev) => {
+      this._cfg = { ...this._cfg, ...ev.detail.value };
+      this._dispatchConfigChange();
+    });
+  }
+
+  _setupThemeForm() {
+    const themeForm = this._root.getElementById("theme-form");
+    themeForm.hass = this._hass;
+    themeForm.data = this._cfg;
+    themeForm.schema = [
+      { name: "compact_view", selector: { boolean: {} } },
+    ];
+    themeForm.computeLabel = (s) => ({
+      compact_view: "Compact View (Hide Actions)",
+    }[s.name] || s.name);
+
+    themeForm.addEventListener("value-changed", (ev) => {
+      this._cfg = { ...this._cfg, ...ev.detail.value };
+      this._dispatchConfigChange();
+    });
+  }
+
+  _dispatchConfigChange() {
+    this.dispatchEvent(new CustomEvent("config-changed", {
+      detail: { config: this._cfg },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+}
+
+customElements.define(EDITOR_TAG, KCFSCardEditor);
 
 window.customCards = window.customCards || [];
 window.customCards.push({
