@@ -6,11 +6,22 @@ const mdi = (name) => `mdi:${name}`;
 
 class KCFSCard extends HTMLElement {
   static getStubConfig() {
-    return {
+    const cfg = {
       name: "CFS",
-      printer_host: "",
       compact_view: false,
     };
+
+    for (let box = 1; box <= 4; box += 1) {
+      cfg[`box${box}_temp`] = "";
+      cfg[`box${box}_humidity`] = "";
+      for (let slot = 1; slot <= 4; slot += 1) {
+        cfg[`box${box}_slot${slot}_filament`] = "";
+        cfg[`box${box}_slot${slot}_color`] = "";
+        cfg[`box${box}_slot${slot}_percent`] = "";
+      }
+    }
+
+    return cfg;
   }
 
   static getConfigElement() {
@@ -157,82 +168,103 @@ class KCFSCard extends HTMLElement {
     if (!this._root || !this._hass) return;
 
     const boxesContainer = this._root.getElementById("boxes");
-    const printerHost = this._cfg.printer_host;
-    
-    // Find all CFS sensors for this printer
-    const states = this._hass.states;
-    const boxSensors = Object.keys(states).filter(eid => 
-      eid.startsWith("sensor.") && 
-      eid.includes("cfs_box_") && 
-      !eid.includes("_slot_") &&
-      (printerHost ? eid.includes(printerHost.replace(/\./g, '_')) : true)
-    ).sort();
+    const states = this._hass.states || {};
+    const gObj = (eid) => (eid ? states?.[eid] : undefined);
+    const fmtState = (st) => {
+      if (!st) return "—";
+      const v = st.state;
+      if (v === undefined || v === null) return "—";
+      const s = String(v);
+      if (s === "unknown" || s === "unavailable") return "—";
+      if (this._hass && typeof this._hass.formatEntityState === "function") {
+        try { return this._hass.formatEntityState(st); } catch (_) { }
+      }
+      const unit = st.attributes?.unit_of_measurement;
+      const n = Number(s);
+      if (!Number.isNaN(n) && Number.isFinite(n)) {
+        const dp = (typeof st.attributes?.display_precision === "number") ? st.attributes.display_precision
+          : (typeof st.attributes?.suggested_display_precision === "number") ? st.attributes.suggested_display_precision
+            : (unit && /°|c|f/i.test(unit)) ? 1
+              : 2;
+        const out = n.toFixed(Math.max(0, Math.min(6, dp)));
+        return unit ? `${out} ${unit}` : out;
+      }
+      return unit ? `${s} ${unit}` : s;
+    };
+    const fmtWithUnit = (eid) => fmtState(gObj(eid));
 
-    if (boxSensors.length === 0) {
+    const hasExplicitMapping = Object.keys(this._cfg || {}).some((key) => key.startsWith("box") && this._cfg[key]);
+    const boxes = {};
+
+    if (hasExplicitMapping) {
+      for (let boxId = 1; boxId <= 4; boxId += 1) {
+        const tempEid = this._cfg[`box${boxId}_temp`];
+        const humidityEid = this._cfg[`box${boxId}_humidity`];
+        const slots = [];
+
+        for (let slotId = 1; slotId <= 4; slotId += 1) {
+          const filamentEid = this._cfg[`box${boxId}_slot${slotId}_filament`];
+          const colorEid = this._cfg[`box${boxId}_slot${slotId}_color`];
+          const percentEid = this._cfg[`box${boxId}_slot${slotId}_percent`];
+          if (!filamentEid && !colorEid && !percentEid) {
+            slots.push(null);
+            continue;
+          }
+
+          const filamentObj = gObj(filamentEid);
+          const colorObj = gObj(colorEid);
+          const percentObj = gObj(percentEid);
+          const name = filamentObj?.state;
+          const type = filamentObj?.attributes?.type;
+          const selected = filamentObj?.attributes?.selected;
+          const color = colorObj?.state || filamentObj?.attributes?.color_hex;
+          const percentText = fmtState(percentObj);
+
+          slots[slotId - 1] = {
+            id: slotId,
+            boxId,
+            entity_id: filamentEid || colorEid || percentEid,
+            name,
+            type,
+            selected,
+            color,
+            percentText,
+          };
+        }
+
+        if (tempEid || humidityEid || slots.some((slot) => slot)) {
+          boxes[boxId] = {
+            id: boxId,
+            temp: fmtWithUnit(tempEid),
+            humidity: fmtWithUnit(humidityEid),
+            slots,
+          };
+        }
+      }
+    }
+
+    const boxValues = Object.values(boxes);
+    if (boxValues.length === 0) {
       boxesContainer.innerHTML = `<div style="text-align:center; color:var(--secondary-text-color)">No CFS data available</div>`;
       return;
     }
 
-    // Group slots by box
-    const boxes = {};
-    boxSensors.forEach(eid => {
-      const match = eid.match(/cfs_box_(\d+)_/);
-      if (match) {
-        const boxId = parseInt(match[1]);
-        if (!boxes[boxId]) boxes[boxId] = { id: boxId, slots: [] };
-        
-        const stateObj = states[eid];
-        if (eid.endsWith("_temp")) boxes[boxId].temp = stateObj.state;
-        if (eid.endsWith("_humidity")) boxes[boxId].humidity = stateObj.state;
-      }
-    });
-
-    const slotSensors = Object.keys(states).filter(eid => 
-      eid.startsWith("sensor.") && 
-      eid.includes("_slot_") && 
-      (printerHost ? eid.includes(printerHost.replace(/\./g, '_')) : true)
-    ).sort();
-
-    slotSensors.forEach(eid => {
-      const match = eid.match(/cfs_box_(\d+)_slot_(\d+)_/);
-      if (match) {
-        const boxId = parseInt(match[1]);
-        const slotId = parseInt(match[2]);
-        if (boxes[boxId]) {
-          const stateObj = states[eid];
-          if (!boxes[boxId].slots[slotId]) {
-            boxes[boxId].slots[slotId] = {
-              id: slotId,
-              boxId: boxId,
-              entity_id: eid // placeholder for main info entity
-            };
-          }
-          
-          if (eid.endsWith("_filament")) {
-            boxes[boxId].slots[slotId].name = stateObj.state;
-            boxes[boxId].slots[slotId].type = stateObj.attributes.type;
-            boxes[boxId].slots[slotId].selected = stateObj.attributes.selected;
-            boxes[boxId].slots[slotId].entity_id = eid; // Use filament sensor for more-info
-          }
-          if (eid.endsWith("_color")) boxes[boxId].slots[slotId].color = stateObj.state;
-          if (eid.endsWith("_percent")) boxes[boxId].slots[slotId].percent = stateObj.state;
-        }
-      }
-    });
-
-    let html = '';
-    Object.values(boxes).forEach(box => {
+    let html = "";
+    boxValues.forEach((box) => {
+      const tempStr = box.temp || "—";
+      const humidityStr = box.humidity || "—";
+      const headerParts = [];
+      if (tempStr !== "—") headerParts.push(tempStr);
+      if (humidityStr !== "—") headerParts.push(humidityStr);
+      const headerText = headerParts.length ? headerParts.join(" | ") : "—";
       html += `
         <div class="box">
           <div class="box-header">
             <span>Box ${box.id}</span>
-            <span>
-              ${box.temp !== undefined ? `${box.temp}°C` : ''} 
-              ${box.humidity !== undefined ? `| ${box.humidity}%` : ''}
-            </span>
+            <span>${headerText}</span>
           </div>
           <div class="slots-grid">
-            ${box.slots.map(slot => this._renderSlot(slot)).join('')}
+            ${box.slots.map((slot) => this._renderSlot(slot)).join("")}
           </div>
         </div>
       `;
@@ -272,15 +304,20 @@ class KCFSCard extends HTMLElement {
     
     const isSelected = slot.selected === 1 || slot.selected === true;
     const color = slot.color || '#cccccc';
+    const safeName = slot.name && !["unknown", "unavailable"].includes(String(slot.name).toLowerCase()) ? slot.name : "---";
+    const safeType = slot.type && !["unknown", "unavailable"].includes(String(slot.type).toLowerCase()) ? slot.type : "---";
+    const percentState = slot.percentText;
+    const percentValid = percentState && !["unknown", "unavailable", "—"].includes(String(percentState).toLowerCase());
+    const percentText = percentValid ? ` - ${percentState}` : "";
     
     return `
       <div class="slot ${isSelected ? 'selected' : ''}" data-eid="${slot.entity_id}">
         <div class="spool-preview" style="background-color: ${color}"></div>
-        <div class="slot-info"><b>${slot.type || '---'}</b></div>
-        <div class="slot-info">${slot.name === 'N/A' ? 'No Filament' : slot.name}</div>
+        <div class="slot-info"><b>${safeType}</b></div>
+        <div class="slot-info">${safeName === 'N/A' ? 'No Filament' : safeName}${percentText}</div>
         <div class="slot-actions">
-          <button class="load-btn" data-box="${slot.boxId}" data-slot="${slot.id}">Load</button>
-          <button class="unload-btn" data-box="${slot.boxId}" data-slot="${slot.id}">Unload</button>
+          <button class="load-btn" data-box="${slot.boxId}" data-slot="${slot.id}" title="Load Box ${slot.boxId} Slot ${slot.id}">Load</button>
+          <button class="unload-btn" data-box="${slot.boxId}" data-slot="${slot.id}" title="Unload Box ${slot.boxId} Slot ${slot.id}">Unload</button>
         </div>
       </div>
     `;
@@ -346,7 +383,6 @@ class KCFSCardEditor extends HTMLElement {
         </div>
         <div class="tab-content active" id="entities-tab">
           <ha-form id="form"></ha-form>
-          <div class="input-helper"><b>Printer Host:</b> Use the same IP/Host as configured in the integration. It filters the CFS sensors (e.g. 192_168_1_50).</div>
         </div>
         <div class="tab-content" id="theme-tab">
           <ha-form id="theme-form"></ha-form>
@@ -376,14 +412,45 @@ class KCFSCardEditor extends HTMLElement {
     this._form = this._root.getElementById("form");
     this._form.hass = this._hass;
     this._form.data = this._cfg;
-    this._form.schema = [
+    const schema = [
       { name: "name", selector: { text: {} } },
-      { name: "printer_host", selector: { text: {} } },
     ];
-    this._form.computeLabel = (s) => ({
-      name: "Card Title",
-      printer_host: "Printer Host (IP/Unique ID)",
-    }[s.name] || s.name);
+
+    for (let box = 1; box <= 4; box += 1) {
+      schema.push({ name: `box${box}_temp`, selector: { entity: { domain: "sensor" } } });
+      schema.push({ name: `box${box}_humidity`, selector: { entity: { domain: "sensor" } } });
+      for (let slot = 1; slot <= 4; slot += 1) {
+        schema.push({ name: `box${box}_slot${slot}_filament`, selector: { entity: { domain: "sensor" } } });
+        schema.push({ name: `box${box}_slot${slot}_color`, selector: { entity: { domain: "sensor" } } });
+        schema.push({ name: `box${box}_slot${slot}_percent`, selector: { entity: { domain: "sensor" } } });
+      }
+    }
+
+    this._form.schema = schema;
+    this._form.computeLabel = (s) => {
+      if (s.name === "name") return "Card Title";
+      const boxMatch = s.name.match(/^box(\d+)_(temp|humidity)$/);
+      if (boxMatch) {
+        const [, boxId, metric] = boxMatch;
+        return `Box ${boxId} ${metric === "temp" ? "Temperature" : "Humidity"}`;
+      }
+
+      const slotMatch = s.name.match(/^box(\d+)_slot(\d+)_(filament|color|percent)$/);
+      if (slotMatch) {
+        const [, boxId, slotId, metric] = slotMatch;
+        const labelMap = {
+          filament: "Filament",
+          color: "Color",
+          percent: "Remaining Percent",
+        };
+        return `Box ${boxId} Slot ${slotId} ${labelMap[metric]}`;
+      }
+
+      return s.name;
+    };
+    if (this._form.computeHelper) {
+      this._form.computeHelper = () => "";
+    }
 
     this._form.addEventListener("value-changed", (ev) => {
       this._cfg = { ...this._cfg, ...ev.detail.value };
