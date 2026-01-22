@@ -5,6 +5,23 @@ const EDITOR_TAG = "k-cfs-card-editor";
 const mdi = (name) => `mdi:${name}`;
 
 class KCFSCard extends HTMLElement {
+  static _sanitizeColor(value) {
+    const raw = String(value || "").trim();
+    if (!raw || ["unknown", "unavailable", "—"].includes(raw.toLowerCase())) {
+      return "#cccccc";
+    }
+    const hex = raw.startsWith("#") ? raw.slice(1) : raw;
+    if (hex.length === 6 && /^[0-9a-fA-F]+$/.test(hex)) {
+      return `#${hex.toLowerCase()}`;
+    }
+    if (hex.length === 3 && /^[0-9a-fA-F]+$/.test(hex)) {
+      return `#${hex.toLowerCase()}`;
+    }
+    if (hex.length === 7 && hex.startsWith("0") && /^[0-9a-fA-F]+$/.test(hex)) {
+      return `#${hex.slice(1).toLowerCase()}`;
+    }
+    return "#cccccc";
+  }
   static getStubConfig() {
     const cfg = {
       name: "CFS",
@@ -217,7 +234,7 @@ class KCFSCard extends HTMLElement {
           const type = filamentObj?.attributes?.type;
           const selected = filamentObj?.attributes?.selected;
           const rawColor = colorObj?.state || filamentObj?.attributes?.color_hex;
-          const color = rawColor && !["unknown", "unavailable", "—"].includes(String(rawColor).toLowerCase()) ? rawColor : "#cccccc";
+          const color = KCFSCard._sanitizeColor(rawColor);
           const percentText = fmtState(percentObj);
 
           slots[slotId] = {

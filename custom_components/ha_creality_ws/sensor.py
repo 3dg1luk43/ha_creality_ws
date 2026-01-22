@@ -634,9 +634,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
         new_ents = []
         cfs_data = coord.data.get("boxsInfo", {})
         material_boxes = cfs_data.get("materialBoxs", [])
+        same_material = cfs_data.get("same_material", [])
+        same_box_ids = {item[2][0].get("boxId") for item in same_material if item and len(item) > 2 and item[2]}
         for box in material_boxes:
             box_id = box.get("id")
             if box_id is None:
+                continue
+            if same_box_ids and box_id in same_box_ids:
                 continue
             
             # Box sensors
