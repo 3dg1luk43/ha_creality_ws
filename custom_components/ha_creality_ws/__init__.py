@@ -180,6 +180,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data.get("_cached_max_nozzle_temp") is None
     )
     
+    # Re-cache if CFS info is missing but cfsConnect is 1
+    if not should_re_cache and coord.data.get("cfsConnect") == 1 and not entry.data.get("_cached_cfs_detected"):
+        should_re_cache = True
+
     if should_re_cache:
         _LOGGER.info(
             "Caching device info for %s (cached_version=%s, current_version=%s)",
@@ -191,6 +195,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # After first connect, wait briefly for model fields to appear to reduce flakiness
             if ok:
                 got_fields = await coord.wait_for_fields(["model", "modelVersion", "hostname"], timeout=6.0)
+                # If CFS is reported, wait a bit for boxsInfo
+                if coord.data.get("cfsConnect") == 1:
+                     await coord.client.request_boxs_info()
+                     await coord.wait_for_fields(["boxsInfo"], timeout=5.0)
             else:
                 got_fields = False
             if (ok and coord.data) or got_fields:
@@ -219,6 +227,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     new_data["_cached_has_box_sensor"] = True  # legacy mirror
                 if "lightSw" in d:
                     new_data["_cached_has_light"] = True
+                
+                # Cache CFS status
+                new_data["_cached_cfs_detected"] = d.get("cfsConnect") == 1
                 
                 # Cache max temperature values for temperature control limits
                 new_data["_cached_max_bed_temp"] = d.get("maxBedTemp", entry.data.get("_cached_max_bed_temp"))
@@ -335,9 +346,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not hasattr(hass.data[DOMAIN], '_diagnostic_service_registered'):
         await _register_diagnostic_service(hass)
         hass.data[DOMAIN]['_diagnostic_service_registered'] = True
+
+    # Register custom services
+    await _register_custom_services(hass)
     
     _LOGGER.info("ha_creality_ws: setup complete")
     return True
+
+
+async def _register_custom_services(hass: HomeAssistant) -> None:
+    """Register custom services for the integration."""
+
+    async def request_cfs_info(call: ServiceCall) -> None:
+        """Service to manually request CFS info from all or specific printers."""
+        # Find the coordinator for the targeted device(s)
+        # For simplicity, we'll just trigger it on all active coordinators for now,
+        # or filter by entry_id if provided in call data.
+        for entry_id, coord in hass.data[DOMAIN].items():
+            if isinstance(coord, KCoordinator):
+                _LOGGER.info("Manually requesting CFS info for %s", coord.client._host)
+                await coord.client.request_boxs_info()
+
+    if not hass.services.has_service(DOMAIN, "request_cfs_info"):
+        hass.services.async_register(DOMAIN, "request_cfs_info", request_cfs_info)
 
 
 async def _register_diagnostic_service(hass: HomeAssistant) -> None:

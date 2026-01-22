@@ -27,6 +27,8 @@ OnMessage = Callable[[dict[str, Any]], Awaitable[None]]
 # Periodic “get” cadences (mirror browser behavior)
 GET_REQPRINTERPARA_SEC = 5.0         # curPosition, autohome, etc.
 GET_PRINT_OBJECTS_SEC = 2.0          # objects/exclusions/current object
+GET_BOXS_INFO_SEC = 300.0             # CFS box info (temp/humidity/filaments) every 5m
+
 
 
 ## number coercion handled by utils.coerce_numbers
@@ -350,6 +352,7 @@ class KClient:
         try:
             t_para = 0.0
             t_objs = 0.0
+            t_cfs = 0.0
             # Staggered loop to avoid bursts
             while True:
                 now = time.monotonic()
@@ -372,12 +375,28 @@ class KClient:
                         pass
                     t_objs = now
 
+                # Only request CFS info if we know CFS is connected or haven't checked recently
+                if now - t_cfs >= GET_BOXS_INFO_SEC:
+                    # If we have state, check cfsConnect. If not yet known, poll anyway to discover.
+                    cfs_connected = self._state.get("cfsConnect")
+                    if cfs_connected is None or cfs_connected == 1:
+                        try:
+                            await self.request_boxs_info()
+                        except Exception:
+                            pass
+                    t_cfs = now
+
                 await asyncio.sleep(0.2)
         except asyncio.CancelledError:
             return
 
     # ---------- public send ----------
+    async def request_boxs_info(self) -> None:
+        """Ask the printer to send boxsInfo now."""
+        await self._send_json({"method": "get", "params": {"boxsInfo": 1}})
+
     async def send_set(self, **params: Any) -> None:
+
         """Single-attempt sender (kept for internal use)."""
         await self._send_json({"method": "set", "params": params})
 

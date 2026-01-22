@@ -23,8 +23,10 @@ ha_mod = types.ModuleType("homeassistant")
 helpers_mod = types.ModuleType("homeassistant.helpers")
 uc_mod = types.ModuleType("homeassistant.helpers.update_coordinator")
 
+from typing import Optional
+
 class DataUpdateCoordinator:  # type: ignore
-    def __init__(self, hass, logger=None, name: str | None = None, update_interval=None):
+    def __init__(self, hass, logger=None, name: Optional[str] = None, update_interval=None):
         self.hass = hass
         self.logger = logger
         self.name = name

@@ -294,7 +294,16 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _handle_message(self, payload: dict[str, Any]) -> None:
         """Handle incoming WebSocket telemetry data."""
+        # Check if boxsInfo is present and we haven't discovered CFS entities yet
+        had_cfs = "boxsInfo" in self.data
         self.data.update(payload)
+        has_cfs = "boxsInfo" in self.data
+        
+        if has_cfs and not had_cfs:
+            _LOGGER.info("CFS detected in telemetry, triggering dynamic discovery")
+            from homeassistant.helpers.dispatcher import async_dispatcher_send
+            async_dispatcher_send(self.hass, f"{DOMAIN}_new_entities_{self._config_entry_id}")
+
         self._recompute_paused_from_telemetry()
         
         # Try queued actions if state allows
