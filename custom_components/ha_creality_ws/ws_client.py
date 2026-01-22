@@ -395,6 +395,14 @@ class KClient:
         """Ask the printer to send boxsInfo now."""
         await self._send_json({"method": "get", "params": {"boxsInfo": 1}})
 
+    async def cfs_load(self, box: int, slot: int) -> None:
+        """Tell the printer to load filament from a specific CFS slot."""
+        await self.send_set_retry(cfs_load={"box": box, "slot": slot})
+
+    async def cfs_unload(self, box: int, slot: int) -> None:
+        """Tell the printer to unload filament from a specific CFS slot."""
+        await self.send_set_retry(cfs_unload={"box": box, "slot": slot})
+
     async def send_set(self, **params: Any) -> None:
 
         """Single-attempt sender (kept for internal use)."""

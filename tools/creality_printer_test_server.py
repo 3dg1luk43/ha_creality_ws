@@ -332,6 +332,76 @@ class PrinterState:
         self._model_fan = 0
         self._side_fan = 0
 
+        # CFS state
+        self._cfs_boxes = [
+            {
+                "id": 0,
+                "state": 0,
+                "type": 1,
+                "materials": [
+                    {
+                        "id": 0,
+                        "vendor": "Generic",
+                        "type": "PLA",
+                        "color": "#01b04ae",
+                        "name": "Generic PLA",
+                        "minTemp": 190,
+                        "maxTemp": 240,
+                        "selected": 0,
+                        "percent": 100,
+                        "state": 1,
+                    }
+                ],
+            },
+            {
+                "id": 1,
+                "state": 1,
+                "type": 0,
+                "materials": [
+                    {
+                        "id": 0,
+                        "vendor": "Creality",
+                        "type": "PLA",
+                        "name": "Hyper PLA",
+                        "color": "#0000000",
+                        "percent": 95,
+                        "state": 1,
+                        "selected": 1,
+                    },
+                    {
+                        "id": 1,
+                        "vendor": "Creality",
+                        "type": "PLA",
+                        "name": "Hyper PLA",
+                        "color": "#0ffffff",
+                        "percent": 80,
+                        "state": 1,
+                        "selected": 0,
+                    },
+                    {
+                        "id": 2,
+                        "vendor": "Creality",
+                        "type": "PLA",
+                        "name": "Hyper PLA",
+                        "color": "#0ffa800",
+                        "percent": 100,
+                        "state": 1,
+                        "selected": 0,
+                    },
+                    {
+                        "id": 3,
+                        "vendor": "Creality",
+                        "type": "PLA",
+                        "name": "Hyper PLA",
+                        "color": "#0ff97e1",
+                        "percent": 75,
+                        "state": 1,
+                        "selected": 0,
+                    },
+                ],
+            },
+        ]
+
         # errors
         self._error_code = 0
 
@@ -375,6 +445,23 @@ class PrinterState:
     def set_flowrate(self, pct: float) -> None:
         self._flowrate_pct = float(pct)
 
+    def set_cfs_load(self, box_id: int, slot_id: int) -> None:
+        """Simulate loading a specific CFS slot."""
+        for box in self._cfs_boxes:
+            for material in box.get("materials", []):
+                if box["id"] == box_id and material["id"] == slot_id:
+                    material["selected"] = 1
+                else:
+                    material["selected"] = 0
+
+    def set_cfs_unload(self, box_id: int, slot_id: int) -> None:
+        """Simulate unloading a specific CFS slot."""
+        for box in self._cfs_boxes:
+            if box["id"] == box_id:
+                for material in box.get("materials", []):
+                    if material["id"] == slot_id:
+                        material["selected"] = 0
+
     def set_autohome(self, axes: str) -> None:
         self._device_state = 7
         # simulate quick homing pulse
@@ -385,83 +472,19 @@ class PrinterState:
 
     def get_cfs_info(self) -> dict[str, Any]:
         """Generate a realistic CFS status payload."""
-        # Only K2 and some K1 models typically have CFS
+        # Update dynamic fields in CFS boxes
+        for box in self._cfs_boxes:
+            if box.get("type") == 0:  # Box with sensors
+                box["temp"] = round(_osc(28.0, 0.5, 1.0), 1)
+                box["humidity"] = round(_osc(40.0, 1.0, 2.0), 1)
+
         return {
             "boxsInfo": {
                 "same_material": [
                     ["001001", "0000000", [{"boxId": 1, "materialId": 0}], "PLA"],
                     ["001001", "0ffffff", [{"boxId": 1, "materialId": 1}], "PLA"],
                 ],
-                "materialBoxs": [
-                    {
-                        "id": 0,
-                        "state": 0,
-                        "type": 1,
-                        "materials": [
-                            {
-                                "id": 0,
-                                "vendor": "Generic",
-                                "type": "PLA",
-                                "color": "#01b04ae",
-                                "name": "Generic PLA",
-                                "minTemp": 190,
-                                "maxTemp": 240,
-                                "selected": 0,
-                                "percent": 100,
-                                "state": 1,
-                            }
-                        ],
-                    },
-                    {
-                        "id": 1,
-                        "state": 1,
-                        "type": 0,
-                        "temp": round(_osc(28.0, 0.5, 1.0), 1),
-                        "humidity": round(_osc(40.0, 1.0, 2.0), 1),
-                        "materials": [
-                            {
-                                "id": 0,
-                                "vendor": "Creality",
-                                "type": "PLA",
-                                "name": "Hyper PLA",
-                                "color": "#0000000",
-                                "percent": 95,
-                                "state": 1,
-                                "selected": 1 if self._cur_object_idx % 4 == 0 else 0,
-                            },
-                            {
-                                "id": 1,
-                                "vendor": "Creality",
-                                "type": "PLA",
-                                "name": "Hyper PLA",
-                                "color": "#0ffffff",
-                                "percent": 80,
-                                "state": 1,
-                                "selected": 1 if self._cur_object_idx % 4 == 1 else 0,
-                            },
-                            {
-                                "id": 2,
-                                "vendor": "Creality",
-                                "type": "PLA",
-                                "name": "Hyper PLA",
-                                "color": "#0ffa800",
-                                "percent": 100,
-                                "state": 1,
-                                "selected": 1 if self._cur_object_idx % 4 == 2 else 0,
-                            },
-                            {
-                                "id": 3,
-                                "vendor": "Creality",
-                                "type": "PLA",
-                                "name": "Hyper PLA",
-                                "color": "#0ff97e1",
-                                "percent": 75,
-                                "state": 1,
-                                "selected": 1 if self._cur_object_idx % 4 == 3 else 0,
-                            },
-                        ],
-                    },
-                ],
+                "materialBoxs": self._cfs_boxes,
             }
         }
 
@@ -658,6 +681,14 @@ async def ws_handle_conn(ws: Any, state: PrinterState):
                     handled = True
                 elif "setFlowratePct" in params:
                     state.set_flowrate(float(params.get("setFlowratePct") or 100))
+                    handled = True
+                elif "cfs_load" in params:
+                    cp = params.get("cfs_load", {})
+                    state.set_cfs_load(int(cp.get("box", 0)), int(cp.get("slot", 0)))
+                    handled = True
+                elif "cfs_unload" in params:
+                    cp = params.get("cfs_unload", {})
+                    state.set_cfs_unload(int(cp.get("box", 0)), int(cp.get("slot", 0)))
                     handled = True
                 elif "gcodeCmd" in params:
                     # no-op placeholder

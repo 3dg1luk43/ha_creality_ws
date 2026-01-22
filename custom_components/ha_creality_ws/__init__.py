@@ -359,16 +359,33 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
 
     async def request_cfs_info(call: ServiceCall) -> None:
         """Service to manually request CFS info from all or specific printers."""
-        # Find the coordinator for the targeted device(s)
-        # For simplicity, we'll just trigger it on all active coordinators for now,
-        # or filter by entry_id if provided in call data.
         for entry_id, coord in hass.data[DOMAIN].items():
             if isinstance(coord, KCoordinator):
                 _LOGGER.info("Manually requesting CFS info for %s", coord.client._host)
                 await coord.client.request_boxs_info()
 
+    async def cfs_load(call: ServiceCall) -> None:
+        """Service to load filament from a specific CFS slot."""
+        box_id = call.data.get("box_id", 0)
+        slot_id = call.data.get("slot_id", 0)
+        for entry_id, coord in hass.data[DOMAIN].items():
+            if isinstance(coord, KCoordinator):
+                await coord.client.cfs_load(box_id, slot_id)
+
+    async def cfs_unload(call: ServiceCall) -> None:
+        """Service to unload filament from a specific CFS slot."""
+        box_id = call.data.get("box_id", 0)
+        slot_id = call.data.get("slot_id", 0)
+        for entry_id, coord in hass.data[DOMAIN].items():
+            if isinstance(coord, KCoordinator):
+                await coord.client.cfs_unload(box_id, slot_id)
+
     if not hass.services.has_service(DOMAIN, "request_cfs_info"):
         hass.services.async_register(DOMAIN, "request_cfs_info", request_cfs_info)
+    if not hass.services.has_service(DOMAIN, "cfs_load"):
+        hass.services.async_register(DOMAIN, "cfs_load", cfs_load)
+    if not hass.services.has_service(DOMAIN, "cfs_unload"):
+        hass.services.async_register(DOMAIN, "cfs_unload", cfs_unload)
 
 
 async def _register_diagnostic_service(hass: HomeAssistant) -> None:
