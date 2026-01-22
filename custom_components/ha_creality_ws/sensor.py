@@ -528,8 +528,8 @@ class KCFSBoxSensor(KEntity, SensorEntity):
     """Sensor for a CFS Box (Temp/Humidity)."""
 
     def __init__(self, coordinator, box_id: int, sensor_type: str):
-        uid = f"cfs_box_{box_id + 1}_{sensor_type}"
-        name = f"CFS Box {box_id + 1} {sensor_type.capitalize()}"
+        uid = f"cfs_box_{box_id}_{sensor_type}"
+        name = f"CFS Box {box_id} {sensor_type.capitalize()}"
         super().__init__(coordinator, name, uid)
         self._box_id = box_id
         self._type = sensor_type  # "temp" or "humidity"
@@ -562,9 +562,9 @@ class KCFSSlotSensor(KEntity, SensorEntity):
     """Sensor for a CFS Slot (Filament type/color/percent)."""
 
     def __init__(self, coordinator, box_id: int, slot_id: int, sensor_type: str):
-        uid = f"cfs_box_{box_id + 1}_slot_{slot_id + 1}_{sensor_type}"
+        uid = f"cfs_box_{box_id}_slot_{slot_id}_{sensor_type}"
         type_label = sensor_type.replace("_", " ").capitalize()
-        name = f"CFS Box {box_id + 1} Slot {slot_id + 1} {type_label}"
+        name = f"CFS Box {box_id} Slot {slot_id} {type_label}"
         super().__init__(coordinator, name, uid)
         self._box_id = box_id
         self._slot_id = slot_id
@@ -642,7 +642,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             # Box sensors
             for s_type in ("temp", "humidity"):
                 if box.get(s_type) is not None:
-                    uid = f"cfs_box_{box_id + 1}_{s_type}"
+                    uid = f"cfs_box_{box_id}_{s_type}"
                     if uid not in added_cfs_uids:
                         new_ents.append(KCFSBoxSensor(coord, box_id, s_type))
                         added_cfs_uids.add(uid)
@@ -653,7 +653,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 if slot_id is None:
                     continue
                 for s_type in ("filament", "color", "percent"):
-                    uid = f"cfs_box_{box_id + 1}_slot_{slot_id + 1}_{s_type}"
+                    uid = f"cfs_box_{box_id}_slot_{slot_id}_{s_type}"
                     if uid not in added_cfs_uids:
                         new_ents.append(KCFSSlotSensor(coord, box_id, slot_id, s_type))
                         added_cfs_uids.add(uid)

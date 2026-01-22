@@ -11,10 +11,10 @@ class KCFSCard extends HTMLElement {
       compact_view: false,
     };
 
-    for (let box = 1; box <= 4; box += 1) {
+    for (let box = 0; box < 4; box += 1) {
       cfg[`box${box}_temp`] = "";
       cfg[`box${box}_humidity`] = "";
-      for (let slot = 1; slot <= 4; slot += 1) {
+      for (let slot = 0; slot < 4; slot += 1) {
         cfg[`box${box}_slot${slot}_filament`] = "";
         cfg[`box${box}_slot${slot}_color`] = "";
         cfg[`box${box}_slot${slot}_percent`] = "";
@@ -197,12 +197,12 @@ class KCFSCard extends HTMLElement {
     const boxes = {};
 
     if (hasExplicitMapping) {
-      for (let boxId = 1; boxId <= 4; boxId += 1) {
+      for (let boxId = 0; boxId < 4; boxId += 1) {
         const tempEid = this._cfg[`box${boxId}_temp`];
         const humidityEid = this._cfg[`box${boxId}_humidity`];
         const slots = [];
 
-        for (let slotId = 1; slotId <= 4; slotId += 1) {
+        for (let slotId = 0; slotId < 4; slotId += 1) {
           const filamentEid = this._cfg[`box${boxId}_slot${slotId}_filament`];
           const colorEid = this._cfg[`box${boxId}_slot${slotId}_color`];
           const percentEid = this._cfg[`box${boxId}_slot${slotId}_percent`];
@@ -217,10 +217,11 @@ class KCFSCard extends HTMLElement {
           const name = filamentObj?.state;
           const type = filamentObj?.attributes?.type;
           const selected = filamentObj?.attributes?.selected;
-          const color = colorObj?.state || filamentObj?.attributes?.color_hex;
+          const rawColor = colorObj?.state || filamentObj?.attributes?.color_hex;
+          const color = rawColor && !["unknown", "unavailable", "—"].includes(String(rawColor).toLowerCase()) ? rawColor : "#cccccc";
           const percentText = fmtState(percentObj);
 
-          slots[slotId - 1] = {
+          slots[slotId] = {
             id: slotId,
             boxId,
             entity_id: filamentEid || colorEid || percentEid,
@@ -260,7 +261,7 @@ class KCFSCard extends HTMLElement {
       html += `
         <div class="box">
           <div class="box-header">
-            <span>Box ${box.id}</span>
+            <span>Box ${box.id + 1}</span>
             <span>${headerText}</span>
           </div>
           <div class="slots-grid">
@@ -316,8 +317,8 @@ class KCFSCard extends HTMLElement {
         <div class="slot-info"><b>${safeType}</b></div>
         <div class="slot-info">${safeName === 'N/A' ? 'No Filament' : safeName}${percentText}</div>
         <div class="slot-actions">
-          <button class="load-btn" data-box="${slot.boxId}" data-slot="${slot.id}" title="Load Box ${slot.boxId} Slot ${slot.id}">Load</button>
-          <button class="unload-btn" data-box="${slot.boxId}" data-slot="${slot.id}" title="Unload Box ${slot.boxId} Slot ${slot.id}">Unload</button>
+          <button class="load-btn" data-box="${slot.boxId}" data-slot="${slot.id}" title="Load Box ${slot.boxId + 1} Slot ${slot.id + 1}">Load</button>
+          <button class="unload-btn" data-box="${slot.boxId}" data-slot="${slot.id}" title="Unload Box ${slot.boxId + 1} Slot ${slot.id + 1}">Unload</button>
         </div>
       </div>
     `;
@@ -416,10 +417,10 @@ class KCFSCardEditor extends HTMLElement {
       { name: "name", selector: { text: {} } },
     ];
 
-    for (let box = 1; box <= 4; box += 1) {
+    for (let box = 0; box < 4; box += 1) {
       schema.push({ name: `box${box}_temp`, selector: { entity: { domain: "sensor" } } });
       schema.push({ name: `box${box}_humidity`, selector: { entity: { domain: "sensor" } } });
-      for (let slot = 1; slot <= 4; slot += 1) {
+      for (let slot = 0; slot < 4; slot += 1) {
         schema.push({ name: `box${box}_slot${slot}_filament`, selector: { entity: { domain: "sensor" } } });
         schema.push({ name: `box${box}_slot${slot}_color`, selector: { entity: { domain: "sensor" } } });
         schema.push({ name: `box${box}_slot${slot}_percent`, selector: { entity: { domain: "sensor" } } });
@@ -432,7 +433,7 @@ class KCFSCardEditor extends HTMLElement {
       const boxMatch = s.name.match(/^box(\d+)_(temp|humidity)$/);
       if (boxMatch) {
         const [, boxId, metric] = boxMatch;
-        return `Box ${boxId} ${metric === "temp" ? "Temperature" : "Humidity"}`;
+        return `Box ${Number(boxId) + 1} ${metric === "temp" ? "Temperature" : "Humidity"}`;
       }
 
       const slotMatch = s.name.match(/^box(\d+)_slot(\d+)_(filament|color|percent)$/);
@@ -443,7 +444,7 @@ class KCFSCardEditor extends HTMLElement {
           color: "Color",
           percent: "Remaining Percent",
         };
-        return `Box ${boxId} Slot ${slotId} ${labelMap[metric]}`;
+        return `Box ${Number(boxId) + 1} Slot ${Number(slotId) + 1} ${labelMap[metric]}`;
       }
 
       return s.name;
