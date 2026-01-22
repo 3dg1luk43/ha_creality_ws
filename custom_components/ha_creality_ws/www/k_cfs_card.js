@@ -119,7 +119,6 @@ class KCFSCard extends HTMLElement {
         height: 8px;
         border-radius: 4px;
         width: 100%;
-        background: #ccc;
       }
       .slot-info {
         font-size: 0.8em;
