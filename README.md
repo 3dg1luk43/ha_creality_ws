@@ -283,6 +283,21 @@ The CFS card is a native UI card with a visual editor. It renders one tile per s
 - Each slot tile opens **more-info** for the mapped filament entity
 - Percent is rendered from the mapped percent sensor and formatted by Home Assistant
 - Filament color uses the mapped color sensor (or color hex from filament attributes)
+- **Active filament** shows a pulsing green dot indicator when currently selected by the printer
+- **Humidity levels** are color-coded following Creality standards:
+  - **Green** (< 40%): Ideal humidity range
+  - **Orange** (40-59%): Attention required
+  - **Red** (≥ 60%): Critical humidity level
+
+### CFS Card screenshots
+
+Full view
+
+![CFS Full](img/cfs_full.png)
+
+Compact view
+
+![CFS Compact](img/cfs_compact.png)
 
 ---
 
