@@ -47,6 +47,14 @@ sys.modules["homeassistant"] = ha_mod
 sys.modules["homeassistant.helpers"] = helpers_mod
 sys.modules["homeassistant.helpers.update_coordinator"] = uc_mod
 
+# Stub aiohttp_client
+aiohttp_client_mod = types.ModuleType("homeassistant.helpers.aiohttp_client")
+def async_get_clientsession(hass):
+    return None
+setattr(aiohttp_client_mod, "async_get_clientsession", async_get_clientsession)
+sys.modules["homeassistant.helpers.aiohttp_client"] = aiohttp_client_mod
+setattr(helpers_mod, "aiohttp_client", aiohttp_client_mod)
+
 # Stub out custom_components.ha_creality_ws.ws_client to avoid external deps
 ws_client_mod = types.ModuleType("custom_components.ha_creality_ws.ws_client")
 import asyncio, time, contextlib  # noqa: E401
