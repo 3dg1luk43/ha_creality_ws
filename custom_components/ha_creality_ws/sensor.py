@@ -721,10 +721,14 @@ async def async_setup_entry(hass, entry, async_add_entities):
                         added_cfs_uids.add(uid)
                 
             # Slots
-            for slot in box.get("materials", []):
+            for idx, slot in enumerate(box.get("materials", [])):
                 slot_id = slot.get("id")
-                if slot_id is None:
-                    continue
+                try:
+                    slot_id = int(slot_id) if slot_id is not None else None
+                except (TypeError, ValueError):
+                    slot_id = None
+                if slot_id is None or slot_id < 0:
+                    slot_id = idx
                 for s_type in ("filament", "color", "percent"):
                     uid = f"cfs_box_{box_id}_slot_{slot_id}_{s_type}"
                     if uid not in added_cfs_uids:
