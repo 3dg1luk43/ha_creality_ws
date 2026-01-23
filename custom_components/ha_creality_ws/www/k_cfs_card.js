@@ -46,9 +46,9 @@ class KCFSCard extends HTMLElement {
     if (!match) return '#64b5f6';
     
     const value = parseFloat(match[1]);
-    if (value < 40) return '#4caf50';   // Verde (0-39%) - Ideal
-    if (value < 60) return '#ff9800';   // Laranja (40-59%) - Atenção
-    return '#f44336';                    // Vermelho (60-100%) - Crítico
+    if (value < 40) return '#4caf50';   // Green (0-39%) - Ideal
+    if (value < 60) return '#ff9800';   // Orange (40-59%) - Attention
+    return '#f44336';                    // Red (60-100%) - Critical
   }
 
   static getStubConfig() {
