@@ -564,7 +564,7 @@ class KCFSSlotSensor(KEntity, SensorEntity):
     def __init__(self, coordinator, box_id: int, slot_id: int, sensor_type: str):
         uid = f"cfs_box_{box_id}_slot_{slot_id}_{sensor_type}"
         type_label = sensor_type.replace("_", " ").capitalize()
-        name = f"CFS Box {box_id} Slot {slot_id} {type_label}"
+        name = f"CFS Box {box_id} Slot {slot_id + 1} {type_label}"
         super().__init__(coordinator, name, uid)
         self._box_id = box_id
         self._slot_id = slot_id
@@ -722,7 +722,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 
             # Slots
             for idx, slot in enumerate(box.get("materials", [])):
-                slot_id = idx
+                slot_id = slot.get("id")
                 try:
                     slot_id = int(slot_id) if slot_id is not None else None
                 except (TypeError, ValueError):
