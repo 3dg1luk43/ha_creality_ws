@@ -722,7 +722,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 
             # Slots
             for idx, slot in enumerate(box.get("materials", [])):
-                slot_id = slot.get("id")
+                slot_id = idx
                 try:
                     slot_id = int(slot_id) if slot_id is not None else None
                 except (TypeError, ValueError):
