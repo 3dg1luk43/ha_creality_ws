@@ -1,5 +1,34 @@
 import asyncio
+import sys
+from unittest.mock import MagicMock
 from types import SimpleNamespace
+
+# Mock homeassistant.helpers.update_coordinator
+mock_update_coordinator = MagicMock()
+# We need DataUpdateCoordinator to be a class that can be inherited from
+class MockDataUpdateCoordinator:
+    def __init__(self, hass, logger, name, update_interval=None, update_method=None, request_refresh_debouncer=None):
+        self.hass = hass
+    
+    async def async_refresh(self):
+        pass
+
+    def async_update_listeners(self):
+        pass
+
+    def __class_getitem__(cls, item):
+        return cls
+
+mock_update_coordinator.DataUpdateCoordinator = MockDataUpdateCoordinator
+sys.modules["homeassistant.helpers.update_coordinator"] = mock_update_coordinator
+
+# Mock homeassistant.helpers.aiohttp_client
+mock_aiohttp_client = MagicMock()
+sys.modules["homeassistant.helpers.aiohttp_client"] = mock_aiohttp_client
+
+# Mock homeassistant.helpers.dispatcher
+mock_dispatcher = MagicMock()
+sys.modules["homeassistant.helpers.dispatcher"] = mock_dispatcher
 
 from custom_components.ha_creality_ws.coordinator import KCoordinator
 
