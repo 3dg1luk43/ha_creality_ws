@@ -197,8 +197,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 got_fields = await coord.wait_for_fields(["model", "modelVersion", "hostname"], timeout=6.0)
                 # If CFS is reported, wait a bit for boxsInfo
                 if coord.data.get("cfsConnect") == 1:
-                     await coord.client.request_boxs_info()
-                     await coord.wait_for_fields(["boxsInfo"], timeout=5.0)
+                    await coord.client.request_boxs_info()
+                    await coord.wait_for_fields(["boxsInfo"], timeout=5.0)
+
             else:
                 got_fields = False
             if (ok and coord.data) or got_fields:
