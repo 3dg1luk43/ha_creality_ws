@@ -445,23 +445,6 @@ class PrinterState:
     def set_flowrate(self, pct: float) -> None:
         self._flowrate_pct = float(pct)
 
-    def set_cfs_load(self, box_id: int, slot_id: int) -> None:
-        """Simulate loading a specific CFS slot."""
-        for box in self._cfs_boxes:
-            for material in box.get("materials", []):
-                if box["id"] == box_id and material["id"] == slot_id:
-                    material["selected"] = 1
-                else:
-                    material["selected"] = 0
-
-    def set_cfs_unload(self, box_id: int, slot_id: int) -> None:
-        """Simulate unloading a specific CFS slot."""
-        for box in self._cfs_boxes:
-            if box["id"] == box_id:
-                for material in box.get("materials", []):
-                    if material["id"] == slot_id:
-                        material["selected"] = 0
-
     def set_autohome(self, axes: str) -> None:
         self._device_state = 7
         # simulate quick homing pulse
@@ -681,14 +664,6 @@ async def ws_handle_conn(ws: Any, state: PrinterState):
                     handled = True
                 elif "setFlowratePct" in params:
                     state.set_flowrate(float(params.get("setFlowratePct") or 100))
-                    handled = True
-                elif "cfs_load" in params:
-                    cp = params.get("cfs_load", {})
-                    state.set_cfs_load(int(cp.get("box", 0)), int(cp.get("slot", 0)))
-                    handled = True
-                elif "cfs_unload" in params:
-                    cp = params.get("cfs_unload", {})
-                    state.set_cfs_unload(int(cp.get("box", 0)), int(cp.get("slot", 0)))
                     handled = True
                 elif "gcodeCmd" in params:
                     # no-op placeholder

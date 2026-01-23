@@ -364,32 +364,8 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
                 _LOGGER.info("Manually requesting CFS info for %s", coord.client._host)
                 await coord.client.request_boxs_info()
 
-    async def cfs_load(call: ServiceCall) -> None:
-        """Service to load filament from a specific CFS slot."""
-        box_id = call.data.get("box_id", 1)
-        slot_id = call.data.get("slot_id", 1)
-        box_idx = max(int(box_id) - 1, 0)
-        slot_idx = max(int(slot_id) - 1, 0)
-        for entry_id, coord in hass.data[DOMAIN].items():
-            if isinstance(coord, KCoordinator):
-                await coord.client.cfs_load(box_idx, slot_idx)
-
-    async def cfs_unload(call: ServiceCall) -> None:
-        """Service to unload filament from a specific CFS slot."""
-        box_id = call.data.get("box_id", 1)
-        slot_id = call.data.get("slot_id", 1)
-        box_idx = max(int(box_id) - 1, 0)
-        slot_idx = max(int(slot_id) - 1, 0)
-        for entry_id, coord in hass.data[DOMAIN].items():
-            if isinstance(coord, KCoordinator):
-                await coord.client.cfs_unload(box_idx, slot_idx)
-
     if not hass.services.has_service(DOMAIN, "request_cfs_info"):
         hass.services.async_register(DOMAIN, "request_cfs_info", request_cfs_info)
-    if not hass.services.has_service(DOMAIN, "cfs_load"):
-        hass.services.async_register(DOMAIN, "cfs_load", cfs_load)
-    if not hass.services.has_service(DOMAIN, "cfs_unload"):
-        hass.services.async_register(DOMAIN, "cfs_unload", cfs_unload)
 
 
 async def _register_diagnostic_service(hass: HomeAssistant) -> None:

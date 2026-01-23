@@ -622,6 +622,75 @@ class KCFSSlotSensor(KEntity, SensorEntity):
         }
 
 
+class KCFSExtSlotSensor(KEntity, SensorEntity):
+    """Sensor for the External Filament slot (Filament type/color/percent)."""
+
+    def __init__(self, coordinator, slot_id: int, sensor_type: str):
+        uid = f"cfs_external_{sensor_type}"
+        type_label = sensor_type.replace("_", " ").capitalize()
+        name = f"CFS External {type_label}"
+        super().__init__(coordinator, name, uid)
+        self._slot_id = slot_id
+        self._type = sensor_type
+
+        if sensor_type == "percent":
+            self._attr_native_unit_of_measurement = U_PERCENT
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+        elif sensor_type == "color":
+            self._attr_icon = "mdi:palette"
+
+    def _get_external_box(self) -> dict[str, Any] | None:
+        boxes = self.coordinator.data.get("boxsInfo", {}).get("materialBoxs", [])
+        for b in boxes:
+            if b.get("type") == 1:
+                return b
+        return None
+
+    def _get_slot_data(self) -> dict[str, Any] | None:
+        box = self._get_external_box()
+        if not box:
+            return None
+        materials = box.get("materials", [])
+        for m in materials:
+            if m.get("id") == self._slot_id:
+                return m
+        return materials[0] if materials else None
+
+    @property
+    def native_value(self) -> Any:
+        if self._should_zero():
+            return 0 if self._type == "percent" else "N/A"
+
+        data = self._get_slot_data()
+        if not data:
+            return None
+
+        if self._type == "filament":
+            vendor = data.get("vendor", "Generic")
+            name = data.get("name") or data.get("type", "Unknown")
+            return f"{vendor} {name}"
+        if self._type == "color":
+            return data.get("color")
+        if self._type == "percent":
+            return data.get("percent")
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        data = self._get_slot_data()
+        if not data:
+            return {}
+        return {
+            "vendor": data.get("vendor"),
+            "type": data.get("type"),
+            "name": data.get("name"),
+            "color_hex": data.get("color"),
+            "rfid": data.get("rfid"),
+            "state": data.get("state"),
+            "selected": data.get("selected"),
+        }
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
     coord = hass.data[DOMAIN][entry.entry_id]
     ents: list[SensorEntity] = []
@@ -634,13 +703,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
         new_ents = []
         cfs_data = coord.data.get("boxsInfo", {})
         material_boxes = cfs_data.get("materialBoxs", [])
-        same_material = cfs_data.get("same_material", [])
-        same_box_ids = {item[2][0].get("boxId") for item in same_material if item and len(item) > 2 and item[2]}
+        has_cfs_box = any(box.get("type") == 0 for box in material_boxes)
+        external_box = next((box for box in material_boxes if box.get("type") == 1), None)
         for box in material_boxes:
             box_id = box.get("id")
             if box_id is None:
                 continue
-            if same_box_ids and box_id in same_box_ids:
+            if has_cfs_box and box.get("type") == 1:
                 continue
             
             # Box sensors
@@ -660,6 +729,16 @@ async def async_setup_entry(hass, entry, async_add_entities):
                     uid = f"cfs_box_{box_id}_slot_{slot_id}_{s_type}"
                     if uid not in added_cfs_uids:
                         new_ents.append(KCFSSlotSensor(coord, box_id, slot_id, s_type))
+                        added_cfs_uids.add(uid)
+
+        if external_box:
+            materials = external_box.get("materials", [])
+            if materials:
+                slot_id = materials[0].get("id", 0)
+                for s_type in ("filament", "color", "percent"):
+                    uid = f"cfs_external_{s_type}"
+                    if uid not in added_cfs_uids:
+                        new_ents.append(KCFSExtSlotSensor(coord, slot_id, s_type))
                         added_cfs_uids.add(uid)
         return new_ents
 

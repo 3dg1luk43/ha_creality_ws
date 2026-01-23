@@ -105,7 +105,7 @@ The integration automatically installs the following Python packages:
 
 ## Lovelace Card
 
-This repository **bundles** a standalone card. The integration serves the card file directly from its own `www/` directory (at `/ha_creality_ws/k_printer_card.js`) and **auto-registers** the Lovelace resource **in storage mode**.
+This repository **bundles** standalone cards. The integration serves the card files directly from its own `www/` directory (at `/ha_creality_ws/k_printer_card.js` and `/ha_creality_ws/k_cfs_card.js`) and **auto-registers** the Lovelace resources **in storage mode**.
 
 ### Card screenshots
 
@@ -138,6 +138,7 @@ Color picker
 
   ```
   /ha_creality_ws/k_printer_card.js   (type: module)
+  /ha_creality_ws/k_cfs_card.js       (type: module)
   ```
 
   If you ever remove/re-add the integration or migrate dashboards, verify it under:
@@ -238,6 +239,50 @@ stop_btn: button.k1c_stop_print
 - Light chip visibility automatically reacts to power state and printer status without reload.
 - Light strictly mirrors entity state (doesn't use optimistic overrides) to avoid desync.
 - Tapping the header opens **more-info** for `camera` (fallbacks: `status`, `progress`).
+
+---
+
+## CFS (Creality Filament System)
+
+If your printer reports CFS data, the integration creates sensors for each CFS box and slot. It also exposes a dedicated set of sensors for the **external filament** (single slot).
+
+### CFS Sensors
+
+**Box sensors (type 0 / CFS):**
+
+- `sensor.<host>_cfs_box_<box>_temp`
+- `sensor.<host>_cfs_box_<box>_humidity`
+
+**Slot sensors (type 0 / CFS):**
+
+- `sensor.<host>_cfs_box_<box>_slot_<slot>_filament`
+- `sensor.<host>_cfs_box_<box>_slot_<slot>_color`
+- `sensor.<host>_cfs_box_<box>_slot_<slot>_percent`
+
+**External filament (type 1 / single slot):**
+
+- `sensor.<host>_cfs_external_filament`
+- `sensor.<host>_cfs_external_color`
+- `sensor.<host>_cfs_external_percent`
+
+### CFS Card
+
+The CFS card is a native UI card with a visual editor. It renders one tile per slot and a dedicated tile for the external filament.
+
+- Card type: **Creality CFS Card**
+- Element tag: **`custom:k-cfs-card`**
+- Configuration is **entity mapping only** via the visual editor (no YAML flow required)
+
+**Editor fields:**
+
+- **External Filament**: map `external_filament`, `external_color`, `external_percent`
+- **Box 1–4**: map temperature/humidity and up to 4 slots per box
+
+**Behavior:**
+
+- Each slot tile opens **more-info** for the mapped filament entity
+- Percent is rendered from the mapped percent sensor and formatted by Home Assistant
+- Filament color uses the mapped color sensor (or color hex from filament attributes)
 
 ---
 

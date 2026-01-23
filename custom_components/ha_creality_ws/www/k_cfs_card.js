@@ -26,6 +26,9 @@ class KCFSCard extends HTMLElement {
     const cfg = {
       name: "CFS",
       compact_view: false,
+      external_filament: "",
+      external_color: "",
+      external_percent: "",
     };
 
     for (let box = 0; box < 4; box += 1) {
@@ -143,29 +146,9 @@ class KCFSCard extends HTMLElement {
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .slot-actions {
-        display: flex;
-        gap: 4px;
-        margin-top: 4px;
-      }
-      .slot-actions button {
-        flex: 1;
-        font-size: 0.7em;
-        padding: 4px;
-        cursor: pointer;
-        border: 1px solid var(--divider-color);
-        border-radius: 4px;
-        background: var(--secondary-background-color);
-        color: var(--primary-text-color);
-      }
-      .slot-actions button:hover {
-        background: rgba(var(--rgb-primary-text-color), 0.1);
-      }
-      
       .compact .box-header { margin-bottom: 4px; }
       .compact .slot { padding: 4px; gap: 2px; }
       .compact .slot-info { font-size: 0.7em; }
-      .compact .slot-actions { display: none; }
     `;
 
     this._root.innerHTML = `
@@ -209,8 +192,14 @@ class KCFSCard extends HTMLElement {
     };
     const fmtWithUnit = (eid) => fmtState(gObj(eid));
 
-    const hasExplicitMapping = Object.keys(this._cfg || {}).some((key) => key.startsWith("box") && this._cfg[key]);
+    const hasExplicitMapping = Object.keys(this._cfg || {}).some((key) => (key.startsWith("box") || key.startsWith("external_")) && this._cfg[key]);
     const boxes = {};
+    const external = {
+      filament: this._cfg.external_filament,
+      color: this._cfg.external_color,
+      percent: this._cfg.external_percent,
+    };
+    const hasExternal = external.filament || external.color || external.percent;
 
     if (hasExplicitMapping) {
       for (let boxId = 0; boxId < 4; boxId += 1) {
@@ -261,12 +250,45 @@ class KCFSCard extends HTMLElement {
     }
 
     const boxValues = Object.values(boxes);
-    if (boxValues.length === 0) {
+    if (boxValues.length === 0 && !hasExternal) {
       boxesContainer.innerHTML = `<div style="text-align:center; color:var(--secondary-text-color)">No CFS data available</div>`;
       return;
     }
 
     let html = "";
+    if (hasExternal) {
+      const filamentObj = gObj(external.filament);
+      const colorObj = gObj(external.color);
+      const percentObj = gObj(external.percent);
+      const name = filamentObj?.state;
+      const type = filamentObj?.attributes?.type;
+      const selected = filamentObj?.attributes?.selected;
+      const rawColor = colorObj?.state || filamentObj?.attributes?.color_hex;
+      const color = KCFSCard._sanitizeColor(rawColor);
+      const percentText = fmtState(percentObj);
+      const externalSlot = {
+        id: 0,
+        boxId: 0,
+        entity_id: external.filament || external.color || external.percent,
+        name,
+        type,
+        selected,
+        color,
+        percentText,
+        hideActions: true,
+      };
+      html += `
+        <div class="box">
+          <div class="box-header">
+            <span>External Filament</span>
+            <span></span>
+          </div>
+          <div class="slots-grid">
+            ${this._renderSlot(externalSlot)}
+          </div>
+        </div>
+      `;
+    }
     boxValues.forEach((box) => {
       const tempStr = box.temp || "—";
       const humidityStr = box.humidity || "—";
@@ -301,19 +323,6 @@ class KCFSCard extends HTMLElement {
       };
     });
 
-    this._root.querySelectorAll('.load-btn').forEach(el => {
-      el.onclick = (e) => {
-        e.stopPropagation();
-        this._callService('cfs_load', el.dataset.box, el.dataset.slot);
-      };
-    });
-
-    this._root.querySelectorAll('.unload-btn').forEach(el => {
-      el.onclick = (e) => {
-        e.stopPropagation();
-        this._callService('cfs_unload', el.dataset.box, el.dataset.slot);
-      };
-    });
   }
 
   _renderSlot(slot) {
@@ -332,24 +341,8 @@ class KCFSCard extends HTMLElement {
         <div class="spool-preview" style="background-color: ${color}"></div>
         <div class="slot-info"><b>${safeType}</b></div>
         <div class="slot-info">${safeName === 'N/A' ? 'No Filament' : safeName}${percentText}</div>
-        <div class="slot-actions">
-          <button class="load-btn" data-box="${slot.boxId}" data-slot="${slot.id}" title="Load Box ${slot.boxId + 1} Slot ${slot.id + 1}">Load</button>
-          <button class="unload-btn" data-box="${slot.boxId}" data-slot="${slot.id}" title="Unload Box ${slot.boxId + 1} Slot ${slot.id + 1}">Unload</button>
-        </div>
       </div>
     `;
-  }
-
-  async _callService(service, box, slot) {
-    if (!this._hass) return;
-    try {
-      await this._hass.callService("ha_creality_ws", service, {
-        box_id: parseInt(box),
-        slot_id: parseInt(slot)
-      });
-    } catch (err) {
-      console.error("Error calling service:", err);
-    }
   }
 
   getCardSize() {
@@ -431,6 +424,9 @@ class KCFSCardEditor extends HTMLElement {
     this._form.data = this._cfg;
     const schema = [
       { name: "name", selector: { text: {} } },
+      { name: "external_filament", selector: { entity: { domain: "sensor" } } },
+      { name: "external_color", selector: { entity: { domain: "sensor" } } },
+      { name: "external_percent", selector: { entity: { domain: "sensor" } } },
     ];
 
     for (let box = 0; box < 4; box += 1) {
@@ -446,6 +442,10 @@ class KCFSCardEditor extends HTMLElement {
     this._form.schema = schema;
     this._form.computeLabel = (s) => {
       if (s.name === "name") return "Card Title";
+      if (s.name === "external_filament") return "External Filament";
+      if (s.name === "external_color") return "External Color";
+      if (s.name === "external_percent") return "External Percent";
+
       const boxMatch = s.name.match(/^box(\d+)_(temp|humidity)$/);
       if (boxMatch) {
         const [, boxId, metric] = boxMatch;
