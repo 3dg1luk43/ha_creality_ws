@@ -653,7 +653,6 @@ class KCFSCard extends HTMLElement {
       <div class="header">
         <div class="title-section">
           <div class="title">${this._cfg.name || 'Creality CFS'}</div>
-          <div class="subtitle">Multi-Material System</div>
         </div>
         ${envInfo}
       </div>
