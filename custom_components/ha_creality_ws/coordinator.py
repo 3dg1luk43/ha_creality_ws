@@ -49,6 +49,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._notified_completed = False
         self._notified_minutes_to_end = False
         self._last_error_code = 0
+        
+        # Caches
+        self._is_k2_base: bool | None = None
 
         if self._config_entry_id:
              self._load_options()
@@ -297,7 +300,10 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _handle_message(self, payload: dict[str, Any]) -> None:
         """Handle incoming WebSocket telemetry data."""
         # Suppress broken targetBoxTemp:0 from K2 Base port 9999
-        if (payload.get("targetBoxTemp") == 0) and ModelDetection(self.data).is_k2_base:
+        if self._is_k2_base is None:
+             self._is_k2_base = ModelDetection(payload).is_k2_base
+             
+        if (payload.get("targetBoxTemp") == 0) and self._is_k2_base:
             payload.pop("targetBoxTemp")
 
         self.data.update(payload)
@@ -313,7 +319,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._check_notifications(payload)
 
         # --- Moonraker Fallback (K2 Base) ---
-        if ModelDetection(self.data).is_k2_base:
+        if self._is_k2_base:
             now = self.hass.loop.time()
             if (now - getattr(self, "_last_mr_poll", 0) > 10.0):
                 self._last_mr_poll = now
@@ -437,6 +443,6 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             _LOGGER.debug("Updated targetBoxTemp from Moonraker: %s", target)
                             self.data["targetBoxTemp"] = target
                             self.async_update_listeners()
-        except Exception:
-            # Moonraker might be disabled or port 7125 blocked; fail silently
-            pass
+        except Exception as e:
+            # Moonraker might be disabled or port 7125 blocked; fail silently but log debug
+            _LOGGER.debug("Failed to poll Moonraker for extras: %s", e)

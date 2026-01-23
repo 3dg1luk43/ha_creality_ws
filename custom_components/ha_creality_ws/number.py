@@ -12,7 +12,7 @@ except Exception:  # older cores
 
 from .const import DOMAIN
 from .entity import KEntity
-from .utils import ModelDetection
+
 from homeassistant.helpers import entity_registry as er  # type: ignore[import]
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -197,12 +197,7 @@ class BoxTargetNumber(KEntity, NumberEntity):
         except (TypeError, ValueError):
             return None
 
-    async def async_set_native_value(self, value: float) -> None:
-        # Bypass this restriction for the Base K2.
-        if ModelDetection(self.coordinator.data).is_k2_base:
-            v = int(round(value))
-        else:
-            v = 0 if value <= 40 else int(round(value))
+        v = int(round(value))
 
         v = max(int(self._attr_native_min_value or 0), v)
         max_v = self._attr_native_max_value
@@ -212,7 +207,7 @@ class BoxTargetNumber(KEntity, NumberEntity):
         # Optimistic update
         self.coordinator.data["targetBoxTemp"] = v
         self.coordinator.async_update_listeners()
-            
+
         await self.coordinator.client.send_set_retry(boxTempControl=v)
 
 
