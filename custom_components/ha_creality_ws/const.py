@@ -1,3 +1,5 @@
+"""Constants for the HA Creality WS integration."""
+
 DOMAIN = "ha_creality_ws"
 
 CONF_HOST = "host"
@@ -52,3 +54,10 @@ CONF_MINUTES_TO_END_VALUE = "minutes_to_end_value"
 
 CONF_POLLING_RATE = "polling_rate"
 DEFAULT_POLLING_RATE = 0  # Real-time
+
+# Moonraker / Extras
+MR_PORT = 7125
+MR_POLL_INTERVAL = 10.0
+MR_POLL_TIMEOUT = 2.0
+MR_QUERY_PARAMS = "temperature_fan%20chamber_fan"
+
