@@ -5,6 +5,11 @@ const EDITOR_TAG = "k-cfs-card-editor";
 const mdi = (name) => `mdi:${name}`;
 
 class KCFSCard extends HTMLElement {
+  constructor() {
+    super();
+    this._selectedCFS = 0; // Track selected CFS tab in normal mode
+  }
+
   static _sanitizeColor(value) {
     const raw = String(value || "").trim();
     if (!raw || ["unknown", "unavailable", "—"].includes(raw.toLowerCase())) {
@@ -22,6 +27,18 @@ class KCFSCard extends HTMLElement {
     }
     return "#cccccc";
   }
+
+  static _parsePercent(percentObj) {
+    if (!percentObj) return null;
+    const state = percentObj.state;
+    if (state === undefined || state === null) return null;
+    const s = String(state);
+    if (s === "unknown" || s === "unavailable") return null;
+    const n = Number(s);
+    if (Number.isNaN(n) || !Number.isFinite(n)) return null;
+    return Math.max(0, Math.min(100, n));
+  }
+
   static getStubConfig() {
     const cfg = {
       name: "CFS",
@@ -64,101 +81,387 @@ class KCFSCard extends HTMLElement {
   _render() {
     if (!this._root) return;
 
+    const isCompact = this._cfg.compact_view;
+
     const style = `
       ha-card {
-        padding: 16px;
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
+        padding: 20px;
+        background: rgba(var(--rgb-card-background-color), 0.95);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border-radius: 24px;
+        border: 1px solid rgba(var(--rgb-primary-text-color), 0.08);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
       }
+
+      /* === NORMAL MODE === */
+      .normal-mode {}
+
       .header {
         display: flex;
         justify-content: space-between;
-        align-items: center;
+        align-items: flex-end;
+        margin-bottom: 24px;
       }
-      .title {
-        font-weight: bold;
-        font-size: 1.1em;
-      }
-      .boxes-container {
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-      }
-      .box {
-        border: 1px solid var(--divider-color);
-        border-radius: 8px;
-        padding: 12px;
-        background: rgba(var(--rgb-primary-text-color), 0.03);
-      }
-      .box-header {
-        display: flex;
-        justify-content: space-between;
-        margin-bottom: 8px;
-        font-size: 0.9em;
-        color: var(--secondary-text-color);
-      }
-      .slots-grid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 8px;
-      }
-      .slot {
-        border: 1px solid var(--divider-color);
-        border-radius: 6px;
-        padding: 8px;
+      .title-section {
         display: flex;
         flex-direction: column;
         gap: 4px;
-        position: relative;
+      }
+      .title {
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+      }
+      .subtitle {
+        font-size: 12px;
+        color: var(--secondary-text-color);
+        font-weight: 500;
+      }
+      .env-info {
+        font-size: 11px;
+        background: rgba(var(--rgb-primary-text-color), 0.08);
+        padding: 6px 10px;
+        border-radius: 12px;
+        color: var(--secondary-text-color);
+      }
+
+      .unit-selector {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 20px;
+        background: rgba(var(--rgb-primary-text-color), 0.05);
+        padding: 4px;
+        border-radius: 14px;
+        width: fit-content;
+      }
+      .unit-btn {
+        padding: 6px 16px;
+        border-radius: 10px;
+        font-size: 12px;
+        font-weight: 600;
         cursor: pointer;
-        transition: transform 0.1s;
+        transition: all 0.3s ease;
+        border: none;
+        color: var(--secondary-text-color);
+        background: transparent;
+      }
+      .unit-btn.active {
+        background: rgba(var(--rgb-primary-text-color), 0.1);
+        color: var(--primary-text-color);
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+      }
+
+      .spool-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .spool-card {
+        background: rgba(var(--rgb-primary-text-color), 0.04);
+        border-radius: 18px;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        border: 1px solid transparent;
+        transition: all 0.3s ease;
+        cursor: pointer;
+      }
+
+      .spool-card:hover {
+        background: rgba(var(--rgb-primary-text-color), 0.06);
+      }
+
+      .spool-card.active {
+        background: rgba(var(--rgb-primary-text-color), 0.08);
+        border: 1px solid rgba(var(--rgb-primary-color), 0.3);
+        box-shadow: 0 0 20px rgba(var(--rgb-primary-color), 0.2);
+      }
+
+      .ring-container {
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        position: relative;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+
+      .ring-outer {
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        position: absolute;
+        background: conic-gradient(
+          var(--spool-color) var(--spool-pct),
+          rgba(var(--rgb-primary-text-color), 0.08) 0
+        );
+      }
+
+      .ring-inner {
+        width: 66px;
+        height: 66px;
         background: var(--card-background-color);
+        border-radius: 50%;
+        position: relative;
+        z-index: 2;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
       }
-      .slot:active {
-        transform: scale(0.98);
+
+      .spool-label {
+        font-size: 10px;
+        color: var(--secondary-text-color);
+        text-transform: uppercase;
       }
-      .slot.selected {
-        border-color: var(--primary-color);
-        box-shadow: 0 0 0 1px var(--primary-color);
+      .spool-pct {
+        font-size: 16px;
+        font-weight: 700;
       }
-      .slot.selected::after {
+
+      .material-name {
+        font-size: 13px;
+        font-weight: 600;
+        text-align: center;
+      }
+      .color-name {
+        font-size: 11px;
+        color: var(--secondary-text-color);
+        text-align: center;
+      }
+
+      .status-badge {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        width: 8px;
+        height: 8px;
+        background: var(--success-color, #4caf50);
+        border-radius: 50%;
+        box-shadow: 0 0 8px var(--success-color, #4caf50);
+        animation: pulse-badge 2s infinite;
+      }
+
+      @keyframes pulse-badge {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.7; transform: scale(1.1); }
+      }
+
+      /* === COMPACT MODE === */
+      .compact-mode {
+        padding: 14px;
+      }
+
+      .compact-mode .header {
+        margin-bottom: 12px;
+      }
+
+      .cfs-rows {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .cfs-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .cfs-label {
+        width: 48px;
+        font-size: 11px;
+        color: var(--secondary-text-color);
+        font-weight: 600;
+      }
+
+      .spools-inline {
+        display: flex;
+        gap: 10px;
+        flex: 1;
+      }
+
+      .spool-mini {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s;
+      }
+
+      .spool-mini:hover {
+        transform: scale(1.05);
+      }
+
+      .spool-mini::before {
         content: '';
         position: absolute;
         inset: 0;
-        border-radius: 6px;
-        border: 2px solid var(--primary-color);
-        animation: pulse 2s infinite;
+        border-radius: 50%;
+        background: conic-gradient(
+          var(--spool-color) var(--spool-pct),
+          rgba(var(--rgb-primary-text-color), 0.08) 0
+        );
       }
-      @keyframes pulse {
-        0% { opacity: 0.6; transform: scale(1); }
-        50% { opacity: 0.1; transform: scale(1.05); }
-        100% { opacity: 0.6; transform: scale(1); }
+
+      .spool-mini::after {
+        content: '';
+        position: absolute;
+        inset: 4px;
+        background: var(--card-background-color);
+        border-radius: 50%;
+        z-index: 1;
       }
-      .spool-preview {
-        height: 8px;
-        border-radius: 4px;
-        width: 100%;
+
+      .spool-mini span {
+        position: relative;
+        z-index: 2;
       }
-      .slot-info {
-        font-size: 0.8em;
+
+      .spool-mini.active {
+        box-shadow: 0 0 10px var(--spool-color);
+      }
+
+      .spool-mini.active::after {
+        inset: 3px;
+      }
+
+      .env-mini {
+        width: 56px;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        font-size: 10px;
+        line-height: 1.4;
+        gap: 2px;
+      }
+
+      .env-mini .temp {
+        color: #ffb74d;
+        font-weight: 600;
+      }
+
+      .env-mini .hum {
+        color: #64b5f6;
+        font-weight: 600;
+      }
+
+      /* === EXTERNAL SECTION === */
+      .external-section {
+        margin-top: 16px;
+        padding-top: 14px;
+        border-top: 1px solid rgba(var(--rgb-primary-text-color), 0.08);
+      }
+
+      .external-normal {
+        background: rgba(var(--rgb-primary-text-color), 0.03);
+        border-radius: 16px;
+        padding: 12px 16px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .ext-icon {
+        width: 30px;
+        height: 30px;
+        background: var(--primary-color);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        font-weight: bold;
+        color: white;
+      }
+
+      .ext-info {
+        flex-grow: 1;
+      }
+
+      .ext-name {
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .ext-bar {
+        height: 4px;
+        background: rgba(var(--rgb-primary-text-color), 0.1);
+        border-radius: 2px;
+        margin-top: 6px;
         overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
       }
-      .compact .box-header { margin-bottom: 4px; }
-      .compact .slot { padding: 4px; gap: 2px; }
-      .compact .slot-info { font-size: 0.7em; }
+
+      .ext-fill {
+        height: 100%;
+        background: var(--primary-color);
+        transition: width 0.3s ease;
+      }
+
+      .ext-percent {
+        font-size: 12px;
+        color: var(--secondary-text-color);
+        font-weight: 600;
+      }
+
+      .external-compact {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .ext-dot {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        background: conic-gradient(var(--primary-color) 100%, rgba(var(--rgb-primary-text-color), 0.1) 0);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        font-weight: 600;
+        color: white;
+      }
+
+      .ext-compact-info {
+        flex: 1;
+      }
+
+      .ext-compact-info div:first-child {
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .ext-compact-info div:last-child {
+        font-size: 10px;
+        color: var(--secondary-text-color);
+      }
+
+      .no-data {
+        text-align: center;
+        color: var(--secondary-text-color);
+        padding: 20px;
+      }
     `;
 
     this._root.innerHTML = `
-      <ha-card class="${this._cfg.compact_view ? 'compact' : ''}">
+      <ha-card class="${isCompact ? 'compact-mode' : 'normal-mode'}">
         <style>${style}</style>
-        <div class="header">
-          <div class="title">${this._cfg.name || 'Creality Filament System'}</div>
-          <ha-icon icon="mdi:printer-3d"></ha-icon>
-        </div>
-        <div class="boxes-container" id="boxes"></div>
+        <div id="content"></div>
       </ha-card>
     `;
   }
@@ -166,7 +469,9 @@ class KCFSCard extends HTMLElement {
   _update() {
     if (!this._root || !this._hass) return;
 
-    const boxesContainer = this._root.getElementById("boxes");
+    const contentContainer = this._root.getElementById("content");
+    if (!contentContainer) return;
+
     const states = this._hass.states || {};
     const gObj = (eid) => (eid ? states?.[eid] : undefined);
     const fmtState = (st) => {
@@ -190,72 +495,65 @@ class KCFSCard extends HTMLElement {
       }
       return unit ? `${s} ${unit}` : s;
     };
-    const fmtWithUnit = (eid) => fmtState(gObj(eid));
 
-    const hasExplicitMapping = Object.keys(this._cfg || {}).some((key) => (key.startsWith("box") || key.startsWith("external_")) && this._cfg[key]);
+    // Collect box data
     const boxes = {};
+    for (let boxId = 0; boxId < 4; boxId += 1) {
+      const tempEid = this._cfg[`box${boxId}_temp`];
+      const humidityEid = this._cfg[`box${boxId}_humidity`];
+      const slots = [];
+
+      for (let slotId = 0; slotId < 4; slotId += 1) {
+        const filamentEid = this._cfg[`box${boxId}_slot${slotId}_filament`];
+        const colorEid = this._cfg[`box${boxId}_slot${slotId}_color`];
+        const percentEid = this._cfg[`box${boxId}_slot${slotId}_percent`];
+        if (!filamentEid && !colorEid && !percentEid) {
+          slots.push(null);
+          continue;
+        }
+
+        const filamentObj = gObj(filamentEid);
+        const colorObj = gObj(colorEid);
+        const percentObj = gObj(percentEid);
+        const name = filamentObj?.state;
+        const type = filamentObj?.attributes?.type;
+        const selected = filamentObj?.attributes?.selected;
+        const rawColor = colorObj?.state || filamentObj?.attributes?.color_hex;
+        const color = KCFSCard._sanitizeColor(rawColor);
+        const percent = KCFSCard._parsePercent(percentObj);
+        const percentText = fmtState(percentObj);
+
+        slots[slotId] = {
+          id: slotId,
+          boxId,
+          entity_id: filamentEid || colorEid || percentEid,
+          name,
+          type,
+          selected,
+          color,
+          percent,
+          percentText,
+        };
+      }
+
+      if (tempEid || humidityEid || slots.some((slot) => slot)) {
+        boxes[boxId] = {
+          id: boxId,
+          temp: fmtState(gObj(tempEid)),
+          humidity: fmtState(gObj(humidityEid)),
+          slots,
+        };
+      }
+    }
+
+    // Collect external data
     const external = {
       filament: this._cfg.external_filament,
       color: this._cfg.external_color,
       percent: this._cfg.external_percent,
     };
     const hasExternal = external.filament || external.color || external.percent;
-
-    if (hasExplicitMapping) {
-      for (let boxId = 0; boxId < 4; boxId += 1) {
-        const tempEid = this._cfg[`box${boxId}_temp`];
-        const humidityEid = this._cfg[`box${boxId}_humidity`];
-        const slots = [];
-
-        for (let slotId = 0; slotId < 4; slotId += 1) {
-          const filamentEid = this._cfg[`box${boxId}_slot${slotId}_filament`];
-          const colorEid = this._cfg[`box${boxId}_slot${slotId}_color`];
-          const percentEid = this._cfg[`box${boxId}_slot${slotId}_percent`];
-          if (!filamentEid && !colorEid && !percentEid) {
-            slots.push(null);
-            continue;
-          }
-
-          const filamentObj = gObj(filamentEid);
-          const colorObj = gObj(colorEid);
-          const percentObj = gObj(percentEid);
-          const name = filamentObj?.state;
-          const type = filamentObj?.attributes?.type;
-          const selected = filamentObj?.attributes?.selected;
-          const rawColor = colorObj?.state || filamentObj?.attributes?.color_hex;
-          const color = KCFSCard._sanitizeColor(rawColor);
-          const percentText = fmtState(percentObj);
-
-          slots[slotId] = {
-            id: slotId,
-            boxId,
-            entity_id: filamentEid || colorEid || percentEid,
-            name,
-            type,
-            selected,
-            color,
-            percentText,
-          };
-        }
-
-        if (tempEid || humidityEid || slots.some((slot) => slot)) {
-          boxes[boxId] = {
-            id: boxId,
-            temp: fmtWithUnit(tempEid),
-            humidity: fmtWithUnit(humidityEid),
-            slots,
-          };
-        }
-      }
-    }
-
-    const boxValues = Object.values(boxes);
-    if (boxValues.length === 0 && !hasExternal) {
-      boxesContainer.innerHTML = `<div style="text-align:center; color:var(--secondary-text-color)">No CFS data available</div>`;
-      return;
-    }
-
-    let html = "";
+    let externalData = null;
     if (hasExternal) {
       const filamentObj = gObj(external.filament);
       const colorObj = gObj(external.color);
@@ -265,56 +563,248 @@ class KCFSCard extends HTMLElement {
       const selected = filamentObj?.attributes?.selected;
       const rawColor = colorObj?.state || filamentObj?.attributes?.color_hex;
       const color = KCFSCard._sanitizeColor(rawColor);
+      const percent = KCFSCard._parsePercent(percentObj);
       const percentText = fmtState(percentObj);
-      const externalSlot = {
+
+      externalData = {
         id: 0,
-        boxId: 0,
+        boxId: -1,
         entity_id: external.filament || external.color || external.percent,
         name,
         type,
         selected,
         color,
+        percent,
         percentText,
-        hideActions: true,
       };
-      html += `
-        <div class="box">
-          <div class="box-header">
-            <span>External Filament</span>
-            <span></span>
-          </div>
-          <div class="slots-grid">
-            ${this._renderSlot(externalSlot)}
+    }
+
+    const boxValues = Object.values(boxes);
+    if (boxValues.length === 0 && !hasExternal) {
+      contentContainer.innerHTML = `<div class="no-data">No CFS data available</div>`;
+      return;
+    }
+
+    // Render based on mode
+    if (this._cfg.compact_view) {
+      contentContainer.innerHTML = this._renderCompactMode(boxValues, externalData);
+    } else {
+      contentContainer.innerHTML = this._renderNormalMode(boxValues, externalData);
+    }
+
+    this._attachEventHandlers();
+  }
+
+  _renderNormalMode(boxes, external) {
+    // Ensure we have at least one box
+    if (boxes.length === 0 && !external) {
+      return `<div class="no-data">No CFS data available</div>`;
+    }
+
+    // Unit selector (only if we have multiple boxes)
+    let unitSelector = '';
+    if (boxes.length > 1) {
+      unitSelector = `
+        <div class="unit-selector">
+          ${boxes.map((box, idx) => `
+            <button class="unit-btn ${idx === this._selectedCFS ? 'active' : ''}" data-cfs="${idx}">
+              CFS ${box.id + 1}
+            </button>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    // Get the selected box
+    const selectedBox = boxes[this._selectedCFS] || boxes[0];
+    if (!selectedBox && !external) {
+      return `<div class="no-data">No CFS data available</div>`;
+    }
+
+    // Header with environment info
+    let envInfo = '';
+    if (selectedBox) {
+      const tempStr = selectedBox.temp !== "—" ? selectedBox.temp : '';
+      const humStr = selectedBox.humidity !== "—" ? selectedBox.humidity : '';
+      const parts = [tempStr, humStr].filter(Boolean);
+      if (parts.length > 0) {
+        envInfo = `<div class="env-info">${parts.join(' • ')}</div>`;
+      }
+    }
+
+    const header = `
+      <div class="header">
+        <div class="title-section">
+          <div class="title">${this._cfg.name || 'Creality CFS'}</div>
+          <div class="subtitle">Multi-Material System</div>
+        </div>
+        ${envInfo}
+      </div>
+    `;
+
+    // Spool grid
+    let spoolGrid = '';
+    if (selectedBox) {
+      spoolGrid = `
+        <div class="spool-grid">
+          ${selectedBox.slots.map((slot) => this._renderSpoolCard(slot)).join('')}
+        </div>
+      `;
+    }
+
+    // External section
+    let externalSection = '';
+    if (external) {
+      const pct = external.percent !== null ? external.percent : 100;
+      const safeType = external.type && !["unknown", "unavailable"].includes(String(external.type).toLowerCase()) ? external.type : "PLA";
+      const safeName = external.name && !["unknown", "unavailable"].includes(String(external.name).toLowerCase()) ? external.name : "Generic";
+      externalSection = `
+        <div class="external-section">
+          <div class="external-normal" data-eid="${external.entity_id}">
+            <div class="ext-icon">EXT</div>
+            <div class="ext-info">
+              <div class="ext-name">${safeName} ${safeType}</div>
+              <div class="ext-bar">
+                <div class="ext-fill" style="width: ${pct}%"></div>
+              </div>
+            </div>
+            <div class="ext-percent">${external.percentText || '—'}</div>
           </div>
         </div>
       `;
     }
-    boxValues.forEach((box) => {
-      const tempStr = box.temp || "—";
-      const humidityStr = box.humidity || "—";
-      const headerParts = [];
-      if (tempStr !== "—") headerParts.push(tempStr);
-      if (humidityStr !== "—") headerParts.push(humidityStr);
-      const headerText = headerParts.length ? headerParts.join(" | ") : "—";
-      html += `
-        <div class="box">
-          <div class="box-header">
-            <span>Box ${box.id + 1}</span>
-            <span>${headerText}</span>
-          </div>
-          <div class="slots-grid">
-            ${box.slots.map((slot) => this._renderSlot(slot)).join("")}
+
+    return `${unitSelector}${header}${spoolGrid}${externalSection}`;
+  }
+
+  _renderCompactMode(boxes, external) {
+    if (boxes.length === 0 && !external) {
+      return `<div class="no-data">No CFS data available</div>`;
+    }
+
+    // CFS rows
+    let cfsRows = '';
+    if (boxes.length > 0) {
+      cfsRows = `
+        <div class="cfs-rows">
+          ${boxes.map((box) => this._renderCFSRow(box)).join('')}
+        </div>
+      `;
+    }
+
+    // External section
+    let externalSection = '';
+    if (external) {
+      const safeType = external.type && !["unknown", "unavailable"].includes(String(external.type).toLowerCase()) ? external.type : "PLA";
+      const safeName = external.name && !["unknown", "unavailable"].includes(String(external.name).toLowerCase()) ? external.name : "Generic";
+      externalSection = `
+        <div class="external-section">
+          <div class="external-compact" data-eid="${external.entity_id}">
+            <div class="ext-dot">EXT</div>
+            <div class="ext-compact-info">
+              <div>${safeName} ${safeType}</div>
+              <div>${external.percentText || '—'}</div>
+            </div>
           </div>
         </div>
       `;
+    }
+
+    return `${cfsRows}${externalSection}`;
+  }
+
+  _renderCFSRow(box) {
+    const tempStr = box.temp !== "—" ? box.temp : '';
+    const humStr = box.humidity !== "—" ? box.humidity : '';
+
+    let envHtml = '';
+    if (tempStr || humStr) {
+      envHtml = `
+        <div class="env-mini">
+          ${tempStr ? `<div class="temp">${tempStr}</div>` : ''}
+          ${humStr ? `<div class="hum">${humStr}</div>` : ''}
+        </div>
+      `;
+    }
+
+    return `
+      <div class="cfs-row">
+        <div class="cfs-label">CFS ${box.id + 1}</div>
+        <div class="spools-inline">
+          ${box.slots.map((slot) => this._renderSpoolMini(slot)).join('')}
+        </div>
+        ${envHtml}
+      </div>
+    `;
+  }
+
+  _renderSpoolCard(slot) {
+    if (!slot) {
+      return `<div class="spool-card"></div>`;
+    }
+
+    const isActive = slot.selected === 1 || slot.selected === true;
+    const color = slot.color || '#cccccc';
+    const pct = slot.percent !== null ? slot.percent : 0;
+    const pctDisplay = slot.percent !== null ? Math.round(slot.percent) : 0;
+    const safeType = slot.type && !["unknown", "unavailable"].includes(String(slot.type).toLowerCase()) ? slot.type : "PLA";
+    const safeName = slot.name && !["unknown", "unavailable"].includes(String(slot.name).toLowerCase()) ? slot.name : "—";
+
+    const badge = isActive ? '<div class="status-badge"></div>' : '';
+
+    return `
+      <div class="spool-card ${isActive ? 'active' : ''}" data-eid="${slot.entity_id}">
+        ${badge}
+        <div class="ring-container">
+          <div class="ring-outer" style="--spool-color: ${color}; --spool-pct: ${pct}%"></div>
+          <div class="ring-inner">
+            <span class="spool-pct">${pctDisplay}%</span>
+            <span class="spool-label">${safeType}</span>
+          </div>
+        </div>
+        <div class="material-name">${safeName}</div>
+        <div class="color-name">${slot.percentText || '—'}</div>
+      </div>
+    `;
+  }
+
+  _renderSpoolMini(slot) {
+    if (!slot) {
+      return `<div class="spool-mini" style="--spool-color: #333; --spool-pct: 0%"><span>—</span></div>`;
+    }
+
+    const isActive = slot.selected === 1 || slot.selected === true;
+    const color = slot.color || '#cccccc';
+    const pct = slot.percent !== null ? slot.percent : 0;
+    const pctDisplay = slot.percent !== null ? Math.round(slot.percent) : 0;
+
+    return `
+      <div class="spool-mini ${isActive ? 'active' : ''}" 
+           style="--spool-color: ${color}; --spool-pct: ${pct}%" 
+           data-eid="${slot.entity_id}">
+        <span>${pctDisplay}</span>
+      </div>
+    `;
+  }
+
+  _attachEventHandlers() {
+    // Unit selector buttons
+    this._root.querySelectorAll('.unit-btn').forEach(btn => {
+      btn.onclick = () => {
+        const cfsIdx = parseInt(btn.dataset.cfs, 10);
+        if (!isNaN(cfsIdx)) {
+          this._selectedCFS = cfsIdx;
+          this._update();
+        }
+      };
     });
 
-    boxesContainer.innerHTML = html;
-
-    // Attach events
-    this._root.querySelectorAll('.slot').forEach(el => {
+    // Spool cards and mini spools - show more info
+    this._root.querySelectorAll('.spool-card, .spool-mini, .external-normal, .external-compact').forEach(el => {
+      const eid = el.dataset.eid;
+      if (!eid) return;
+      
       el.onclick = () => {
-        const eid = el.dataset.eid;
         this.dispatchEvent(new CustomEvent("hass-more-info", {
           detail: { entityId: eid },
           bubbles: true,
@@ -322,27 +812,6 @@ class KCFSCard extends HTMLElement {
         }));
       };
     });
-
-  }
-
-  _renderSlot(slot) {
-    if (!slot) return '<div class="slot empty"></div>';
-    
-    const isSelected = slot.selected === 1 || slot.selected === true;
-    const color = slot.color || '#cccccc';
-    const safeName = slot.name && !["unknown", "unavailable"].includes(String(slot.name).toLowerCase()) ? slot.name : "---";
-    const safeType = slot.type && !["unknown", "unavailable"].includes(String(slot.type).toLowerCase()) ? slot.type : "---";
-    const percentState = slot.percentText;
-    const percentValid = percentState && !["unknown", "unavailable", "—"].includes(String(percentState).toLowerCase());
-    const percentText = percentValid ? ` - ${percentState}` : "";
-    
-    return `
-      <div class="slot ${isSelected ? 'selected' : ''}" data-eid="${slot.entity_id}">
-        <div class="spool-preview" style="background-color: ${color}"></div>
-        <div class="slot-info"><b>${safeType}</b></div>
-        <div class="slot-info">${safeName === 'N/A' ? 'No Filament' : safeName}${percentText}</div>
-      </div>
-    `;
   }
 
   getCardSize() {
@@ -483,7 +952,7 @@ class KCFSCardEditor extends HTMLElement {
       { name: "compact_view", selector: { boolean: {} } },
     ];
     themeForm.computeLabel = (s) => ({
-      compact_view: "Compact View (Hide Actions)",
+      compact_view: "Compact View (Mini Mode)",
     }[s.name] || s.name);
 
     themeForm.addEventListener("value-changed", (ev) => {
