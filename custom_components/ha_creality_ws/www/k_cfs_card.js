@@ -39,6 +39,18 @@ class KCFSCard extends HTMLElement {
     return Math.max(0, Math.min(100, n));
   }
 
+  static _getHumidityColor(humidityStr) {
+    if (!humidityStr || humidityStr === "—") return '#64b5f6'; // default blue
+    
+    const match = String(humidityStr).match(/(\d+\.?\d*)/);
+    if (!match) return '#64b5f6';
+    
+    const value = parseFloat(match[1]);
+    if (value < 40) return '#4caf50';   // Verde (0-39%) - Ideal
+    if (value < 60) return '#ff9800';   // Laranja (40-59%) - Atenção
+    return '#f44336';                    // Vermelho (60-100%) - Crítico
+  }
+
   static getStubConfig() {
     const cfg = {
       name: "CFS",
@@ -356,8 +368,8 @@ class KCFSCard extends HTMLElement {
       }
 
       .env-mini .hum {
-        color: #64b5f6;
         font-weight: 600;
+        /* Cor aplicada dinamicamente via inline style */
       }
 
       /* === EXTERNAL SECTION === */
@@ -537,10 +549,12 @@ class KCFSCard extends HTMLElement {
       }
 
       if (tempEid || humidityEid || slots.some((slot) => slot)) {
+        const humidityFormatted = fmtState(gObj(humidityEid));
         boxes[boxId] = {
           id: boxId,
           temp: fmtState(gObj(tempEid)),
-          humidity: fmtState(gObj(humidityEid)),
+          humidity: humidityFormatted,
+          humidityColor: KCFSCard._getHumidityColor(humidityFormatted),
           slots,
         };
       }
@@ -626,9 +640,12 @@ class KCFSCard extends HTMLElement {
     if (selectedBox) {
       const tempStr = selectedBox.temp !== "—" ? selectedBox.temp : '';
       const humStr = selectedBox.humidity !== "—" ? selectedBox.humidity : '';
-      const parts = [tempStr, humStr].filter(Boolean);
-      if (parts.length > 0) {
-        envInfo = `<div class="env-info">${parts.join(' • ')}</div>`;
+      
+      if (tempStr || humStr) {
+        const tempHtml = tempStr ? `<span class="env-temp">${tempStr}</span>` : '';
+        const humHtml = humStr ? `<span class="env-hum" style="color: ${selectedBox.humidityColor}">${humStr}</span>` : '';
+        const separator = tempStr && humStr ? ' <span style="color: var(--divider-color)">•</span> ' : '';
+        envInfo = `<div class="env-info">${tempHtml}${separator}${humHtml}</div>`;
       }
     }
 
@@ -722,7 +739,7 @@ class KCFSCard extends HTMLElement {
       envHtml = `
         <div class="env-mini">
           ${tempStr ? `<div class="temp">${tempStr}</div>` : ''}
-          ${humStr ? `<div class="hum">${humStr}</div>` : ''}
+          ${humStr ? `<div class="hum" style="color: ${box.humidityColor}">${humStr}</div>` : ''}
         </div>
       `;
     }
