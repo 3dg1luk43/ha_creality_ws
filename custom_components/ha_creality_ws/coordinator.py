@@ -3,7 +3,10 @@ import logging
 import asyncio
 from typing import Any, Iterable
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from .ws_client import KClient
+from .utils import ModelDetection
 from .const import (
     DOMAIN, 
     STALE_AFTER_SECS,
@@ -14,12 +17,17 @@ from .const import (
     CONF_MINUTES_TO_END_VALUE,
     CONF_POLLING_RATE,
     DEFAULT_POLLING_RATE,
+    MR_PORT,
+    MR_POLL_INTERVAL,
+    MR_POLL_TIMEOUT,
+    MR_QUERY_PARAMS,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+    """Coordinator to manage connection and data for the printer."""
     def __init__(self, hass, host: str, power_switch: str | None = None, config_entry_id: str | None = None):
         super().__init__(hass, _LOGGER, name=f"{DOMAIN}@{host}", update_interval=None)
         self.client = KClient(host, self._handle_message)
@@ -47,9 +55,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._notified_completed = False
         self._notified_minutes_to_end = False
         self._last_error_code = 0
+        self._last_mr_poll = 0.0
+        
+        # Caches
+        self._is_k2_base: bool | None = None
 
         if self._config_entry_id:
-             self._load_options()
+            self._load_options()
 
         # Only enable power detection if a switch is configured
         if self._power_switch_entity:
@@ -102,6 +114,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._notify_listeners_threadsafe()
         
     def power_is_off(self) -> bool:
+        """Check if the power switch is off."""
         eid = self._power_switch_entity
         if not eid:
             return False
@@ -111,10 +124,11 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return True # FAIL-SAFE: Assume OFF if switch entity isn't ready
         is_off = str(st.state).lower() in ("off", "unavailable", "unknown")
         if is_off:
-             _LOGGER.debug("Power switch %s is %s -> skipping connection", eid, st.state)
+            _LOGGER.debug("Power switch %s is %s -> skipping connection", eid, st.state)
         return is_off
 
     async def async_start(self) -> None:
+        """Start the WebSocket connection."""
         if self.power_is_off():
             _LOGGER.info("Power switch is OFF; deferring WS connect")
             self._last_power_off = True
@@ -133,9 +147,11 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return True
         
     async def async_stop(self) -> None:
+        """Stop the WebSocket connection."""
         await self.client.stop()
         
     async def wait_first_connect(self, timeout: float = 5.0) -> bool:
+        """Wait for the first successful connection."""
         return await self.client.wait_first_connect(timeout=timeout)
     
     async def wait_for_fields(self, fields: Iterable[str], timeout: float = 6.0) -> bool:
@@ -294,6 +310,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _handle_message(self, payload: dict[str, Any]) -> None:
         """Handle incoming WebSocket telemetry data."""
+        # Suppress broken targetBoxTemp:0 from K2 Base port 9999
+        if self._is_k2_base is None:
+            self._is_k2_base = ModelDetection(payload).is_k2_base
+             
+        if (payload.get("targetBoxTemp") == 0) and self._is_k2_base:
+            payload.pop("targetBoxTemp")
+
         # Check if boxsInfo is present and we haven't discovered CFS entities yet
         had_cfs = "boxsInfo" in self.data
         self.data.update(payload)
@@ -301,7 +324,6 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         
         if has_cfs and not had_cfs:
             _LOGGER.info("CFS detected in telemetry, triggering dynamic discovery")
-            from homeassistant.helpers.dispatcher import async_dispatcher_send
             async_dispatcher_send(self.hass, f"{DOMAIN}_new_entities_{self._config_entry_id}")
 
         self._recompute_paused_from_telemetry()
@@ -314,6 +336,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # --- Notifications ---
         await self._check_notifications(payload)
+
+        # --- Moonraker Fallback (K2 Base) ---
+        if self._is_k2_base:
+            now = self.hass.loop.time()
+            if (now - getattr(self, "_last_mr_poll", 0) > MR_POLL_INTERVAL):
+                self._last_mr_poll = now
+                self.hass.async_create_task(self._poll_moonraker_extras())
         
         # --- Conditional Throttling (printing only) ---
         # Always update immediately when NOT printing; throttle entity updates only when printing
@@ -325,7 +354,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_update_ts = now
         self.async_update_listeners()
 
-    async def _check_notifications(self, payload: dict[str, Any]):
+    async def _check_notifications(self, _payload: dict[str, Any]):
         """Check logic for sending notifications."""
         if not self._notify_device:
             return
@@ -410,3 +439,29 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self.hass.services.async_call(domain, service, service_data)
             except Exception as e:
                 _LOGGER.error("Failed to send notification: %s", e)
+
+    async def _poll_moonraker_extras(self):
+        """Poll Moonraker for missing telemetry fields (e.g. chamber target)."""
+        host = self.client._host
+        # Only poll if we have a host and integration is still active
+        if not host or self.power_is_off():
+            return
+            
+        url = f"http://{host}:{MR_PORT}/printer/objects/query?{MR_QUERY_PARAMS}"
+        try:
+            session = async_get_clientsession(self.hass)
+            async with session.get(url, timeout=MR_POLL_TIMEOUT) as resp:
+                if resp.status == 200:
+                    res = await resp.json()
+                    status = res.get("result", {}).get("status", {})
+                    fan = status.get("temperature_fan chamber_fan")
+                    if fan and "target" in fan:
+                        target = fan["target"]
+                        # Only update if it's different to avoid unnecessary listener triggers
+                        if self.data.get("targetBoxTemp") != target:
+                            _LOGGER.debug("Updated targetBoxTemp from Moonraker: %s", target)
+                            self.data["targetBoxTemp"] = target
+                            self.async_update_listeners()
+        except Exception as e:
+            # Moonraker might be disabled or port 7125 blocked; fail silently but log debug
+            _LOGGER.debug("Failed to poll Moonraker for extras: %s", e)
