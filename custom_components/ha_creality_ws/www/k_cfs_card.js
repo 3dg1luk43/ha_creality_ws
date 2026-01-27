@@ -691,20 +691,23 @@ class KCFSCard extends HTMLElement {
     // External section
     let externalSection = '';
     if (external) {
-      const pct = external.percent !== null ? external.percent : 100;
-      const safeType = external.type && !["unknown", "unavailable"].includes(String(external.type).toLowerCase()) ? external.type : "PLA";
-      const safeName = external.name && !["unknown", "unavailable"].includes(String(external.name).toLowerCase()) ? external.name : "Generic";
+      const safeType = external.type && !["unknown", "unavailable", "—", "-"].includes(String(external.type).toLowerCase()) ? external.type : "—";
+      const safeName = external.name && !["unknown", "unavailable", "—", "-"].includes(String(external.name).toLowerCase()) ? external.name : "—";
+      const hasFilament = safeType !== "—" && safeName !== "—";
+      const pct = hasFilament && external.percent !== null ? external.percent : 0;
+      const percentTextDisplay = hasFilament ? (external.percentText || '—') : '—';
+      const displayName = hasFilament ? `${safeName} ${safeType}` : '—';
       externalSection = `
         <div class="external-section">
           <div class="external-normal" data-eid="${external.entity_id}">
             <div class="ext-icon">EXT</div>
             <div class="ext-info">
-              <div class="ext-name">${safeName} ${safeType}</div>
+              <div class="ext-name">${displayName}</div>
               <div class="ext-bar">
                 <div class="ext-fill" style="width: ${pct}%"></div>
               </div>
             </div>
-            <div class="ext-percent">${external.percentText || '—'}</div>
+            <div class="ext-percent">${percentTextDisplay}</div>
           </div>
         </div>
       `;
@@ -731,15 +734,18 @@ class KCFSCard extends HTMLElement {
     // External section
     let externalSection = '';
     if (external) {
-      const safeType = external.type && !["unknown", "unavailable"].includes(String(external.type).toLowerCase()) ? external.type : "PLA";
-      const safeName = external.name && !["unknown", "unavailable"].includes(String(external.name).toLowerCase()) ? external.name : "Generic";
+      const safeType = external.type && !["unknown", "unavailable", "—", "-"].includes(String(external.type).toLowerCase()) ? external.type : "—";
+      const safeName = external.name && !["unknown", "unavailable", "—", "-"].includes(String(external.name).toLowerCase()) ? external.name : "—";
+      const hasFilament = safeType !== "—" && safeName !== "—";
+      const percentTextDisplay = hasFilament ? (external.percentText || '—') : '—';
+      const displayName = hasFilament ? `${safeName} ${safeType}` : '—';
       externalSection = `
         <div class="external-section">
           <div class="external-compact" data-eid="${external.entity_id}">
             <div class="ext-dot">EXT</div>
             <div class="ext-compact-info">
-              <div>${safeName} ${safeType}</div>
-              <div>${external.percentText || '—'}</div>
+              <div>${displayName}</div>
+              <div>${percentTextDisplay}</div>
             </div>
           </div>
         </div>
