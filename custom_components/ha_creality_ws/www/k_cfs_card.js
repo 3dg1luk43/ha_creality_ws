@@ -55,6 +55,7 @@ class KCFSCard extends HTMLElement {
     const cfg = {
       name: "CFS",
       compact_view: false,
+      show_type_in_mini: false,
       external_filament: "",
       external_color: "",
       external_percent: "",
@@ -350,6 +351,25 @@ class KCFSCard extends HTMLElement {
 
       .spool-mini.active::after {
         inset: 3px;
+      }
+
+      .spool-mini-wrapper {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+      }
+
+      .spool-mini-type {
+        font-size: 8px;
+        color: var(--secondary-text-color);
+        text-transform: uppercase;
+        font-weight: 600;
+        max-width: 40px;
+        text-align: center;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .env-mini {
@@ -785,7 +805,12 @@ class KCFSCard extends HTMLElement {
   }
 
   _renderSpoolMini(slot) {
+    const showType = this._cfg.show_type_in_mini;
+    
     if (!slot) {
+      if (showType) {
+        return `<div class="spool-mini-wrapper"><div class="spool-mini" style="--spool-color: #333; --spool-pct: 0%"><span>—</span></div><div class="spool-mini-type">—</div></div>`;
+      }
       return `<div class="spool-mini" style="--spool-color: #333; --spool-pct: 0%"><span>—</span></div>`;
     }
 
@@ -793,6 +818,20 @@ class KCFSCard extends HTMLElement {
     const color = slot.color || '#cccccc';
     const pct = slot.percent !== null ? slot.percent : 0;
     const pctDisplay = slot.percent !== null ? Math.round(slot.percent) : 0;
+    const safeType = slot.type && !["unknown", "unavailable"].includes(String(slot.type).toLowerCase()) ? slot.type : "—";
+
+    if (showType) {
+      return `
+        <div class="spool-mini-wrapper">
+          <div class="spool-mini ${isActive ? 'active' : ''}" 
+               style="--spool-color: ${color}; --spool-pct: ${pct}%" 
+               data-eid="${slot.entity_id}">
+            <span>${pctDisplay}</span>
+          </div>
+          <div class="spool-mini-type">${safeType}</div>
+        </div>
+      `;
+    }
 
     return `
       <div class="spool-mini ${isActive ? 'active' : ''}" 
@@ -816,7 +855,7 @@ class KCFSCard extends HTMLElement {
     });
 
     // Spool cards and mini spools - show more info
-    this._root.querySelectorAll('.spool-card, .spool-mini, .external-normal, .external-compact').forEach(el => {
+    this._root.querySelectorAll('.spool-card, .spool-mini, .spool-mini-wrapper .spool-mini, .external-normal, .external-compact').forEach(el => {
       const eid = el.dataset.eid;
       if (!eid) return;
       
@@ -966,9 +1005,11 @@ class KCFSCardEditor extends HTMLElement {
     themeForm.data = this._cfg;
     themeForm.schema = [
       { name: "compact_view", selector: { boolean: {} } },
+      { name: "show_type_in_mini", selector: { boolean: {} } },
     ];
     themeForm.computeLabel = (s) => ({
       compact_view: "Compact View (Mini Mode)",
+      show_type_in_mini: "Show Filament Type in Mini Mode",
     }[s.name] || s.name);
 
     themeForm.addEventListener("value-changed", (ev) => {
