@@ -781,10 +781,14 @@ class KCFSCard extends HTMLElement {
 
     const isActive = slot.selected === 1 || slot.selected === true;
     const color = slot.color || '#cccccc';
-    const pct = slot.percent !== null ? slot.percent : 0;
-    const pctDisplay = slot.percent !== null ? Math.round(slot.percent) : 0;
-    const safeType = slot.type && !["unknown", "unavailable"].includes(String(slot.type).toLowerCase()) ? slot.type : "PLA";
-    const safeName = slot.name && !["unknown", "unavailable"].includes(String(slot.name).toLowerCase()) ? slot.name : "—";
+    const safeType = slot.type && !["unknown", "unavailable", "—", "-"].includes(String(slot.type).toLowerCase()) ? slot.type : "—";
+    const safeName = slot.name && !["unknown", "unavailable", "—", "-"].includes(String(slot.name).toLowerCase()) ? slot.name : "—";
+    
+    // If no filament (type is "—" or name is "—"), show 0% regardless of actual value
+    const hasFilament = safeType !== "—" && safeName !== "—";
+    const pct = hasFilament && slot.percent !== null ? slot.percent : 0;
+    const pctDisplay = hasFilament && slot.percent !== null ? Math.round(slot.percent) : 0;
+    const percentTextDisplay = hasFilament ? (slot.percentText || '—') : '—';
 
     const badge = isActive ? '<div class="status-badge"></div>' : '';
 
@@ -799,7 +803,7 @@ class KCFSCard extends HTMLElement {
           </div>
         </div>
         <div class="material-name">${safeName}</div>
-        <div class="color-name">${slot.percentText || '—'}</div>
+        <div class="color-name">${percentTextDisplay}</div>
       </div>
     `;
   }
@@ -816,9 +820,13 @@ class KCFSCard extends HTMLElement {
 
     const isActive = slot.selected === 1 || slot.selected === true;
     const color = slot.color || '#cccccc';
-    const pct = slot.percent !== null ? slot.percent : 0;
-    const pctDisplay = slot.percent !== null ? Math.round(slot.percent) : 0;
-    const safeType = slot.type && !["unknown", "unavailable"].includes(String(slot.type).toLowerCase()) ? slot.type : "—";
+    const safeType = slot.type && !["unknown", "unavailable", "—", "-"].includes(String(slot.type).toLowerCase()) ? slot.type : "—";
+    const safeName = slot.name && !["unknown", "unavailable", "—", "-"].includes(String(slot.name).toLowerCase()) ? slot.name : null;
+    
+    // If no filament (type is "—" or name is empty/dash), show 0% regardless of actual value
+    const hasFilament = safeType !== "—" && safeName !== null;
+    const pct = hasFilament && slot.percent !== null ? slot.percent : 0;
+    const pctDisplay = hasFilament && slot.percent !== null ? Math.round(slot.percent) : 0;
 
     if (showType) {
       return `
