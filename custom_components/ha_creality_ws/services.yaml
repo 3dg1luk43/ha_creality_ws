@@ -22,3 +22,105 @@ request_cfs_info:
           integration: ha_creality_ws
           multiple: true
 
+set_cfs_material:
+  name: Set CFS Material
+  description: Modify CFS material/filament settings for a specific box and slot.
+  fields:
+    device_id:
+      name: Device
+      description: The printer device to update.
+      required: true
+      selector:
+        device:
+          integration: ha_creality_ws
+    box_id:
+      name: Box ID
+      description: CFS box number (1-4). Use 0 for external filament.
+      required: true
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 4
+          mode: box
+    slot_id:
+      name: Slot ID
+      description: Slot number within the box (0-3).
+      required: true
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 3
+          mode: box
+    type:
+      name: Material Type
+      description: Type of filament (e.g., PLA, PETG, ABS, TPU).
+      required: true
+      default: "PLA"
+      selector:
+        text:
+    name:
+      name: Material Name
+      description: Name/brand of the filament.
+      required: false
+      default: "Ender-PLA"
+      selector:
+        text:
+    vendor:
+      name: Vendor
+      description: Manufacturer/vendor name.
+      required: false
+      default: "Creality"
+      selector:
+        text:
+    color:
+      name: Color
+      description: Filament color in hex format (e.g., #06c84f).
+      required: true
+      default: "#06c84f"
+      selector:
+        color_rgb:
+    min_temp:
+      name: Minimum Temperature
+      description: Minimum printing temperature in Celsius.
+      required: false
+      default: 190.0
+      selector:
+        number:
+          min: 150
+          max: 300
+          step: 1
+          unit_of_measurement: "°C"
+          mode: box
+    max_temp:
+      name: Maximum Temperature
+      description: Maximum printing temperature in Celsius.
+      required: false
+      default: 240.0
+      selector:
+        number:
+          min: 150
+          max: 350
+          step: 1
+          unit_of_measurement: "°C"
+          mode: box
+    pressure:
+      name: Pressure Advance
+      description: Pressure advance value.
+      required: false
+      default: 0.04
+      selector:
+        number:
+          min: 0.0
+          max: 1.0
+          step: 0.01
+          mode: box
+    rfid:
+      name: RFID
+      description: RFID tag value (leave empty if not using RFID).
+      required: false
+      default: ""
+      selector:
+        text:
+

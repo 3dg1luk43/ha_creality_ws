@@ -28,6 +28,7 @@ def _register_static_path(hass: HomeAssistant, url_path: str, path: str) -> None
         # exceptions (duplicate routes, etc.) are handled and don't generate
         # un-retrieved task exceptions which show as noisy errors in the log.
         if hasattr(hass.http, "async_register_static_paths"):
+
             async def _safe_register():
                 try:
                     await hass.http.async_register_static_paths(
@@ -37,7 +38,12 @@ def _register_static_path(hass: HomeAssistant, url_path: str, path: str) -> None
                     # Duplicate route registrations raise RuntimeError in aiohttp
                     # when the same method/path is already present. Handle it
                     # gracefully and log at debug level.
-                    _LOGGER.debug("Failed to async register static path %s -> %s: %s", url_path, path, exc)
+                    _LOGGER.debug(
+                        "Failed to async register static path %s -> %s: %s",
+                        url_path,
+                        path,
+                        exc,
+                    )
 
             hass.async_create_task(_safe_register())
             return
@@ -64,10 +70,14 @@ async def _init_resource(hass: HomeAssistant, url: str, ver: str) -> bool:
     try:
         # Import lazily to keep module import safe during tests
         from homeassistant.components.frontend import add_extra_js_url
-        from homeassistant.components.lovelace.resources import ResourceStorageCollection
+        from homeassistant.components.lovelace.resources import (
+            ResourceStorageCollection,
+        )
     except Exception:
         # If imports fail here (tests/local static analysis), skip auto-registration
-        _LOGGER.debug("Lovlace resource helpers unavailable; skipping auto resource init")
+        _LOGGER.debug(
+            "Lovlace resource helpers unavailable; skipping auto resource init"
+        )
         return False
 
     lovelace = hass.data.get("lovelace")
@@ -92,7 +102,9 @@ async def _init_resource(hass: HomeAssistant, url: str, ver: str) -> bool:
 
         _LOGGER.debug("Update lovelace resource to: %s", url2)
         if isinstance(resources, ResourceStorageCollection):
-            await resources.async_update_item(item["id"], {"res_type": "module", "url": url2})
+            await resources.async_update_item(
+                item["id"], {"res_type": "module", "url": url2}
+            )
         else:
             item["url"] = url2
 
@@ -116,9 +128,13 @@ async def _migrate_local_resources(
     Returns the number of resources migrated.
     """
     try:
-        from homeassistant.components.lovelace.resources import ResourceStorageCollection
+        from homeassistant.components.lovelace.resources import (
+            ResourceStorageCollection,
+        )
     except Exception:
-        _LOGGER.debug("Lovelace helpers unavailable; skipping local -> integration migration")
+        _LOGGER.debug(
+            "Lovelace helpers unavailable; skipping local -> integration migration"
+        )
         return 0
 
     lovelace = hass.data.get("lovelace")
@@ -151,7 +167,9 @@ async def _migrate_local_resources(
         _LOGGER.info("Migrating Lovelace resource from %s to %s", u, url2)
         try:
             if isinstance(resources, ResourceStorageCollection):
-                await resources.async_update_item(item["id"], {"res_type": "module", "url": url2})
+                await resources.async_update_item(
+                    item["id"], {"res_type": "module", "url": url2}
+                )
             else:
                 item["url"] = url2
             migrated += 1
@@ -181,6 +199,18 @@ class CrealityCardRegistration:
         We do NOT auto-create or modify Lovelace resources to avoid clobbering user
         dashboards. Instead we log the integration-hosted URL for manual registration.
         """
+        # First, register the entire www directory to serve all static files (images, etc.)
+        www_dir_path = Path(__file__).parent / "www"
+        if www_dir_path.exists():
+            _register_static_path(
+                self.hass, INTEGRATION_URL_BASE.rstrip("/"), str(www_dir_path)
+            )
+            _LOGGER.debug(
+                "Registered www directory at %s -> %s",
+                INTEGRATION_URL_BASE,
+                www_dir_path,
+            )
+
         for card_name in CARDS:
             integration_url = f"{INTEGRATION_URL_BASE}{card_name}"
             src = self._src_path(card_name)
@@ -193,7 +223,9 @@ class CrealityCardRegistration:
                 # fall back to original frontend location when 'www' is not present
                 serve_path = str(src)
 
-            _register_static_path(self.hass, integration_url, serve_path)
+            # Note: Individual file registration is not needed since we registered the directory
+            # but we keep it for backwards compatibility
+            # _register_static_path(self.hass, integration_url, serve_path)
 
             # Remove old copy from /config/www if present (cleanup of previous installs)
             try:
@@ -203,7 +235,9 @@ class CrealityCardRegistration:
                         dst.unlink()
                         _LOGGER.info("Removed old /config/www copy: %s", dst)
                     except Exception as exc:  # pragma: no cover - best-effort cleanup
-                        _LOGGER.debug("Failed to remove old /config/www copy %s: %s", dst, exc)
+                        _LOGGER.debug(
+                            "Failed to remove old /config/www copy %s: %s", dst, exc
+                        )
             except Exception:
                 _LOGGER.debug("Could not determine config www path to cleanup old card")
 
@@ -211,20 +245,34 @@ class CrealityCardRegistration:
             # update/create the single resource URL and includes a version query param.
             try:
                 await _init_resource(self.hass, integration_url, _VERSION)
-                _LOGGER.debug("Auto-registered lovelace resource for %s", integration_url)
+                _LOGGER.debug(
+                    "Auto-registered lovelace resource for %s", integration_url
+                )
             except Exception:
-                _LOGGER.debug("Auto-registration of lovelace resource failed for %s", integration_url)
+                _LOGGER.debug(
+                    "Auto-registration of lovelace resource failed for %s",
+                    integration_url,
+                )
 
             # If there are existing lovelace resources that still point to /local/...,
             # migrate them to the integration-hosted URL to avoid leaving stale references.
             try:
                 migrated = await _migrate_local_resources(
-                    self.hass, f"/local/{LOCAL_SUBDIR}/{card_name}", integration_url, _VERSION
+                    self.hass,
+                    f"/local/{LOCAL_SUBDIR}/{card_name}",
+                    integration_url,
+                    _VERSION,
                 )
                 if migrated:
-                    _LOGGER.info("Migrated %d Lovelace /local/ resources to integration-hosted URL", migrated)
+                    _LOGGER.info(
+                        "Migrated %d Lovelace /local/ resources to integration-hosted URL",
+                        migrated,
+                    )
             except Exception:
-                _LOGGER.debug("Local-to-integration resource migration failed for %s", integration_url)
+                _LOGGER.debug(
+                    "Local-to-integration resource migration failed for %s",
+                    integration_url,
+                )
 
         # Fix any base-only resource entries (e.g. "/ha_creality_ws/?v=1") by expanding
         # them into the concrete card file URL(s).
@@ -243,13 +291,17 @@ class CrealityCardRegistration:
         return
 
 
-async def _expand_base_resource(hass: HomeAssistant, base: str, card_names: list[str]) -> int:
+async def _expand_base_resource(
+    hass: HomeAssistant, base: str, card_names: list[str]
+) -> int:
     """Expand any resources that point to `base` (with no filename) into per-card URLs.
 
     Returns number of newly created/updated resource entries.
     """
     try:
-        from homeassistant.components.lovelace.resources import ResourceStorageCollection
+        from homeassistant.components.lovelace.resources import (
+            ResourceStorageCollection,
+        )
     except Exception:
         _LOGGER.debug("Lovelace helpers unavailable; skipping base resource expansion")
         return 0
@@ -287,7 +339,9 @@ async def _expand_base_resource(hass: HomeAssistant, base: str, card_names: list
             # Update the existing item to the first target and create the rest
             first = targets[0]
             if isinstance(resources, ResourceStorageCollection):
-                await resources.async_update_item(item["id"], {"res_type": "module", "url": first})
+                await resources.async_update_item(
+                    item["id"], {"res_type": "module", "url": first}
+                )
             else:
                 item["url"] = first
             created += 1

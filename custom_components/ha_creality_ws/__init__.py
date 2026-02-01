@@ -440,11 +440,82 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
             hass,
             title="CFS Info Request",
             message=f"Request sent to {success_count} printer(s).\nFailures: {fail_count}",
-            notification_id="cfs_request_result"
+            notification_id="cfs_request_result",
         )
+
+    async def set_cfs_material(call: ServiceCall) -> None:
+        """Service to modify CFS material/filament settings."""
+        device_id = call.data.get("device_id")
+        if not device_id:
+            _LOGGER.error("set_cfs_material: device_id is required")
+            return
+
+        # Find the coordinator for this device
+        dev_reg = dr.async_get(hass)
+        device = dev_reg.async_get(device_id)
+        if not device:
+            _LOGGER.error("set_cfs_material: device not found: %s", device_id)
+            return
+
+        # Get the config entry for this device
+        target_coord = None
+        for entry_id in device.config_entries:
+            coord = hass.data[DOMAIN].get(entry_id)
+            if isinstance(coord, KCoordinator):
+                target_coord = coord
+                break
+
+        if not target_coord:
+            _LOGGER.error(
+                "set_cfs_material: coordinator not found for device %s", device_id
+            )
+            return
+
+        # Build the modifyMaterial payload
+        material_data = {
+            "id": call.data.get("slot_id", 0),
+            "boxId": call.data.get("box_id", 0),
+            "rfid": call.data.get("rfid", ""),
+            "type": call.data.get("type", "PLA"),
+            "vendor": call.data.get("vendor", "Creality"),
+            "name": call.data.get("name", "Ender-PLA"),
+            "color": call.data.get("color", "#06c84f"),
+            "minTemp": float(call.data.get("min_temp", 190.0)),
+            "maxTemp": float(call.data.get("max_temp", 240.0)),
+            "pressure": float(call.data.get("pressure", 0.04)),
+        }
+
+        try:
+            _LOGGER.info(
+                "Sending modifyMaterial to %s: %s",
+                target_coord.client.host,
+                material_data,
+            )
+            await target_coord.client.send_set_retry(modifyMaterial=material_data)
+
+            # Notify success
+            pn_async_create(
+                hass,
+                title="CFS Material Updated",
+                message=f"Material settings for Box {material_data['boxId']} Slot {material_data['id']} updated successfully.",
+                notification_id="cfs_material_update",
+            )
+        except Exception as exc:
+            _LOGGER.error(
+                "Failed to set CFS material for %s: %s", target_coord.client.host, exc
+            )
+            pn_async_create(
+                hass,
+                title="CFS Material Update Failed",
+                message=f"Failed to update material: {str(exc)}",
+                notification_id="cfs_material_error",
+            )
 
     if not hass.services.has_service(DOMAIN, "request_cfs_info"):
         hass.services.async_register(DOMAIN, "request_cfs_info", request_cfs_info)
+
+    if not hass.services.has_service(DOMAIN, "set_cfs_material"):
+        hass.services.async_register(DOMAIN, "set_cfs_material", set_cfs_material)
 
 
 async def _register_diagnostic_service(hass: HomeAssistant) -> None:
