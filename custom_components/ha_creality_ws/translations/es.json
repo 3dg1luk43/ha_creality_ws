@@ -1,0 +1,46 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Conectar a la impresora Creality",
+        "description": "Introduce la dirección IP de tu impresora Creality de la serie K. La impresora debe estar desbloqueada (no se requiere acceso de superusuario) y en la misma red.",
+        "data": {
+          "host": "Dirección IP",
+          "name": "Nombre descriptivo"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Error al conectar con la impresora. Asegúrate de que la dirección IP sea correcta y de que la impresora esté encendida.",
+      "not_K": "Conexión rechazada o no es una impresora Creality de la serie K compatible.",
+      "already_configured": "Esta impresora ya está configurada."
+    },
+    "abort": {
+      "already_configured": "El dispositivo ya está configurado",
+      "cannot_connect": "Error de conexión",
+      "not_K": "No es una impresora de la serie K"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configuración de la impresora",
+        "description": "Configura los ajustes avanzados para tu impresora.",
+        "data": {
+          "host": "Dirección IP de la impresora",
+          "power_switch_enabled": "Activar la detección del interruptor de encendido",
+          "power_switch": "Entidad del interruptor de encendido",
+          "camera_mode": "Modo de transmisión de la cámara",
+          "go2rtc_url": "Servidor o dirección externa de go2rtc (si es necesario)",
+          "go2rtc_port": "Puerto externo de go2rtc",
+          "polling_rate": "Frecuencia de actualización (segundos, 0 = tiempo real)",
+          "notify_device": "Dispositivo de notificación",
+          "notify_completed": "Notificar al finalizar",
+          "notify_error": "Notificar en caso de error",
+          "notify_minutes_to_end": "Notificar antes de finalizar",
+          "minutes_to_end_value": "Minutos antes de finalizar"
+        }
+      }
+    }
+  }
+}
