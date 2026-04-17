@@ -51,23 +51,34 @@ KClient = ws_client_module.KClient
 # ---------------------------------------------------------------------------
 
 def _make_failing_connect(call_counter: list[int], exc: Exception | None = None):
-    """Return a mock for ``websockets.connect`` that records calls and raises exc."""
+    """Return a mock for ``websockets.connect`` that records calls and raises *exc*.
+
+    Each time the returned context manager is entered, ``1`` is appended to
+    *call_counter* so tests can assert how many connection attempts were made.
+    If *exc* is ``None`` a minimal fake WebSocket is yielded that immediately
+    closes the ``async for`` loop; otherwise *exc* is raised before yielding.
+    """
 
     @asynccontextmanager
     async def _fake_connect(url, **kwargs):
+        """Async context manager that records the call and optionally raises."""
         call_counter.append(1)
         if exc is not None:
             raise exc
         # Yield a minimal ws stub that immediately closes the async-for loop
         class _FakeWS:
+            """Minimal WebSocket stub used by the failing-connect helper."""
+
             def __aiter__(self):
+                """Return self as the async iterator."""
                 return self
 
             async def __anext__(self):
+                """Immediately signal the end of the message stream."""
                 raise StopAsyncIteration
 
             async def close(self, *a, **k):
-                pass
+                """No-op close so teardown code does not raise."""
 
         yield _FakeWS()
 
@@ -81,10 +92,11 @@ def test_force_connect_attempts_connection_when_power_on():
     """With _force_connect=True and power ON, the loop must call websockets.connect."""
 
     async def run():
+        """Run the test coroutine inside a fresh event loop."""
         call_counter: list[int] = []
 
         async def _on_msg(payload):
-            pass
+            """No-op message handler used for testing."""
 
         client = KClient("192.168.1.99", _on_msg)
         # Power is ON
@@ -119,10 +131,11 @@ def test_force_connect_skips_connection_when_power_off():
     """With _force_connect=True but power OFF, the loop must NOT attempt to connect."""
 
     async def run():
+        """Run the test coroutine inside a fresh event loop."""
         call_counter: list[int] = []
 
         async def _on_msg(payload):
-            pass
+            """No-op message handler used for testing."""
 
         client = KClient("192.168.1.99", _on_msg)
         # Power is OFF
@@ -153,10 +166,11 @@ def test_normal_loop_connects_when_power_on():
     """Baseline: without any force flag, a normal loop iteration attempts to connect."""
 
     async def run():
+        """Run the test coroutine inside a fresh event loop."""
         call_counter: list[int] = []
 
         async def _on_msg(payload):
-            pass
+            """No-op message handler used for testing."""
 
         client = KClient("192.168.1.99", _on_msg)
         # Power is ON, no force flag
