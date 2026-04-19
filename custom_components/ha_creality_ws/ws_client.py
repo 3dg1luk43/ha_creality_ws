@@ -198,11 +198,11 @@ class KClient:
                     # Reset backoff so we start fresh when power returns
                     backoff = RETRY_MIN_BACKOFF
                     connect_failures = 0
-                try:
-                    await asyncio.wait_for(self._stop.wait(), timeout=10.0)
-                except asyncio.TimeoutError:
-                    pass
-                continue
+                    try:
+                        await asyncio.wait_for(self._stop.wait(), timeout=10.0)
+                    except asyncio.TimeoutError:
+                        pass
+                    continue
 
             try:
                 url = self._url()
