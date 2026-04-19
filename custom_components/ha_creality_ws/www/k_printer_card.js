@@ -266,10 +266,7 @@ class KPrinterCard extends HTMLElement {
       :host { --row-xpad: 6px; }
 
       .card {
-        border-radius: var(--ha-card-border-radius, 12px);
-        background: var(--card-background-color);
         color: var(--primary-text-color);
-        box-shadow: var(--ha-card-box-shadow, 0 2px 4px rgba(0,0,0,.2));
         padding: 10px var(--row-xpad) 10px var(--row-xpad);
         display: grid;
         grid-template-rows: auto auto;
@@ -304,7 +301,7 @@ class KPrinterCard extends HTMLElement {
 
       /* action chips – align right edge to telemetry via the same side padding */
       .chips {
-        display:flex; gap:8px; justify-content:flex-end; flex-wrap:nowrap;
+        display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;
         padding: 0 var(--row-xpad);
       }
       .chip {

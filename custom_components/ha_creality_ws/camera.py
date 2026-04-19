@@ -644,8 +644,9 @@ class CrealityWebRTCCamera(_BaseCamera):
             )
             return
         
-        # Configure stream source with Creality format
-        go2rtc_src = f"webrtc:{self._upstream_signaling_url}#format=creality"
+        # Configure stream source
+        # Note: go2rtc 1.9.14+ compatibility - use standard webrtc source
+        go2rtc_src = f"webrtc:{self._upstream_signaling_url}"
         
         try:
             # Check if stream already exists
@@ -751,7 +752,10 @@ class CrealityWebRTCCamera(_BaseCamera):
             offer = WebRTCSdpOffer(sdp=offer_sdp)
             
             # Forward offer to go2rtc and get answer
-            _LOGGER.debug("ha_creality_ws: forwarding offer to go2rtc for stream: %s", self._stream_name)
+            _LOGGER.debug(
+                "ha_creality_ws: forwarding offer to go2rtc for stream: %s. Offer size: %d", 
+                self._stream_name, len(offer_sdp)
+            )
             answer = await self._go2rtc_client.webrtc.forward_whep_sdp_offer(
                 source_name=self._stream_name,
                 offer=offer
@@ -774,9 +778,20 @@ class CrealityWebRTCCamera(_BaseCamera):
 
         except Go2RtcClientError as exc:
             _LOGGER.error(
-                "ha_creality_ws: go2rtc client error handling WebRTC offer: %s",
-                exc, exc_info=True
+                "ha_creality_ws: go2rtc client error handling WebRTC offer for stream '%s': %s",
+                self._stream_name, exc, exc_info=True
             )
+            
+            # Attempt recovery by invalidating the stream to force reconfiguration next time
+            if self._stream_name:
+                _LOGGER.warning("ha_creality_ws: Invalidating stream '%s' due to go2rtc error", self._stream_name)
+                try:
+                    await self._go2rtc_client.streams.delete(self._stream_name)
+                except Exception:
+                    # Ignore errors during cleanup
+                    pass
+                self._stream_name = None
+
             send_message(
                 self._wrap_send_message(
                     {"type": "error", "message": f"go2rtc error: {exc}"}
