@@ -644,8 +644,9 @@ class CrealityWebRTCCamera(_BaseCamera):
             )
             return
         
-        # Configure stream source with Creality format
-        go2rtc_src = f"webrtc:{self._upstream_signaling_url}#format=creality"
+        # Configure stream source
+        # Note: go2rtc 1.9.14+ compatibility - use standard webrtc source
+        go2rtc_src = f"webrtc:{self._upstream_signaling_url}"
         
         try:
             # Check if stream already exists
@@ -751,7 +752,10 @@ class CrealityWebRTCCamera(_BaseCamera):
             offer = WebRTCSdpOffer(sdp=offer_sdp)
             
             # Forward offer to go2rtc and get answer
-            _LOGGER.debug("ha_creality_ws: forwarding offer to go2rtc for stream: %s", self._stream_name)
+            _LOGGER.debug(
+                "ha_creality_ws: forwarding offer to go2rtc for stream: %s. Offer size: %d", 
+                self._stream_name, len(offer_sdp)
+            )
             answer = await self._go2rtc_client.webrtc.forward_whep_sdp_offer(
                 source_name=self._stream_name,
                 offer=offer
@@ -773,13 +777,27 @@ class CrealityWebRTCCamera(_BaseCamera):
             _LOGGER.info("ha_creality_ws: WebRTC offer handled successfully")
 
         except Go2RtcClientError as exc:
+            go2rtc_err = exc
             _LOGGER.error(
-                "ha_creality_ws: go2rtc client error handling WebRTC offer: %s",
-                exc, exc_info=True
+                "ha_creality_ws: go2rtc client error handling WebRTC offer for stream '%s': %s",
+                self._stream_name, go2rtc_err, exc_info=True
             )
+
+            # Attempt recovery by invalidating the stream to force reconfiguration next time
+            if self._stream_name:
+                _LOGGER.warning("ha_creality_ws: Invalidating stream '%s' due to go2rtc error", self._stream_name)
+                try:
+                    await self._go2rtc_client.streams.delete(self._stream_name)
+                except Exception as cleanup_exc:
+                    _LOGGER.debug(
+                        "ha_creality_ws: error deleting stream '%s' during cleanup: %s",
+                        self._stream_name, cleanup_exc,
+                    )
+                self._stream_name = None
+
             send_message(
                 self._wrap_send_message(
-                    {"type": "error", "message": f"go2rtc error: {exc}"}
+                    {"type": "error", "message": f"go2rtc error: {go2rtc_err}"}
                 )
             )
         except Exception as exc:
