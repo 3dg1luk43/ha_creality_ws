@@ -34,6 +34,37 @@ for mod_name in [
     if mod_name not in sys.modules:
         sys.modules[mod_name] = types.ModuleType(mod_name)
 
+# Stub out websockets and its submodules so the real package isn't required
+if "websockets" not in sys.modules:
+    _ws_stub = types.ModuleType("websockets")
+    _ws_stub.connect = None  # will be patched per-test
+
+    # websockets.exceptions
+    _ws_exceptions = types.ModuleType("websockets.exceptions")
+
+    class ConnectionClosedOK(Exception):
+        """Stub for websockets.exceptions.ConnectionClosedOK."""
+
+    class ConnectionClosed(Exception):
+        """Stub for websockets.exceptions.ConnectionClosed."""
+
+    _ws_exceptions.ConnectionClosedOK = ConnectionClosedOK
+    _ws_exceptions.ConnectionClosed = ConnectionClosed
+    _ws_stub.exceptions = _ws_exceptions
+    sys.modules["websockets.exceptions"] = _ws_exceptions
+
+    # websockets.client (referenced in type annotation)
+    _ws_client_sub = types.ModuleType("websockets.client")
+
+    class ClientConnection:
+        """Stub for websockets.client.ClientConnection."""
+
+    _ws_client_sub.ClientConnection = ClientConnection
+    _ws_stub.client = _ws_client_sub
+    sys.modules["websockets.client"] = _ws_client_sub
+
+    sys.modules["websockets"] = _ws_stub
+
 # Now import the real module
 import importlib.util
 
