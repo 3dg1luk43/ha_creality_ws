@@ -332,11 +332,10 @@ class KPrinterCard extends HTMLElement {
       .telemetry {
         display:flex;
         gap:6px;
-        justify-content:center;   /* was: flex-start */
-        flex-wrap:nowrap;
+        justify-content:center;
+        flex-wrap:wrap;
         padding: 0 var(--row-xpad);
         min-width:0;
-        overflow:hidden;
       }
       .pill {
         display:inline-flex; align-items:center; gap:6px;

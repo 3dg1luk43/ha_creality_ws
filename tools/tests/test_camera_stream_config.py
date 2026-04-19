@@ -69,6 +69,5 @@ async def test_ensure_stream_configured_modern():
     call_args = mock_go2rtc_client.streams.add.call_args
     assert "sources" in call_args.kwargs
     source = call_args.kwargs["sources"]
-    print(f"DEBUG: source={source}")
     assert "#format=creality" not in source
     assert source == "webrtc:http://1.2.3.4:8000/call/webrtc_local"

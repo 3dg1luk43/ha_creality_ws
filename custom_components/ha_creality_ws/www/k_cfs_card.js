@@ -251,8 +251,8 @@ class KCFSCard extends HTMLElement {
           var(--spool-color) var(--spool-pct),
           rgba(var(--rgb-primary-text-color), 0.08) 0
         );
-        mask: radial-gradient(circle at 50% 50%, transparent 82%, black 83%);
-        -webkit-mask: radial-gradient(circle at 50% 50%, transparent 82%, black 83%);
+        mask: radial-gradient(circle closest-side at 50% 50%, transparent 33px, black 34px);
+        -webkit-mask: radial-gradient(circle closest-side at 50% 50%, transparent 33px, black 34px);
       }
 
       .ring-inner {
@@ -367,8 +367,8 @@ class KCFSCard extends HTMLElement {
           var(--spool-color) var(--spool-pct),
           rgba(var(--rgb-primary-text-color), 0.08) 0
         );
-        mask: radial-gradient(circle at 50% 50%, transparent 70%, black 71%);
-        -webkit-mask: radial-gradient(circle at 50% 50%, transparent 70%, black 71%);
+        mask: radial-gradient(circle closest-side at 50% 50%, transparent 12px, black 13px);
+        -webkit-mask: radial-gradient(circle closest-side at 50% 50%, transparent 12px, black 13px);
       }
 
       .spool-mini::after {

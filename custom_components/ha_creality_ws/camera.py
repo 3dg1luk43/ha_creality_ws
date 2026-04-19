@@ -787,9 +787,11 @@ class CrealityWebRTCCamera(_BaseCamera):
                 _LOGGER.warning("ha_creality_ws: Invalidating stream '%s' due to go2rtc error", self._stream_name)
                 try:
                     await self._go2rtc_client.streams.delete(self._stream_name)
-                except Exception:
-                    # Ignore errors during cleanup
-                    pass
+                except Exception as exc:
+                    _LOGGER.debug(
+                        "ha_creality_ws: error deleting stream '%s' during cleanup: %s",
+                        self._stream_name, exc,
+                    )
                 self._stream_name = None
 
             send_message(

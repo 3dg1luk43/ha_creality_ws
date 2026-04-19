@@ -753,7 +753,8 @@ class KActiveFilamentSensor(KEntity, SensorEntity):
     def native_value(self) -> str | None:
         if self._should_zero():
             return None
-        boxes = self.coordinator.data.get("boxsInfo", {}).get("materialBoxs", [])
+        data = self.coordinator.data or {}
+        boxes = data.get("boxsInfo", {}).get("materialBoxs", [])
         for box in boxes:
             box_type = box.get("type", 0)
             for slot in box.get("materials", []):
@@ -762,12 +763,15 @@ class KActiveFilamentSensor(KEntity, SensorEntity):
                         return "External"
                     slot_id = slot.get("id", 0)
                     box_id = box.get("id", 0)
-                    return f"Box {box_id + 1} Slot {slot_id + 1}"
+                    return f"Box {box_id} Slot {slot_id + 1}"
         return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        boxes = self.coordinator.data.get("boxsInfo", {}).get("materialBoxs", [])
+        if self._should_zero():
+            return {}
+        data = self.coordinator.data or {}
+        boxes = data.get("boxsInfo", {}).get("materialBoxs", [])
         for box in boxes:
             for slot in box.get("materials", []):
                 if slot.get("selected"):
