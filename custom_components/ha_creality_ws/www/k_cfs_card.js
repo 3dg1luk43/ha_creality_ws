@@ -251,12 +251,14 @@ class KCFSCard extends HTMLElement {
           var(--spool-color) var(--spool-pct),
           rgba(var(--rgb-primary-text-color), 0.08) 0
         );
+        mask: radial-gradient(circle closest-side at 50% 50%, transparent 33px, black 34px);
+        -webkit-mask: radial-gradient(circle closest-side at 50% 50%, transparent 33px, black 34px);
       }
 
       .ring-inner {
         width: 66px;
         height: 66px;
-        background: var(--card-background-color);
+        background: transparent;
         border-radius: 50%;
         position: relative;
         z-index: 2;
@@ -365,13 +367,15 @@ class KCFSCard extends HTMLElement {
           var(--spool-color) var(--spool-pct),
           rgba(var(--rgb-primary-text-color), 0.08) 0
         );
+        mask: radial-gradient(circle closest-side at 50% 50%, transparent 12px, black 13px);
+        -webkit-mask: radial-gradient(circle closest-side at 50% 50%, transparent 12px, black 13px);
       }
 
       .spool-mini::after {
         content: '';
         position: absolute;
         inset: 4px;
-        background: var(--card-background-color);
+        background: transparent;
         border-radius: 50%;
         z-index: 1;
       }
