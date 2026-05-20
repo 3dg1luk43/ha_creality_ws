@@ -653,8 +653,38 @@ class CrealityWebRTCCamera(_BaseCamera):
             # Check if stream already exists
             streams = await self._go2rtc_client.streams.list()
             
-            if self._force_recreate_stream or stream_name not in streams:
-                # Add or force re-add the deterministic stream.
+            recreate_needed = self._force_recreate_stream or stream_name not in streams
+            
+            # If stream exists, verify its configured source matches expected
+            if not recreate_needed and stream_name in streams:
+                existing_stream = streams.get(stream_name, {})
+                existing_sources = existing_stream.get('sources', [])
+                # Normalize comparison: handle both string and list formats
+                expected_source = go2rtc_src
+                has_expected_source = (
+                    expected_source in existing_sources if isinstance(existing_sources, list)
+                    else existing_sources == expected_source
+                )
+                if not has_expected_source:
+                    _LOGGER.warning(
+                        "ha_creality_ws: Stream '%s' exists but source mismatch: "
+                        "expected '%s', found '%s'. Recreating...",
+                        stream_name, expected_source, existing_sources
+                    )
+                    recreate_needed = True
+            
+            if recreate_needed:
+                # Delete old stream if it exists
+                if stream_name in streams:
+                    try:
+                        await self._go2rtc_client.streams.delete(stream_name)
+                    except Exception as del_exc:
+                        _LOGGER.debug(
+                            "ha_creality_ws: Error deleting old stream '%s': %s",
+                            stream_name, del_exc
+                        )
+                
+                # Add the stream with correct source
                 recreate_stream = self._force_recreate_stream
                 await self._go2rtc_client.streams.add(
                     name=stream_name,
@@ -670,10 +700,10 @@ class CrealityWebRTCCamera(_BaseCamera):
                     go2rtc_src,
                 )
             else:
-                # Stream already exists; ensure state is consistent
+                # Stream already exists with correct source; ensure state is consistent
                 self._stream_name = stream_name
                 _LOGGER.debug(
-                    "ha_creality_ws: Stream '%s' already exists in go2rtc",
+                    "ha_creality_ws: Stream '%s' already exists in go2rtc with correct source",
                     stream_name
                 )
                 
