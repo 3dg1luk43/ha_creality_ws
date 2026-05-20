@@ -325,18 +325,10 @@ class KClient:
                         "K WS connection failing repeatedly (host=%s). Attempting mDNS fallback...",
                         self._host
                     )
-                    resolved_host = self._resolve_host()
-                    if resolved_host != self._host:
-                        _LOGGER.info(
-                            "K WS mDNS fallback resolved host=%s -> %s",
-                            self._host,
-                            resolved_host,
-                        )
-                    else:
-                        _LOGGER.debug(
-                            "K WS mDNS fallback did not resolve a new address for host=%s",
-                            self._host,
-                        )
+                    _LOGGER.debug(
+                        "K WS mDNS fallback: will retry connection on next loop iteration for host=%s",
+                        self._host,
+                    )
                 else:
                     _LOGGER.debug("K WS connection failing, but mDNS fallback rate-limited host=%s", self._host)
 

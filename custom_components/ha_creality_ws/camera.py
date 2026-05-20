@@ -638,7 +638,6 @@ class CrealityWebRTCCamera(_BaseCamera):
         try:
             printer_host = self._upstream_signaling_url.split("://")[1].split(":")[0]
             stream_name = self._stream_name or f"creality_k2_{printer_host.replace('.', '_')}"
-            self._stream_name = stream_name
         except (IndexError, AttributeError) as exc:
             _LOGGER.error(
                 "ha_creality_ws: Failed to parse printer host from URL %s: %s",
@@ -661,6 +660,8 @@ class CrealityWebRTCCamera(_BaseCamera):
                     name=stream_name,
                     sources=go2rtc_src
                 )
+                # Only update state after successful add
+                self._stream_name = stream_name
                 self._force_recreate_stream = False
                 _LOGGER.info(
                     "ha_creality_ws: %s stream '%s' with source '%s'",
@@ -669,6 +670,8 @@ class CrealityWebRTCCamera(_BaseCamera):
                     go2rtc_src,
                 )
             else:
+                # Stream already exists; ensure state is consistent
+                self._stream_name = stream_name
                 _LOGGER.debug(
                     "ha_creality_ws: Stream '%s' already exists in go2rtc",
                     stream_name
@@ -676,14 +679,14 @@ class CrealityWebRTCCamera(_BaseCamera):
                 
         except Go2RtcClientError as exc:
             _LOGGER.error(
-                "ha_creality_ws: Failed to configure stream: %s",
-                exc, exc_info=True
+                "ha_creality_ws: Failed to configure stream (source=%s): %s",
+                self._upstream_signaling_url, exc, exc_info=True
             )
             self._force_recreate_stream = True
         except Exception as exc:
             _LOGGER.error(
-                "ha_creality_ws: Unexpected error configuring stream: %s",
-                exc, exc_info=True
+                "ha_creality_ws: Unexpected error configuring stream (source=%s): %s",
+                self._upstream_signaling_url, exc, exc_info=True
             )
             self._force_recreate_stream = True
 
