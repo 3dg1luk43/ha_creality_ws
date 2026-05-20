@@ -1,5 +1,4 @@
 import sys
-import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
 if "aiohttp" not in sys.modules:
@@ -44,6 +43,8 @@ def test_webrtc_offer_500_error_repro():
     # Setup
     mock_go2rtc_client = MagicMock()
     mock_go2rtc_client.webrtc = MagicMock()
+    mock_go2rtc_client.streams = MagicMock()
+    mock_go2rtc_client.streams.delete = AsyncMock()
 
     # Define a real exception class for the test
     class RealGo2RtcClientError(Exception):
@@ -82,3 +83,5 @@ def test_webrtc_offer_500_error_repro():
         assert msg["type"] == "error"
         # Since we patched the exception, it should be caught by the first except block
         assert "go2rtc error" in msg["message"]
+        mock_go2rtc_client.streams.delete.assert_awaited_once_with("test_stream")
+        assert camera._stream_name is None

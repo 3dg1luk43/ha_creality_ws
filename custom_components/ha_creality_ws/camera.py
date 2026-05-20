@@ -355,6 +355,7 @@ class CrealityWebRTCCamera(_BaseCamera):
         self._custom_go2rtc_url = go2rtc_url
         self._custom_go2rtc_port = go2rtc_port
         self._stream_name: str | None = None
+        self._force_recreate_stream = False
         self._last_error: str | None = None
         
         # Snapshot throttling to avoid hammering go2rtc
@@ -624,7 +625,7 @@ class CrealityWebRTCCamera(_BaseCamera):
 
     async def _ensure_stream_configured(self) -> None:
         """Ensure the go2rtc stream is configured using HA's go2rtc client."""
-        if self._stream_name:
+        if self._stream_name and not self._force_recreate_stream:
             return  # Already configured
         
         # Initialize client if needed
@@ -636,7 +637,8 @@ class CrealityWebRTCCamera(_BaseCamera):
         # Generate stream name from printer IP
         try:
             printer_host = self._upstream_signaling_url.split("://")[1].split(":")[0]
-            self._stream_name = f"creality_k2_{printer_host.replace('.', '_')}"
+            stream_name = self._stream_name or f"creality_k2_{printer_host.replace('.', '_')}"
+            self._stream_name = stream_name
         except (IndexError, AttributeError) as exc:
             _LOGGER.error(
                 "ha_creality_ws: Failed to parse printer host from URL %s: %s",
@@ -652,20 +654,24 @@ class CrealityWebRTCCamera(_BaseCamera):
             # Check if stream already exists
             streams = await self._go2rtc_client.streams.list()
             
-            if self._stream_name not in streams:
-                # Add new stream
+            if self._force_recreate_stream or stream_name not in streams:
+                # Add or force re-add the deterministic stream.
+                recreate_stream = self._force_recreate_stream
                 await self._go2rtc_client.streams.add(
-                    name=self._stream_name,
+                    name=stream_name,
                     sources=go2rtc_src
                 )
+                self._force_recreate_stream = False
                 _LOGGER.info(
-                    "ha_creality_ws: Added stream '%s' with source '%s'",
-                    self._stream_name, go2rtc_src
+                    "ha_creality_ws: %s stream '%s' with source '%s'",
+                    "Recreated" if recreate_stream else "Added",
+                    stream_name,
+                    go2rtc_src,
                 )
             else:
                 _LOGGER.debug(
                     "ha_creality_ws: Stream '%s' already exists in go2rtc",
-                    self._stream_name
+                    stream_name
                 )
                 
         except Go2RtcClientError as exc:
@@ -673,13 +679,13 @@ class CrealityWebRTCCamera(_BaseCamera):
                 "ha_creality_ws: Failed to configure stream: %s",
                 exc, exc_info=True
             )
-            self._stream_name = None  # Reset so we retry later
+            self._force_recreate_stream = True
         except Exception as exc:
             _LOGGER.error(
                 "ha_creality_ws: Unexpected error configuring stream: %s",
                 exc, exc_info=True
             )
-            self._stream_name = None  # Reset so we retry later
+            self._force_recreate_stream = True
 
 
 
@@ -788,12 +794,14 @@ class CrealityWebRTCCamera(_BaseCamera):
                 _LOGGER.warning("ha_creality_ws: Invalidating stream '%s' due to go2rtc error", self._stream_name)
                 try:
                     await self._go2rtc_client.streams.delete(self._stream_name)
+                    self._stream_name = None
+                    self._force_recreate_stream = False
                 except Exception as cleanup_exc:
                     _LOGGER.debug(
                         "ha_creality_ws: error deleting stream '%s' during cleanup: %s",
                         self._stream_name, cleanup_exc,
                     )
-                self._stream_name = None
+                    self._force_recreate_stream = True
 
             send_message(
                 self._wrap_send_message(
