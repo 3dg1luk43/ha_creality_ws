@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-
 import importlib.util
 import sys
 from pathlib import Path
@@ -24,6 +23,7 @@ sensor_text = sensor_path.read_text(encoding="utf-8")
 
 
 def test_manifest_exists_and_has_version():
+    """Verify manifest.json exists and declares a version field."""
     p = Path(__file__).resolve().parents[2] / "custom_components" / "ha_creality_ws" / "manifest.json"
     assert p.exists()
     m = json.loads(p.read_text(encoding="utf-8"))
@@ -31,5 +31,6 @@ def test_manifest_exists_and_has_version():
 
 
 def test_specs_contains_box_sensor_uid():
+    """Check that sensor.py references the box_temperature uid required for K1/K2 models."""
     # Ensure SPECS includes the box_temperature uid used by sensors
     assert '"box_temperature"' in sensor_text or "'box_temperature'" in sensor_text
