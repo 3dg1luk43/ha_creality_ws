@@ -7,12 +7,14 @@ PRINTER_CARD = ROOT / "custom_components" / "ha_creality_ws" / "www" / "k_printe
 
 
 def _css_block(source: str, selector: str) -> str:
+    """Return a CSS rule body for a selector in the printer card source."""
     match = re.search(rf"{re.escape(selector)}\s*\{{(?P<body>.*?)\n\s*\}}", source, re.S)
     assert match, f"Missing CSS block for {selector}"
     return match.group("body")
 
 
 def test_printer_card_telemetry_wraps_when_roomy():
+    """Keep the existing telemetry row wrapping behavior for roomy layouts."""
     source = PRINTER_CARD.read_text(encoding="utf-8")
     telemetry = _css_block(source, ".telemetry")
 
@@ -23,6 +25,7 @@ def test_printer_card_telemetry_wraps_when_roomy():
 
 
 def test_printer_card_size_tracks_measured_telemetry_lines():
+    """Ensure wrapped telemetry updates Lovelace card size without breakpoints."""
     source = PRINTER_CARD.read_text(encoding="utf-8")
 
     assert "@container (max-width:" not in source
@@ -38,6 +41,7 @@ def test_printer_card_size_tracks_measured_telemetry_lines():
 
 
 def test_printer_card_telemetry_pills_do_not_line_break():
+    """Ensure each telemetry pill remains a stable single-line item."""
     source = PRINTER_CARD.read_text(encoding="utf-8")
     pill = _css_block(source, ".pill")
 
