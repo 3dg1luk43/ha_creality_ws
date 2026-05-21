@@ -645,9 +645,12 @@ class CrealityWebRTCCamera(_BaseCamera):
             )
             return
         
-        # Configure stream source
-        # Note: go2rtc 1.9.14+ compatibility - use standard webrtc source
-        go2rtc_src = f"webrtc:{self._upstream_signaling_url}"
+        # Configure stream source.
+        # The K2 family signaling endpoint speaks Creality's JSON-wrapped SDP
+        # protocol, not standard WHEP. The `#format=creality` fragment selects
+        # go2rtc's built-in Creality client; dropping it makes go2rtc send raw
+        # WHEP, which the printer replies to with `{}` and breaks the stream.
+        go2rtc_src = f"webrtc:{self._upstream_signaling_url}#format=creality"
         
         try:
             # Check if stream already exists
