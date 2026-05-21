@@ -445,6 +445,10 @@ class KPrinterCard extends HTMLElement {
   disconnectedCallback() {
     clearTimeout(this._initialUpdateTimer);
     if (this._telemetryResizeObserver) {
+      if (this._telemetryObservedNode) {
+        this._telemetryResizeObserver.unobserve(this._telemetryObservedNode);
+        this._telemetryObservedNode = null;
+      }
       this._telemetryResizeObserver.disconnect();
       this._telemetryResizeObserver = null;
     }
@@ -455,15 +459,25 @@ class KPrinterCard extends HTMLElement {
   }
 
   _setupTelemetrySizeObserver() {
-    if (this._telemetryResizeObserver) {
-      this._telemetryResizeObserver.disconnect();
-    }
     const telemetry = this._root?.querySelector(".telemetry");
     if (!telemetry) return;
-    if (typeof ResizeObserver === "function") {
+
+    if (typeof ResizeObserver !== "function") {
+      this._scheduleTelemetrySizeUpdate();
+      return;
+    }
+
+    if (!this._telemetryResizeObserver) {
       this._telemetryResizeObserver = new ResizeObserver(() => this._scheduleTelemetrySizeUpdate());
+    }
+
+    if (this._telemetryObservedNode && this._telemetryObservedNode !== telemetry) {
+      this._telemetryResizeObserver.unobserve(this._telemetryObservedNode);
+    }
+
+    if (this._telemetryObservedNode !== telemetry) {
       this._telemetryResizeObserver.observe(telemetry);
-      this._telemetryResizeObserver.observe(this);
+      this._telemetryObservedNode = telemetry;
     }
     this._scheduleTelemetrySizeUpdate();
   }
