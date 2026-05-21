@@ -491,7 +491,8 @@ class KPrinterCard extends HTMLElement {
         .map((pill) => Math.round(pill.offsetTop)),
     );
     const nextSize = Math.max(3, 2 + lineTops.size);
-    if (nextSize === this._cardSize) return;
+    const currentSize = this._cardSize ?? 3;
+    if (nextSize === currentSize) return;
 
     this._cardSize = nextSize;
     this.dispatchEvent(new CustomEvent("ll-rebuild", { bubbles: true, composed: true }));
