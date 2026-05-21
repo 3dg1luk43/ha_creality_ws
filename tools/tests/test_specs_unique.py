@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sensor_path = ROOT / "custom_components" / "ha_creality_ws" / "sensor.py"
 
 # Load sensor module minimally (will import Home Assistant modules; for static uniqueness we can parse text)
-text = sensor_path.read_text()
+text = sensor_path.read_text(encoding="utf-8")
 
 
 def _extract_uids(src: str):

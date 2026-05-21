@@ -15,7 +15,7 @@ BLOCK_PATTERNS = [
 def test_no_blocking_calls_in_component():
     texts = []
     for p in SRC_DIR.glob("*.py"):
-        texts.append(p.read_text())
+        texts.append(p.read_text(encoding="utf-8"))
     combined = "\n".join(texts)
     for pat in BLOCK_PATTERNS:
         assert re.search(pat, combined, re.MULTILINE) is None, f"Blocking pattern {pat} found in source"

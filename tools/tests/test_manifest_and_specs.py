@@ -20,13 +20,13 @@ spec_c.loader.exec_module(const)
 # Avoid importing sensor.py (it imports Home Assistant). We'll do static checks instead.
 sensor_path = base / "sensor.py"
 assert sensor_path.exists()
-sensor_text = sensor_path.read_text()
+sensor_text = sensor_path.read_text(encoding="utf-8")
 
 
 def test_manifest_exists_and_has_version():
     p = Path(__file__).resolve().parents[2] / "custom_components" / "ha_creality_ws" / "manifest.json"
     assert p.exists()
-    m = json.loads(p.read_text())
+    m = json.loads(p.read_text(encoding="utf-8"))
     assert "version" in m
 
 
