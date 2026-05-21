@@ -218,7 +218,7 @@ class KPrinterCard extends HTMLElement {
       }, 150);
     }
   }
-  getCardSize() { return 3; }
+  getCardSize() { return this._cardSize || 3; }
 
   _render() {
     if (!this._root) return;
@@ -439,6 +439,62 @@ class KPrinterCard extends HTMLElement {
     });
 
     this._update();
+    this._setupTelemetrySizeObserver();
+  }
+
+  disconnectedCallback() {
+    clearTimeout(this._initialUpdateTimer);
+    if (this._telemetryResizeObserver) {
+      this._telemetryResizeObserver.disconnect();
+      this._telemetryResizeObserver = null;
+    }
+    if (this._telemetrySizeFrame) {
+      cancelAnimationFrame(this._telemetrySizeFrame);
+      this._telemetrySizeFrame = null;
+    }
+  }
+
+  _setupTelemetrySizeObserver() {
+    if (this._telemetryResizeObserver) {
+      this._telemetryResizeObserver.disconnect();
+    }
+    const telemetry = this._root?.querySelector(".telemetry");
+    if (!telemetry) return;
+    if (typeof ResizeObserver === "function") {
+      this._telemetryResizeObserver = new ResizeObserver(() => this._scheduleTelemetrySizeUpdate());
+      this._telemetryResizeObserver.observe(telemetry);
+      this._telemetryResizeObserver.observe(this);
+    }
+    this._scheduleTelemetrySizeUpdate();
+  }
+
+  _scheduleTelemetrySizeUpdate() {
+    if (this._telemetrySizeFrame) {
+      cancelAnimationFrame(this._telemetrySizeFrame);
+    }
+    this._telemetrySizeFrame = requestAnimationFrame(() => {
+      this._telemetrySizeFrame = null;
+      this._updateTelemetryCardSize();
+    });
+  }
+
+  _updateTelemetryCardSize() {
+    const telemetry = this._root?.querySelector(".telemetry");
+    if (!telemetry) return;
+
+    const lineTops = new Set(
+      Array.from(telemetry.children)
+        .filter((pill) => {
+          const style = getComputedStyle(pill);
+          return style.display !== "none" && style.visibility !== "hidden";
+        })
+        .map((pill) => Math.round(pill.offsetTop)),
+    );
+    const nextSize = Math.max(3, 2 + lineTops.size);
+    if (nextSize === this._cardSize) return;
+
+    this._cardSize = nextSize;
+    this.dispatchEvent(new CustomEvent("ll-rebuild", { bubbles: true, composed: true }));
   }
 
   // Re-implement _pressButtonEntity to be smarter about non-button domains if needed, 
@@ -689,6 +745,7 @@ class KPrinterCard extends HTMLElement {
         boxPill.style.display = "";
       }
     }
+    this._scheduleTelemetrySizeUpdate();
   }
 }
 customElements.define(CARD_TAG, KPrinterCard);
