@@ -6,6 +6,61 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.9.4] - 2026-05-21
+> [List of issues (0.9.4)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.4)
+
+### Fixed
+- **K2 WebRTC Camera Regression** (#87, #88):
+  - Restored the `#format=creality` go2rtc source fragment for K2 family WebRTC cameras, which selects go2rtc's built-in Creality JSON-wrapped SDP client.
+  - In 0.9.3 the fragment was dropped on the assumption it was no longer needed, but the K2/K2 Pro/K2 Combo signaling endpoint at `:8000/call/webrtc_local` does not speak standard WHEP — it replies with `{}` to raw SDP offers, which made go2rtc fail with `sdp: syntax error at pos 1: "}"` and caused the camera entity to become unavailable.
+  - 0.9.3 users seeing "Failed to start WebRTC stream: go2rtc error" or a permanently unavailable camera entity should be fixed by upgrading to 0.9.4 without any config changes.
+
+
+## [0.9.3] - 2026-05-20
+> [List of issues (0.9.3)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.3)
+
+### Added
+- **Active Filament Slot Sensor** (#80):
+  - Added a new sensor that reports the currently selected CFS source as `Box X Slot Y` or `External`.
+  - Exposes extra active-filament metadata when available, including filament/vendor name, color, and remaining percentage.
+
+### Changed
+- **WebRTC Stream Provisioning**:
+  - Updated go2rtc stream configuration for K2/WebRTC cameras to use the standard `webrtc:` source format for improved compatibility with newer go2rtc versions.
+  - Hardened stream lifecycle handling so stream names are reused more predictably across retries and recovery paths.
+  - Existing go2rtc streams are now validated against the expected source and recreated when stale or mismatched.
+- **Lovelace Card Styling** (#73):
+  - Refined CFS card layout, spacing, and Home Assistant theme inheritance for better visual consistency.
+  - Added dynamic card sizing/layout reporting for the CFS card to improve dashboard placement, especially in compact mode.
+
+### Fixed
+- **Manual Reconnect Reliability** (#81):
+  - Fixed reconnect flow issues where manual reconnect attempts could fail to restore the WebSocket connection.
+- **Power-Off Reconnect Noise** (#84):
+  - Suppressed repeated mDNS fallback warning spam when a configured power switch reports the printer is intentionally off.
+  - Cleaned up reconnect logging so fallback behavior remains visible without producing noisy or misleading warnings.
+- **WebRTC Error Recovery**:
+  - Improved recovery after go2rtc/WebRTC offer failures by invalidating bad streams and forcing reconfiguration on the next attempt.
+  - Fixed cleanup paths so stream recreation remains possible even when deleting the old stream fails.
+  - Fixed state handling during stream setup so cancellations or exceptions do not leave the camera marked as configured prematurely.
+  - Improved error messages around WebRTC offer forwarding and stream management to make diagnostics more actionable.
+- **go2rtc Stream Consistency**:
+  - Fixed cases where an existing go2rtc stream could be reused even though it pointed at an outdated or incorrect source.
+  - Existing streams are now recreated when their configured source does not match the printer's expected upstream signaling URL.
+- **Printer Card Mobile Layout** (#72):
+  - Fixed action chips and telemetry pills being cropped on smaller screens by allowing them to wrap correctly.
+- **CFS Card Theme Compatibility** (#77):
+  - Fixed spool/ring rendering on certain Home Assistant themes where the card could appear white or visually inconsistent.
+  - Improved transparency and masking behavior so the CFS card better matches themed card backgrounds.
+- **CFS Data Handling**:
+  - Improved CFS slot/box handling and sensor registration robustness, including cleaner box ID handling and late-entity creation behavior.
+
+### Testing
+- **Regression Coverage** (#82):
+  - Added focused tests for WebSocket reconnect behavior, WebRTC error recovery, stream configuration, and previously reported WebRTC failure scenarios.
+  - Updated async test setup to improve reliability and remove older pytest configuration issues.
+
+
 ## [0.9.2] - 2026-01-27
 > [List of issues (0.9.2)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.2
 
