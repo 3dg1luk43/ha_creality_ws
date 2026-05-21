@@ -2,6 +2,7 @@ from pathlib import Path
 import importlib.util, sys
 
 ROOT = Path(__file__).resolve().parents[2]
+
 sensor_path = ROOT / "custom_components" / "ha_creality_ws" / "sensor.py"
 
 # Load sensor module minimally (will import Home Assistant modules; for static uniqueness we can parse text)
@@ -9,6 +10,7 @@ text = sensor_path.read_text(encoding="utf-8")
 
 
 def _extract_uids(src: str):
+    """Naively parse sensor spec source and return a list of uid values found."""
     uids = []
     for line in src.splitlines():
         line_stripped = line.strip()
@@ -37,9 +39,9 @@ def _extract_uids(src: str):
 
 
 def test_sensor_specs_uids_unique_and_contains_box():
+    """Assert all sensor uids are unique and that box_temperature is present."""
     uids = _extract_uids(text)
     # filter out non-values like keys referencing
     filtered = [u for u in uids if u and not u.startswith('lambda')]
     assert 'box_temperature' in filtered, 'box_temperature uid missing'
     assert len(filtered) == len(set(filtered)), 'Duplicate sensor uid detected'
-
