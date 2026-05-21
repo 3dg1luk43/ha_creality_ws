@@ -39,9 +39,10 @@ else:
 
 from custom_components.ha_creality_ws.camera import CrealityWebRTCCamera
 
-def test_ensure_stream_configured_modern():
+def test_ensure_stream_configured_uses_creality_format():
     import asyncio
-    # Test that it adds stream WITHOUT format=creality
+    # K2 signaling uses Creality's JSON-wrapped SDP, not raw WHEP — the
+    # `#format=creality` fragment must remain on the go2rtc source. See #87/#88.
 
     mock_go2rtc_client = MagicMock()
     mock_go2rtc_client.streams = MagicMock()
@@ -71,5 +72,4 @@ def test_ensure_stream_configured_modern():
     call_args = mock_go2rtc_client.streams.add.call_args
     assert "sources" in call_args.kwargs
     source = call_args.kwargs["sources"]
-    assert "#format=creality" not in source
-    assert source == "webrtc:http://1.2.3.4:8000/call/webrtc_local"
+    assert source == "webrtc:http://1.2.3.4:8000/call/webrtc_local#format=creality"

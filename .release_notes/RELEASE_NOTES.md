@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.9.4] - 2026-05-21
+> [List of issues (0.9.4)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.4)
+
+### Fixed
+- **K2 WebRTC Camera Regression** (#87, #88):
+  - Restored the `#format=creality` go2rtc source fragment for K2 family WebRTC cameras, which selects go2rtc's built-in Creality JSON-wrapped SDP client.
+  - In 0.9.3 the fragment was dropped on the assumption it was no longer needed, but the K2/K2 Pro/K2 Combo signaling endpoint at `:8000/call/webrtc_local` does not speak standard WHEP — it replies with `{}` to raw SDP offers, which made go2rtc fail with `sdp: syntax error at pos 1: "}"` and caused the camera entity to become unavailable.
+  - 0.9.3 users seeing "Failed to start WebRTC stream: go2rtc error" or a permanently unavailable camera entity should be fixed by upgrading to 0.9.4 without any config changes.
+
+
 ## [0.9.3] - 2026-05-20
 > [List of issues (0.9.3)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.3)
 
