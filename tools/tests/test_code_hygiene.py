@@ -2,6 +2,7 @@ from pathlib import Path
 import json, re
 
 ROOT = Path(__file__).resolve().parents[2]
+
 const_path = ROOT / "custom_components" / "ha_creality_ws" / "const.py"
 init_path = ROOT / "custom_components" / "ha_creality_ws" / "__init__.py"
 
@@ -9,7 +10,8 @@ ALLOWED_HOST_SUBSTRINGS = ["localhost", "http://", "ws://"]
 
 
 def test_platforms_list_unique():
-    text = init_path.read_text()
+    """Ensure PLATFORMS list in __init__.py contains no duplicate entries."""
+    text = init_path.read_text(encoding="utf-8")
     # crude parse for PLATFORMS list line
     for line in text.splitlines():
         if line.strip().startswith("PLATFORMS") and "[" in line:
@@ -20,11 +22,11 @@ def test_platforms_list_unique():
 
 
 def test_no_unexpected_cloud_urls():
+    """Confirm no unexpected external (cloud) URLs are hardcoded in the integration source."""
     suspicious = []
     for p in (ROOT / "custom_components" / "ha_creality_ws").glob("*.py"):
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         for m in re.findall(r"https?://[A-Za-z0-9._:/-]+", text):
             if not any(sub in m for sub in ALLOWED_HOST_SUBSTRINGS):
                 suspicious.append(m)
     assert not suspicious, f"Unexpected external URLs found: {suspicious}"
-
