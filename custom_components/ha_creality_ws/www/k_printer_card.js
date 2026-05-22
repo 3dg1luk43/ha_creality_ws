@@ -525,13 +525,16 @@ class KPrinterCard extends HTMLElement {
     const currentSize = this._cardSize ?? 3;
     if (nextSize === currentSize) return;
 
-    this._cardSize = nextSize;
-
     const cardKey = this._cardId || CARD_TAG;
     const now = Date.now();
     const lastDispatch = _lastCardRebuildDispatch.get(cardKey) || 0;
+    // Defer the _cardSize update until the throttle clears: otherwise a throttled
+    // call would record the new size locally without telling Lovelace, and the
+    // next measurement would short-circuit on the equality check above — leaving
+    // the rebuild permanently suppressed.
     if (now - lastDispatch < LL_REBUILD_MIN_INTERVAL_MS) return;
     _lastCardRebuildDispatch.set(cardKey, now);
+    this._cardSize = nextSize;
 
     this.dispatchEvent(new CustomEvent("ll-rebuild", { bubbles: true, composed: true }));
   }
