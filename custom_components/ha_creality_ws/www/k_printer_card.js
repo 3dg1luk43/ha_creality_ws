@@ -1,6 +1,13 @@
 const CARD_TAG = "k-printer-card";
 const EDITOR_TAG = "k-printer-card-editor";
 
+// Per-card-id throttle for ll-rebuild dispatches. ll-rebuild may cause Lovelace to
+// recreate the element, in which case instance state (this._cardSize) is reset. A
+// module-level record survives recreation and prevents a measure→dispatch→recreate
+// loop if size measurement on the fresh instance keeps producing the same delta.
+const LL_REBUILD_MIN_INTERVAL_MS = 2000;
+const _lastCardRebuildDispatch = new Map();
+
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
 const mdi = (name) => `mdi:${name}`;
 const normStr = (x) => String(x ?? "").toLowerCase();
@@ -442,6 +449,16 @@ class KPrinterCard extends HTMLElement {
     this._setupTelemetrySizeObserver();
   }
 
+  connectedCallback() {
+    // The card may be re-attached without setConfig firing again (e.g. when Lovelace
+    // moves the element between containers). _render() — which normally wires up the
+    // telemetry observer — only runs from setConfig/hass paths, so reinstate the
+    // observer here whenever a previously-rendered card returns to the DOM.
+    if (this._root) {
+      this._setupTelemetrySizeObserver();
+    }
+  }
+
   disconnectedCallback() {
     clearTimeout(this._initialUpdateTimer);
     if (this._telemetryResizeObserver) {
@@ -509,6 +526,13 @@ class KPrinterCard extends HTMLElement {
     if (nextSize === currentSize) return;
 
     this._cardSize = nextSize;
+
+    const cardKey = this._cardId || CARD_TAG;
+    const now = Date.now();
+    const lastDispatch = _lastCardRebuildDispatch.get(cardKey) || 0;
+    if (now - lastDispatch < LL_REBUILD_MIN_INTERVAL_MS) return;
+    _lastCardRebuildDispatch.set(cardKey, now);
+
     this.dispatchEvent(new CustomEvent("ll-rebuild", { bubbles: true, composed: true }));
   }
 
