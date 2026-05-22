@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.9.5] - 2026-05-22
+> [List of issues (0.9.5)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.5)
+
+### Fixed
+- **K2 WebRTC Camera Instability after 0.9.4** (#88 follow-up):
+  - Fixed an `'Stream' object has no attribute 'get'` error that fired on every snapshot and WebRTC offer when the go2rtc stream already existed.
+  - The 0.9.4 "verify existing source matches" check incorrectly treated `streams.list()` entries as dicts; the `go2rtc-client` library actually returns `Stream` dataclasses with a `producers: list[Producer]` field. The misuse raised on every call, was swallowed by the generic exception handler, and forced a delete-and-recreate of the active stream on every snapshot / offer — producing the flicker, repeated 30s loads, and intermittent unavailability reported on 0.9.4.
+  - The verification now inspects `Stream.producers[*].url`, so the upgrade-path self-healing (recreate a leftover stream that points at a wrong source) is preserved without breaking the steady state.
+
+### Changed
+- **Printer Card Sizing for Wrapped Telemetry** (#91, thanks @Ahmed-max):
+  - The printer Lovelace card now reports a larger card size when its telemetry pills naturally wrap onto a second line, so Home Assistant reserves the right amount of vertical space and the next dashboard tile no longer overlaps the wrapped row.
+  - Added a debounced `ResizeObserver` on the telemetry area; observers and timers are cleaned up on disconnect. Wrapping behavior itself is unchanged.
+
+### Internal
+- **Shutdown Robustness**:
+  - WebSocket client shutdown now reliably ignores expected `asyncio.CancelledError` during teardown so it no longer surfaces as a spurious error in logs.
+
+### Testing
+- Added regression tests covering the `Stream` dataclass shape returned by `go2rtc_client.streams.list()` — both "existing stream with correct source is left alone" and "existing stream with stale source is recreated".
+- Stabilized the static pytest suite by reading source files as UTF-8 and added layout tests for telemetry-driven card sizing.
+
+
 ## [0.9.4] - 2026-05-21
 > [List of issues (0.9.4)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.4)
 
