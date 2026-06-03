@@ -18,6 +18,7 @@ from .const import (
     RETRY_BACKOFF_MULTIPLIER,
     HEARTBEAT_SECS,
     PROBE_ON_SILENCE_SECS,
+    WS_SUBPROTOCOL,
     WS_URL_TEMPLATE,
 )
 from .utils import coerce_numbers
@@ -29,6 +30,7 @@ OnMessage = Callable[[dict[str, Any]], Awaitable[None]]
 GET_REQPRINTERPARA_SEC = 5.0         # curPosition, autohome, etc.
 GET_PRINT_OBJECTS_SEC = 2.0          # objects/exclusions/current object
 GET_BOXS_INFO_SEC = 300.0             # CFS box info (temp/humidity/filaments) every 5m
+STABLE_CONNECT_SECS = 10.0
 
 
 
@@ -210,27 +212,24 @@ class KClient:
                 url = self._url()
                 _LOGGER.debug("K WS connecting host=%s url=%s", self._host, url)
                 # Disable library pings; we do app-level heartbeat + periodic GETs.
-                async with websockets.connect(url, ping_interval=None) as ws:
+                async with websockets.connect(
+                    url,
+                    ping_interval=None,
+                    subprotocols=[WS_SUBPROTOCOL],
+                ) as ws:
                     self._ws = ws
-                    self._ws_ready.set()  # signal connected
-                    _LOGGER.info("K WS connected host=%s url=%s", self._host, url)
-                    self._connected_once.set()
+                    _LOGGER.debug("K WS handshake connected host=%s url=%s", self._host, url)
                     
-                    # Store connect time to calculate duration later
-                    self._last_rx = time.monotonic()
+                    # Store connect time to calculate duration later. Do not
+                    # update _last_rx here; availability requires valid data.
                     self.uptime_start = time.monotonic()
                     self.reconnect_count += 1
                     
-                    # Reset failure counters on successful connection
-                    connect_failures = 0
-                    backoff = RETRY_MIN_BACKOFF
-
                     # background tasks
                     self._hb_task = asyncio.create_task(self._heartbeat(), name="K-ws-heartbeat")
                     self._tick_task = asyncio.create_task(self._periodic_gets(), name="K-ws-ticker")
 
                     async for raw in ws:
-                        self._last_rx = time.monotonic()
                         # websockets>=15: text is str, binary is bytes
                         if isinstance(raw, (bytes, bytearray)):
                             text = raw.decode("utf-8", "ignore")
@@ -250,6 +249,11 @@ class KClient:
 
                         # Heartbeat handling
                         if isinstance(payload, dict) and payload.get("ModeCode") == "heart_beat":
+                            self._last_rx = time.monotonic()
+                            if not self._ws_ready.is_set():
+                                self._ws_ready.set()
+                                self._connected_once.set()
+                                _LOGGER.info("K WS ready host=%s url=%s", self._host, url)
                             # ACK immediately; literal 'ok' (no JSON)
                             try:
                                 await ws.send("ok")
@@ -258,6 +262,11 @@ class KClient:
                             continue
 
                         if isinstance(payload, dict):
+                            self._last_rx = time.monotonic()
+                            if not self._ws_ready.is_set():
+                                self._ws_ready.set()
+                                self._connected_once.set()
+                                _LOGGER.info("K WS ready host=%s url=%s", self._host, url)
                             merged = coerce_numbers(payload)
                             self._state.update(merged)
                             self.msg_count += 1
@@ -268,9 +277,17 @@ class KClient:
                         else:
                             _LOGGER.debug("K WS unexpected frame type: %r", type(payload))
 
+                    if time.monotonic() - self.uptime_start >= STABLE_CONNECT_SECS:
+                        connect_failures = 0
+                        backoff = RETRY_MIN_BACKOFF
+
             except asyncio.CancelledError:
                 break
             except Exception as exc:
+                short_lived = (
+                    self.uptime_start > 0
+                    and time.monotonic() - self.uptime_start < STABLE_CONNECT_SECS
+                )
                 connect_failures += 1
                 
                 # Check power status before logging loud errors.
@@ -282,7 +299,13 @@ class KClient:
                         "K WS closed/failed (power OFF) host=%s reason=%s", self._host, exc
                     )
                 elif self._is_benign_close(exc):
-                    _LOGGER.debug("K WS closed host=%s reason=%s", self._host, exc)
+                    _LOGGER.debug(
+                        "K WS closed host=%s reason=%s short_lived=%s attempt=%d",
+                        self._host,
+                        exc,
+                        short_lived,
+                        connect_failures,
+                    )
                 else:
                     # Log a single warning after 3 failures (confirms it's not transient)
                     # All other failures are debug-only to avoid log spam
@@ -404,9 +427,11 @@ class KClient:
     async def _periodic_gets(self):
         """Mirror the web UI's periodic GETs so the printer keeps streaming state."""
         try:
-            t_para = 0.0
-            t_objs = 0.0
-            t_cfs = 0.0
+            await asyncio.sleep(2.0)
+            now = time.monotonic()
+            t_para = now
+            t_objs = now
+            t_cfs = now
             # Staggered loop to avoid bursts
             while True:
                 now = time.monotonic()
@@ -415,6 +440,9 @@ class KClient:
                     break
                 if self._stop.is_set():
                     break
+                if not self._ws_ready.is_set():
+                    await asyncio.sleep(0.2)
+                    continue
                 if now - t_para >= GET_REQPRINTERPARA_SEC:
                     try:
                         await self._send_json({"method": "get", "params": {"ReqPrinterPara": 1}})

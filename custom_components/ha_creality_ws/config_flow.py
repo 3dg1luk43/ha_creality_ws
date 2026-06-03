@@ -14,6 +14,7 @@ from .const import (
     CONF_NAME,
     DEFAULT_NAME,
     WS_PORT,
+    WEBRTC_CALL_ROOT_URL_TEMPLATE,
     WEBRTC_URL_TEMPLATE,
     CONF_POWER_SWITCH,
     CONF_POWER_SWITCH_ENABLED,
@@ -165,8 +166,15 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 printermodel = ModelDetection(coord.data)
                 
                 # K2 family uses WebRTC
-                if printermodel.is_k2_family:
-                    _LOGGER.debug("ha_creality_ws: detected K2 family printer (WebRTC)")
+                if printermodel.is_k2_family or printermodel.supports_webrtc:
+                    _LOGGER.debug("ha_creality_ws: detected WebRTC-capable printer")
+                    return CAM_MODE_WEBRTC
+
+                # Some newer K1C firmwares expose the same Creality WebRTC
+                # signaling endpoint as K2 models even though the model name is
+                # still reported as K1C. Probe before falling back to MJPEG.
+                if await self._has_webrtc_signaling(host):
+                    _LOGGER.debug("ha_creality_ws: detected WebRTC via probe")
                     return CAM_MODE_WEBRTC
                 
                 # K1 family, K1 Max, K1C, Creality Hi use MJPEG
@@ -182,14 +190,21 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             _LOGGER.debug("ha_creality_ws: failed to detect camera from telemetry: %s", exc)
         
         # Fallback: probe WebRTC signaling endpoint
-        webrtc_url = WEBRTC_URL_TEMPLATE.format(host=host)
-        if await _probe_webrtc_signaling(self.hass, webrtc_url, timeout=2.0):
+        if await self._has_webrtc_signaling(host):
             _LOGGER.debug("ha_creality_ws: detected WebRTC via probe")
             return CAM_MODE_WEBRTC
         
         # Default to MJPEG
         _LOGGER.debug("ha_creality_ws: defaulting to MJPEG")
         return CAM_MODE_MJPEG
+
+    async def _has_webrtc_signaling(self, host: str) -> bool:
+        """Return True if any known Creality WebRTC signaling endpoint responds."""
+        for template in (WEBRTC_CALL_ROOT_URL_TEMPLATE, WEBRTC_URL_TEMPLATE):
+            url = template.format(host=host)
+            if await _probe_webrtc_signaling(self.hass, url, timeout=2.0):
+                return True
+        return False
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         if user_input is not None:

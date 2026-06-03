@@ -11,6 +11,8 @@ additional HACS integrations.
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import logging
 from typing import Optional
 
@@ -22,8 +24,15 @@ _LOGGER = logging.getLogger(__name__)
 
 # Import go2rtc client library
 try:
-    from go2rtc_client import Go2RtcRestClient, WebRTCSdpOffer
+    from go2rtc_client import Go2RtcRestClient
     from go2rtc_client.exceptions import Go2RtcClientError
+    from go2rtc_client.ws import (
+        Go2RtcWsClient,
+        WebRTCAnswer as Go2RtcWsAnswer,
+        WebRTCCandidate as Go2RtcWsCandidate,
+        WebRTCOffer as Go2RtcWsOffer,
+        WsError,
+    )
     GO2RTC_CLIENT_AVAILABLE = True
 except ImportError:
     GO2RTC_CLIENT_AVAILABLE = False
@@ -42,6 +51,9 @@ try:
     from homeassistant.components.camera import (
         Camera,
         CameraEntityFeature,  # type: ignore[attr-defined]
+        WebRTCAnswer as HAWebRTCAnswer,
+        WebRTCCandidate as HAWebRTCCandidate,
+        WebRTCError,
     )
 except ImportError:  # compatibility with older cores
     from homeassistant.components.camera import Camera  # type: ignore[assignment]
@@ -49,15 +61,25 @@ except ImportError:  # compatibility with older cores
         from homeassistant.components.camera import CameraEntityFeature  # type: ignore[misc]
     except ImportError:  # very old cores
         CameraEntityFeature = None  # type: ignore[assignment]
+    HAWebRTCAnswer = None  # type: ignore[assignment]
+    HAWebRTCCandidate = None  # type: ignore[assignment]
+    WebRTCError = None  # type: ignore[assignment]
+
+try:
+    from webrtc_models import RTCIceCandidateInit
+except ImportError:
+    RTCIceCandidateInit = None  # type: ignore[assignment]
 
 from .const import (
     DOMAIN, 
     MJPEG_URL_TEMPLATE, 
+    WEBRTC_CALL_ROOT_URL_TEMPLATE,
     WEBRTC_URL_TEMPLATE,
     CONF_GO2RTC_URL,
     CONF_GO2RTC_PORT,
 )
 from .entity import KEntity
+from .utils import ModelDetection
 
 
 
@@ -360,13 +382,16 @@ class CrealityWebRTCCamera(_BaseCamera):
         
         # Snapshot throttling to avoid hammering go2rtc
         self._last_snapshot_ts: float = 0.0
-        self._snapshot_min_interval: float = 2.0  # seconds
+        self._snapshot_min_interval: float = 30.0  # seconds
         self._snapshot_lock = asyncio.Lock()
         
         # Initialize go2rtc client (will be set up in async_added_to_hass)
         self._go2rtc_client: Go2RtcRestClient | None = None
+        self._go2rtc_session = None
         self._go2rtc_server_url: str | None = None
         self._go2rtc_version: str | None = None
+        self._webrtc_sessions: dict[str, Go2RtcWsClient] = {}
+        self._direct_sessions: dict[str, list] = {}
         
         _LOGGER.info(
             "ha_creality_ws: WebRTC camera initialized for printer: %s",
@@ -424,6 +449,8 @@ class CrealityWebRTCCamera(_BaseCamera):
         Returns:
             str: Stream name, or None if not configured
         """
+        if not self._uses_go2rtc_webrtc_bridge():
+            return None
         return self._stream_name
 
     async def async_get_stream_source(self) -> Optional[str]:
@@ -435,6 +462,8 @@ class CrealityWebRTCCamera(_BaseCamera):
         Returns:
             str: Stream name, or None if not configured
         """
+        if not self._uses_go2rtc_webrtc_bridge():
+            return None
         await self._ensure_stream_configured()
         return self._stream_name
 
@@ -445,6 +474,14 @@ class CrealityWebRTCCamera(_BaseCamera):
         We initialize the go2rtc client here to ensure it's ready for use.
         """
         await super().async_added_to_hass()
+
+        if not self._uses_go2rtc_webrtc_bridge():
+            self._stream_name = None
+            _LOGGER.info(
+                "ha_creality_ws: using direct printer WebRTC signaling for %s",
+                self._upstream_signaling_url,
+            )
+            return
         
         # Initialize go2rtc client from HA's component
         if not await self._initialize_go2rtc_client():
@@ -489,6 +526,7 @@ class CrealityWebRTCCamera(_BaseCamera):
                     url += "/"
                     
                 self._go2rtc_client = Go2RtcRestClient(session, url)
+                self._go2rtc_session = session
                 self._go2rtc_server_url = url
                 
                 # Validate server version
@@ -509,6 +547,7 @@ class CrealityWebRTCCamera(_BaseCamera):
                 )
                 # Fall through to standard discovery logic
                 self._go2rtc_client = None
+                self._go2rtc_session = None
                 self._go2rtc_server_url = None
 
 
@@ -529,6 +568,7 @@ class CrealityWebRTCCamera(_BaseCamera):
                 go2rtc_data.session,
                 go2rtc_data.url
             )
+            self._go2rtc_session = go2rtc_data.session
             self._go2rtc_server_url = go2rtc_data.url
             
             # Validate server version
@@ -573,6 +613,9 @@ class CrealityWebRTCCamera(_BaseCamera):
             width = None
         if not height or height <= 0:
             height = None
+
+        if not self._uses_go2rtc_webrtc_bridge():
+            return await self._fallback_image()
             
         # Ensure stream is configured and client is initialized
         await self._ensure_stream_configured()
@@ -645,12 +688,11 @@ class CrealityWebRTCCamera(_BaseCamera):
             )
             return
         
-        # Configure stream source.
-        # The K2 family signaling endpoint speaks Creality's JSON-wrapped SDP
-        # protocol, not standard WHEP. The `#format=creality` fragment selects
-        # go2rtc's built-in Creality client; dropping it makes go2rtc send raw
-        # WHEP, which the printer replies to with `{}` and breaks the stream.
-        go2rtc_src = f"webrtc:{self._upstream_signaling_url}#format=creality"
+        # Configure stream source. K2-family printers need go2rtc's Creality
+        # JSON/base64 SDP wrapper, while WebRTC-capable K1C firmwares answer
+        # with plain SDP and fail with "illegal base64" if #format=creality is
+        # used.
+        go2rtc_src = self._go2rtc_source_url()
         
         try:
             # Check if stream already exists
@@ -660,13 +702,12 @@ class CrealityWebRTCCamera(_BaseCamera):
             
             # If stream exists, verify its configured source matches expected
             if not recreate_needed and stream_name in streams:
-                existing_stream = streams.get(stream_name, {})
-                existing_sources = existing_stream.get('sources', [])
-                # Normalize comparison: handle both string and list formats
+                existing_stream = streams[stream_name]
+                existing_sources = self._stream_sources(existing_stream)
                 expected_source = go2rtc_src
-                has_expected_source = (
-                    expected_source in existing_sources if isinstance(existing_sources, list)
-                    else existing_sources == expected_source
+                has_expected_source = self._stream_source_matches(
+                    existing_sources,
+                    expected_source,
                 )
                 if not has_expected_source:
                     _LOGGER.warning(
@@ -677,17 +718,9 @@ class CrealityWebRTCCamera(_BaseCamera):
                     recreate_needed = True
             
             if recreate_needed:
-                # Delete old stream if it exists
-                if stream_name in streams:
-                    try:
-                        await self._go2rtc_client.streams.delete(stream_name)
-                    except Exception as del_exc:
-                        _LOGGER.debug(
-                            "ha_creality_ws: Error deleting old stream '%s': %s",
-                            stream_name, del_exc
-                        )
-                
-                # Add the stream with correct source
+                # Add/update the stream with correct source. Current go2rtc-client
+                # versions used by HA do not expose streams.delete(); add() updates
+                # an existing stream when the name already exists.
                 recreate_stream = self._force_recreate_stream
                 await self._go2rtc_client.streams.add(
                     name=stream_name,
@@ -723,6 +756,87 @@ class CrealityWebRTCCamera(_BaseCamera):
             )
             self._force_recreate_stream = True
 
+    def _stream_sources(self, stream) -> list[str] | str:
+        """Return sources from either a go2rtc Stream object or a legacy dict."""
+        if isinstance(stream, dict):
+            return stream.get("sources", [])
+
+        sources = getattr(stream, "sources", None)
+        if sources is not None:
+            return sources
+
+        source = getattr(stream, "source", None)
+        if source is not None:
+            return source
+
+        producers = getattr(stream, "producers", None)
+        if producers is not None:
+            urls = [
+                url
+                for producer in producers
+                if (url := getattr(producer, "url", None)) is not None
+            ]
+            if urls:
+                return urls
+
+        return []
+
+    def _stream_source_matches(self, existing_sources, expected_source: str) -> bool:
+        """Return True when a go2rtc stream source already points at the expected URL."""
+        if isinstance(existing_sources, str):
+            existing_values = [existing_sources]
+        else:
+            existing_values = list(existing_sources or [])
+
+        expected_url = self._normalize_go2rtc_source(expected_source)
+        expected_creality = "#format=creality" in expected_source
+        for source in existing_values:
+            source = str(source or "")
+            if self._normalize_go2rtc_source(source) != expected_url:
+                continue
+            source_creality = "#format=creality" in source
+            if source_creality == expected_creality or not source_creality:
+                return True
+        return False
+
+    def _normalize_go2rtc_source(self, source: str) -> str:
+        """Normalize go2rtc source strings for comparing configured vs probed URLs."""
+        value = str(source or "")
+        if value.startswith("webrtc:"):
+            value = value[len("webrtc:"):]
+        return value.split("#", 1)[0]
+
+    def _go2rtc_source_url(self) -> str:
+        """Return the go2rtc source URL for this printer's WebRTC protocol."""
+        source = f"webrtc:{self._upstream_signaling_url}"
+        try:
+            if ModelDetection(getattr(self.coordinator, "data", {})).is_k2_family:
+                return f"{source}#format=creality"
+        except Exception:
+            pass
+        return source
+
+    def _uses_go2rtc_webrtc_bridge(self) -> bool:
+        """Return True when this printer should be handled through go2rtc."""
+        try:
+            return ModelDetection(getattr(self.coordinator, "data", {})).is_k2_family
+        except Exception:
+            return False
+
+    async def _delete_stream_if_supported(self, stream_name: str) -> bool:
+        """Delete a go2rtc stream when this client version exposes deletion."""
+        streams_client = getattr(self._go2rtc_client, "streams", None)
+        delete = getattr(streams_client, "delete", None)
+        if delete is None:
+            _LOGGER.debug(
+                "ha_creality_ws: go2rtc client has no stream delete API; will recreate '%s' with add()",
+                stream_name,
+            )
+            return False
+
+        await delete(stream_name)
+        return True
+
 
 
     def _wrap_send_message(self, payload: dict):
@@ -750,6 +864,28 @@ class CrealityWebRTCCamera(_BaseCamera):
         
         return MessageWrapper(payload)
 
+    def _webrtc_answer_message(self, sdp: str):
+        """Return a HA WebRTC answer message with fallback for older cores."""
+        if HAWebRTCAnswer is not None:
+            return HAWebRTCAnswer(sdp)
+        return self._wrap_send_message({"type": "answer", "answer": sdp})
+
+    def _webrtc_candidate_message(self, candidate: str):
+        """Return a HA WebRTC candidate message with fallback for older cores."""
+        if HAWebRTCCandidate is not None and RTCIceCandidateInit is not None:
+            return HAWebRTCCandidate(RTCIceCandidateInit(candidate))
+        return self._wrap_send_message(
+            {"type": "candidate", "candidate": {"candidate": candidate}}
+        )
+
+    def _webrtc_error_message(self, code: str, message: str):
+        """Return a HA WebRTC error message with fallback for older cores."""
+        if WebRTCError is not None:
+            return WebRTCError(code, message)
+        return self._wrap_send_message(
+            {"type": "error", "code": code, "message": message}
+        )
+
     async def async_handle_async_webrtc_offer(
         self, offer_sdp: str, session_id: str, send_message
     ) -> None:
@@ -764,24 +900,9 @@ class CrealityWebRTCCamera(_BaseCamera):
             session_id: Unique session identifier
             send_message: Callback function to send messages to the frontend
         """
-        # Ensure stream is configured and client is initialized
-        await self._ensure_stream_configured()
-        
-        if not self._go2rtc_client or not self._stream_name:
-            _LOGGER.error(
-                "ha_creality_ws: Cannot handle WebRTC offer - client: %s, stream: %s",
-                self._go2rtc_client is not None, self._stream_name
-            )
-            send_message(
-                self._wrap_send_message(
-                    {"type": "error", "message": "go2rtc not configured"}
-                )
-            )
-            return
-
         _LOGGER.info(
-            "ha_creality_ws: handling WebRTC offer for stream '%s', session '%s'",
-            self._stream_name,
+            "ha_creality_ws: handling WebRTC offer for source '%s', session '%s'",
+            self._upstream_signaling_url,
             session_id,
         )
         _LOGGER.debug(
@@ -789,34 +910,71 @@ class CrealityWebRTCCamera(_BaseCamera):
             offer_sdp[:200] + "..." if len(offer_sdp) > 200 else offer_sdp,
         )
 
+        if not self._uses_go2rtc_webrtc_bridge():
+            await self._handle_direct_webrtc_offer(offer_sdp, session_id, send_message)
+            return
+
+        # Ensure go2rtc stream is configured and client is initialized for K2.
+        await self._ensure_stream_configured()
+        
+        if (
+            not self._go2rtc_client
+            or not self._go2rtc_session
+            or not self._go2rtc_server_url
+            or not self._stream_name
+        ):
+            _LOGGER.error(
+                "ha_creality_ws: Cannot handle WebRTC offer - client: %s, session: %s, url: %s, stream: %s",
+                self._go2rtc_client is not None,
+                self._go2rtc_session is not None,
+                self._go2rtc_server_url,
+                self._stream_name,
+            )
+            send_message(
+                self._webrtc_error_message("go2rtc_not_configured", "go2rtc not configured")
+            )
+            return
+
         try:
-            # Create offer object for go2rtc client
-            offer = WebRTCSdpOffer(sdp=offer_sdp)
-            
-            # Forward offer to go2rtc and get answer
+            ws_client = Go2RtcWsClient(
+                self._go2rtc_session,
+                self._go2rtc_server_url,
+                source=self._stream_name,
+            )
+            self._webrtc_sessions[session_id] = ws_client
+
+            def on_messages(message) -> None:
+                """Forward go2rtc WebRTC messages to the HA frontend."""
+                if isinstance(message, Go2RtcWsAnswer):
+                    answer_sdp = message.sdp
+                    _LOGGER.debug(
+                        "ha_creality_ws: received answer SDP preview: %s",
+                        answer_sdp[:200] + "..." if len(answer_sdp) > 200 else answer_sdp,
+                    )
+                    send_message(
+                        self._webrtc_answer_message(answer_sdp)
+                    )
+                    _LOGGER.info("ha_creality_ws: WebRTC offer handled successfully")
+                elif isinstance(message, Go2RtcWsCandidate):
+                    candidate_value = message.candidate
+                    _LOGGER.debug("ha_creality_ws: forwarding go2rtc ICE candidate to frontend")
+                    send_message(
+                        self._webrtc_candidate_message(candidate_value)
+                    )
+                elif isinstance(message, WsError):
+                    _LOGGER.error("ha_creality_ws: go2rtc WebRTC websocket error: %s", message.error)
+                    send_message(
+                        self._webrtc_error_message("go2rtc_webrtc_error", message.error)
+                    )
+
+            ws_client.subscribe(on_messages)
+
             _LOGGER.debug(
-                "ha_creality_ws: forwarding offer to go2rtc for stream: %s. Offer size: %d", 
+                "ha_creality_ws: forwarding offer to go2rtc websocket for stream: %s. Offer size: %d",
                 self._stream_name, len(offer_sdp)
             )
-            answer = await self._go2rtc_client.webrtc.forward_whep_sdp_offer(
-                source_name=self._stream_name,
-                offer=offer
-            )
-            
-            # Extract SDP from answer
-            answer_sdp = answer.sdp
-            _LOGGER.debug(
-                "ha_creality_ws: received answer SDP preview: %s",
-                answer_sdp[:200] + "..." if len(answer_sdp) > 200 else answer_sdp,
-            )
-
-            # Send answer back to frontend
-            send_message(
-                self._wrap_send_message(
-                    {"type": "answer", "answer": answer_sdp}
-                )
-            )
-            _LOGGER.info("ha_creality_ws: WebRTC offer handled successfully")
+            config = self.async_get_webrtc_client_configuration()
+            await ws_client.send(Go2RtcWsOffer(offer_sdp, config.configuration.ice_servers))
 
         except Go2RtcClientError as exc:
             go2rtc_err = exc
@@ -828,20 +986,21 @@ class CrealityWebRTCCamera(_BaseCamera):
             # Attempt recovery by invalidating the stream to force reconfiguration next time
             if self._stream_name:
                 _LOGGER.warning("ha_creality_ws: Invalidating stream '%s' due to go2rtc error", self._stream_name)
+                old_stream_name = self._stream_name
                 try:
-                    await self._go2rtc_client.streams.delete(self._stream_name)
+                    await self._delete_stream_if_supported(old_stream_name)
                     self._stream_name = None
-                    self._force_recreate_stream = False
                 except Exception as cleanup_exc:
                     _LOGGER.debug(
                         "ha_creality_ws: error deleting stream '%s' during cleanup: %s",
-                        self._stream_name, cleanup_exc,
+                        old_stream_name, cleanup_exc,
                     )
-                    self._force_recreate_stream = True
+                    self._stream_name = None
+                self._force_recreate_stream = True
 
             send_message(
-                self._wrap_send_message(
-                    {"type": "error", "message": f"go2rtc error: {go2rtc_err}"}
+                self._webrtc_error_message(
+                    "go2rtc_webrtc_error", f"go2rtc error: {go2rtc_err}"
                 )
             )
         except Exception as exc:
@@ -850,10 +1009,271 @@ class CrealityWebRTCCamera(_BaseCamera):
                 exc, exc_info=True
             )
             send_message(
-                self._wrap_send_message(
-                    {"type": "error", "message": f"WebRTC error: {exc}"}
+                self._webrtc_error_message("webrtc_error", f"WebRTC error: {exc}")
+            )
+
+    async def _handle_direct_webrtc_offer(
+        self, offer_sdp: str, session_id: str, send_message
+    ) -> None:
+        """Handle K1C-style WebRTC signaling directly against the printer."""
+        _LOGGER.debug(
+            "ha_creality_ws: forwarding offer directly to printer for session '%s'",
+            session_id,
+        )
+        self._direct_sessions[session_id] = []
+        await asyncio.sleep(1.0)
+        session = async_get_clientsession(self.hass)
+        printer_origin = self._upstream_signaling_url.rsplit("/", 2)[0]
+        try:
+            printer_offer = self._printer_direct_offer_sdp(
+                offer_sdp,
+                self._direct_sessions.get(session_id, []),
+            )
+            async with session.post(
+                self._upstream_signaling_url,
+                data=self._wrap_direct_offer_payload(printer_offer),
+                headers={
+                    "Accept": "*/*",
+                    "Content-Type": "plain/text",
+                    "DNT": "1",
+                    "Origin": printer_origin,
+                    "Referer": f"{printer_origin}/",
+                },
+                timeout=10,
+            ) as resp:
+                answer_payload = (await resp.text(errors="ignore")).strip()
+                if resp.status != 200:
+                    _LOGGER.error(
+                        "ha_creality_ws: direct WebRTC signaling failed status=%s body=%s",
+                        resp.status,
+                        answer_payload[:200],
+                    )
+                    send_message(
+                        self._webrtc_error_message(
+                            "printer_webrtc_offer_failed",
+                            f"printer signaling returned HTTP {resp.status}",
+                        )
+                    )
+                    return
+
+                answer_sdp = self._ha_direct_answer_sdp(
+                    offer_sdp,
+                    self._extract_direct_answer_sdp(answer_payload),
+                )
+                if not answer_sdp.startswith("v=0"):
+                    _LOGGER.error(
+                        "ha_creality_ws: direct WebRTC signaling returned non-SDP answer: %s",
+                        answer_payload[:200],
+                    )
+                    send_message(
+                        self._webrtc_error_message(
+                            "printer_webrtc_offer_failed",
+                            "printer signaling returned non-SDP answer",
+                        )
+                    )
+                    return
+
+                _LOGGER.debug(
+                    "ha_creality_ws: direct WebRTC answer SDP preview: %s",
+                    answer_sdp[:200] + "..." if len(answer_sdp) > 200 else answer_sdp,
+                )
+                send_message(self._webrtc_answer_message(answer_sdp))
+                _LOGGER.info("ha_creality_ws: direct WebRTC offer handled successfully")
+
+        except Exception as exc:
+            _LOGGER.error(
+                "ha_creality_ws: direct WebRTC signaling error: %s",
+                exc,
+                exc_info=True,
+            )
+            send_message(
+                self._webrtc_error_message(
+                    "printer_webrtc_offer_failed",
+                    f"printer WebRTC signaling error: {exc}",
                 )
             )
+        finally:
+            self._direct_sessions.pop(session_id, None)
+
+    def _wrap_direct_offer_payload(self, offer_sdp: str) -> str:
+        """Wrap SDP offer in the K1C base64 JSON signaling format."""
+        payload = json.dumps(
+            {"type": "offer", "sdp": offer_sdp},
+            separators=(",", ":"),
+        )
+        return base64.b64encode(payload.encode("utf-8")).decode("ascii")
+
+    def _printer_direct_offer_sdp(self, offer_sdp: str, candidates: list | None = None) -> str:
+        """Return a K1C-compatible video-only offer SDP."""
+        session_lines, media_sections = self._split_sdp(offer_sdp)
+        video = next((section for section in media_sections if section and section[0].startswith("m=video ")), None)
+        if not video:
+            return offer_sdp
+
+        video = self._replace_mid(video, "0")
+        video_candidates = self._candidate_lines_for_video(candidates or [], offer_sdp)
+        _LOGGER.debug(
+            "ha_creality_ws: direct WebRTC printer offer candidates total=%d video=%d",
+            len(candidates or []),
+            len(video_candidates),
+        )
+        if video_candidates:
+            video = video + video_candidates
+        munged_session = self._replace_bundle(session_lines, ["0"])
+        return self._join_sdp(munged_session, [video])
+
+    def _ha_direct_answer_sdp(self, offer_sdp: str, printer_answer_sdp: str) -> str:
+        """Return an answer SDP whose m-line order matches HA's original offer."""
+        offer_session, offer_sections = self._split_sdp(offer_sdp)
+        answer_session, answer_sections = self._split_sdp(printer_answer_sdp)
+        if len(offer_sections) <= 1:
+            return printer_answer_sdp
+
+        video_answer = next(
+            (section for section in answer_sections if section and section[0].startswith("m=video ")),
+            None,
+        )
+        if not video_answer:
+            return printer_answer_sdp
+
+        rebuilt_sections: list[list[str]] = []
+        bundle_mids: list[str] = []
+        for offer_section in offer_sections:
+            offer_mid = self._section_mid(offer_section) or str(len(rebuilt_sections))
+            if offer_section and offer_section[0].startswith("m=video "):
+                rebuilt_sections.append(self._replace_mid(video_answer, offer_mid))
+                bundle_mids.append(offer_mid)
+            else:
+                rebuilt_sections.append(self._rejected_media_answer(offer_section, offer_mid))
+
+        return self._join_sdp(self._replace_bundle(answer_session, bundle_mids), rebuilt_sections)
+
+    def _split_sdp(self, sdp: str) -> tuple[list[str], list[list[str]]]:
+        """Split SDP into session lines and media sections."""
+        lines = [line for line in sdp.replace("\r\n", "\n").split("\n") if line]
+        session: list[str] = []
+        sections: list[list[str]] = []
+        current: list[str] | None = None
+        for line in lines:
+            if line.startswith("m="):
+                current = [line]
+                sections.append(current)
+            elif current is None:
+                session.append(line)
+            else:
+                current.append(line)
+        return session, sections
+
+    def _join_sdp(self, session_lines: list[str], media_sections: list[list[str]]) -> str:
+        """Join SDP session lines and media sections."""
+        lines = list(session_lines)
+        for section in media_sections:
+            lines.extend(section)
+        return "\r\n".join(lines) + "\r\n"
+
+    def _section_mid(self, section: list[str]) -> str | None:
+        """Return a media section MID."""
+        for line in section:
+            if line.startswith("a=mid:"):
+                return line.split(":", 1)[1]
+        return None
+
+    def _candidate_lines_for_video(self, candidates: list, offer_sdp: str) -> list[str]:
+        """Return ICE candidate SDP lines that belong to the original video m-line."""
+        _session, sections = self._split_sdp(offer_sdp)
+        video_index = next(
+            (idx for idx, section in enumerate(sections) if section and section[0].startswith("m=video ")),
+            None,
+        )
+        if video_index is None:
+            return []
+        video_mid = self._section_mid(sections[video_index])
+
+        lines: list[str] = []
+        for candidate in candidates:
+            value = getattr(candidate, "candidate", None)
+            if value is None and isinstance(candidate, dict):
+                value = candidate.get("candidate")
+            if not value:
+                continue
+
+            cand_mid = getattr(candidate, "sdpMid", None)
+            cand_index = getattr(candidate, "sdpMLineIndex", None)
+            if isinstance(candidate, dict):
+                cand_mid = candidate.get("sdpMid", cand_mid)
+                cand_index = candidate.get("sdpMLineIndex", cand_index)
+
+            if cand_mid is not None and video_mid is not None and str(cand_mid) != str(video_mid):
+                continue
+            if cand_index is not None:
+                try:
+                    if int(cand_index) != int(video_index):
+                        continue
+                except (TypeError, ValueError):
+                    pass
+
+            lines.append(value if str(value).startswith("a=") else f"a={value}")
+        return lines
+
+    def _replace_mid(self, section: list[str], mid: str) -> list[str]:
+        """Return media section with a replaced MID."""
+        replaced = False
+        out: list[str] = []
+        for line in section:
+            if line.startswith("a=mid:"):
+                out.append(f"a=mid:{mid}")
+                replaced = True
+            else:
+                out.append(line)
+        if not replaced:
+            out.append(f"a=mid:{mid}")
+        return out
+
+    def _replace_bundle(self, session_lines: list[str], mids: list[str]) -> list[str]:
+        """Replace BUNDLE group with the supplied mids."""
+        out: list[str] = []
+        replaced = False
+        for line in session_lines:
+            if line.startswith("a=group:BUNDLE"):
+                out.append("a=group:BUNDLE " + " ".join(mids))
+                replaced = True
+            else:
+                out.append(line)
+        if not replaced and mids:
+            out.append("a=group:BUNDLE " + " ".join(mids))
+        return out
+
+    def _rejected_media_answer(self, offer_section: list[str], mid: str) -> list[str]:
+        """Return a rejected answer media section preserving the offered kind."""
+        if not offer_section:
+            return [f"m=application 0 UDP/DTLS/SCTP webrtc-datachannel", f"a=mid:{mid}", "a=inactive"]
+        parts = offer_section[0].split()
+        kind = parts[0][2:] if parts and parts[0].startswith("m=") else "audio"
+        proto = parts[2] if len(parts) > 2 else "UDP/TLS/RTP/SAVPF"
+        fmts = " ".join(parts[3:]) if len(parts) > 3 else "0"
+        return [
+            f"m={kind} 0 {proto} {fmts}".rstrip(),
+            "c=IN IP4 0.0.0.0",
+            f"a=mid:{mid}",
+            "a=inactive",
+        ]
+
+    def _extract_direct_answer_sdp(self, payload: str) -> str:
+        """Extract SDP from a K1C direct signaling response."""
+        payload = (payload or "").strip()
+        if payload.startswith("v=0"):
+            return payload
+
+        try:
+            decoded = base64.b64decode(payload, validate=False).decode("utf-8", "ignore")
+            data = json.loads(decoded)
+            sdp = data.get("sdp")
+            if isinstance(sdp, str):
+                return sdp
+        except Exception as exc:
+            _LOGGER.debug("ha_creality_ws: failed to decode direct WebRTC answer: %s", exc)
+
+        return payload
 
 
 
@@ -861,15 +1281,32 @@ class CrealityWebRTCCamera(_BaseCamera):
         """Handle WebRTC ICE candidate.
         
         This method is called when ICE candidates are received from the frontend.
-        For go2rtc integration, candidates are handled internally by go2rtc,
-        so this method is primarily for logging purposes.
+        Candidates must be forwarded to the matching go2rtc WebSocket session
+        so ICE can complete between the browser and go2rtc.
         
         Args:
             session_id: Unique session identifier
             candidate: ICE candidate from the frontend
         """
-        # For go2rtc integration, candidates are handled internally
-        _LOGGER.debug("ha_creality_ws: WebRTC candidate received for session %s", session_id)
+        if session_id in self._direct_sessions:
+            self._direct_sessions[session_id].append(candidate)
+            _LOGGER.debug("ha_creality_ws: queued direct WebRTC candidate for session %s", session_id)
+            return
+
+        ws_client = self._webrtc_sessions.get(session_id)
+        if not ws_client:
+            _LOGGER.debug("ha_creality_ws: unknown WebRTC session %s; ignoring candidate", session_id)
+            return
+
+        candidate_value = getattr(candidate, "candidate", None)
+        if candidate_value is None and isinstance(candidate, dict):
+            candidate_value = candidate.get("candidate")
+        if not candidate_value:
+            _LOGGER.debug("ha_creality_ws: empty WebRTC candidate for session %s", session_id)
+            return
+
+        _LOGGER.debug("ha_creality_ws: forwarding frontend ICE candidate for session %s", session_id)
+        await ws_client.send(Go2RtcWsCandidate(candidate_value))
 
     @callback
     def close_webrtc_session(self, session_id: str) -> None:
@@ -883,6 +1320,10 @@ class CrealityWebRTCCamera(_BaseCamera):
             session_id: Unique session identifier to close
         """
         _LOGGER.debug("ha_creality_ws: WebRTC session %s closed", session_id)
+        self._direct_sessions.pop(session_id, None)
+        ws_client = self._webrtc_sessions.pop(session_id, None)
+        if ws_client:
+            self.hass.async_create_task(ws_client.close())
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -957,6 +1398,27 @@ async def _probe_webrtc_signaling(hass: HomeAssistant, url: str, timeout: float 
     return False
 
 
+async def _select_webrtc_signaling_url(hass: HomeAssistant, host: str) -> str | None:
+    """Select the best Creality WebRTC signaling URL for this printer."""
+    signaling_url = WEBRTC_URL_TEMPLATE.format(host=host)
+    if await _probe_webrtc_signaling(hass, signaling_url, timeout=2.0):
+        _LOGGER.info("ha_creality_ws: selected WebRTC signaling endpoint %s", signaling_url)
+        return signaling_url
+
+    # /call is the printer's browser-facing player endpoint on some K1C
+    # firmwares. It is useful for detection, but go2rtc's creality format must
+    # still use /call/webrtc_local for SDP signaling.
+    player_url = WEBRTC_CALL_ROOT_URL_TEMPLATE.format(host=host)
+    if await _probe_webrtc_signaling(hass, player_url, timeout=2.0):
+        _LOGGER.info(
+            "ha_creality_ws: detected WebRTC player endpoint %s; using signaling endpoint %s",
+            player_url,
+            signaling_url,
+        )
+        return signaling_url
+    return None
+
+
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities):
     """Set up camera entities for a Creality printer.
     
@@ -972,23 +1434,35 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities):
     coord = hass.data[DOMAIN][entry.entry_id]
     host = entry.data["host"]
     use_proxy = False  # No longer needed with go2rtc approach
+    selected_webrtc_url = await _select_webrtc_signaling_url(hass, host)
+    webrtc_url = selected_webrtc_url or WEBRTC_URL_TEMPLATE.format(host=host)
 
     _LOGGER.debug("ha_creality_ws: setting up camera for printer at %s", host)
 
-    # Respect user-forced camera mode first
-    cam_mode = entry.options.get("camera_mode")
-    if cam_mode == "webrtc":
-        _LOGGER.info("ha_creality_ws: user forced WebRTC mode for %s", host)
+    def _add_webrtc_camera(reason: str) -> None:
+        _LOGGER.info("ha_creality_ws: using WebRTC camera for %s (%s)", host, reason)
         async_add_entities([
             CrealityWebRTCCamera(
-                coord, 
-                WEBRTC_URL_TEMPLATE.format(host=host), 
+                coord,
+                webrtc_url,
                 use_proxy=use_proxy,
                 go2rtc_url=entry.options.get(CONF_GO2RTC_URL),
                 go2rtc_port=entry.options.get(CONF_GO2RTC_PORT),
             )
         ])
+
+    # Respect user-forced camera mode first
+    cam_mode = entry.options.get("camera_mode")
+    if cam_mode == "webrtc":
+        _add_webrtc_camera("configured mode")
         return
+
+    # Older auto-detection saved K1C as "mjpeg". If the Creality WebRTC
+    # signaling endpoint is reachable, prefer it over the legacy 8080 MJPEG URL.
+    if selected_webrtc_url:
+        _add_webrtc_camera("signaling endpoint detected")
+        return
+
     if cam_mode == "mjpeg":
         _LOGGER.info("ha_creality_ws: user forced MJPEG mode for %s", host)
         async_add_entities([CrealityMjpegCamera(coord, MJPEG_URL_TEMPLATE.format(host=host))])
@@ -998,18 +1472,8 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities):
     cached_camera_type = entry.data.get("_cached_camera_type", "mjpeg")
     
     # WebRTC cameras (K2 family - always present)
-    webrtc_url = WEBRTC_URL_TEMPLATE.format(host=host)
     if cached_camera_type == "webrtc":
-        _LOGGER.info("ha_creality_ws: using cached WebRTC camera detection for %s", host)
-        async_add_entities([
-            CrealityWebRTCCamera(
-                coord, 
-                webrtc_url, 
-                use_proxy=use_proxy,
-                go2rtc_url=entry.options.get(CONF_GO2RTC_URL),
-                go2rtc_port=entry.options.get(CONF_GO2RTC_PORT),
-            )
-        ])
+        _add_webrtc_camera("cached detection")
         return
 
     # MJPEG cameras (default or optional)

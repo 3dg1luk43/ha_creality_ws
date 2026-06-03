@@ -16,11 +16,14 @@ MJPEG_PORT = 8080
 HTTP_PORT = 80
 
 WS_URL_TEMPLATE = "ws://{host}:" + str(WS_PORT)
+WS_SUBPROTOCOL = "wsslicer"
 MJPEG_URL_TEMPLATE = "http://{host}:" + str(MJPEG_PORT) + "/?action=stream"
 
 # WebRTC signaling endpoint (K2 models)
 WEBRTC_PORT = 8000
+WEBRTC_CALL_ROOT_PATH = "/call"
 WEBRTC_CALL_PATH = "/call/webrtc_local"
+WEBRTC_CALL_ROOT_URL_TEMPLATE = "http://{host}:" + str(WEBRTC_PORT) + WEBRTC_CALL_ROOT_PATH
 WEBRTC_URL_TEMPLATE = "http://{host}:" + str(WEBRTC_PORT) + WEBRTC_CALL_PATH
 
 # Camera modes
