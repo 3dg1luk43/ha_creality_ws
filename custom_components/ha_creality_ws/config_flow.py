@@ -15,14 +15,18 @@ from .const import (
     DEFAULT_NAME,
     WS_PORT,
     WEBRTC_URL_TEMPLATE,
+    WEBRTC_CALL_ROOT_URL_TEMPLATE,
     CONF_POWER_SWITCH,
     CONF_POWER_SWITCH_ENABLED,
     CONF_CAMERA_MODE,
     CAM_MODE_AUTO,
     CAM_MODE_MJPEG,
     CAM_MODE_WEBRTC,
+    CAM_MODE_WEBRTC_DIRECT,
+    CAM_MODE_CUSTOM,
     CONF_GO2RTC_URL,
     CONF_GO2RTC_PORT,
+    CONF_CUSTOM_CAMERA_URL,
     DEFAULT_GO2RTC_URL,
     DEFAULT_GO2RTC_PORT,
     CONF_NOTIFY_DEVICE,
@@ -67,6 +71,19 @@ async def _probe_webrtc_signaling(hass, url: str, timeout: float = 1.5) -> bool:
                 return True
     except Exception:
         return False
+    return False
+
+
+async def _has_webrtc_signaling(hass, host: str) -> bool:
+    """Return True if any known Creality WebRTC signaling endpoint responds.
+
+    Newer K1C firmwares expose the signaling endpoint on `/call` while K2-family
+    printers use `/call/webrtc_local`; probe both before deciding.
+    """
+    for template in (WEBRTC_CALL_ROOT_URL_TEMPLATE, WEBRTC_URL_TEMPLATE):
+        url = template.format(host=host)
+        if await _probe_webrtc_signaling(hass, url, timeout=2.0):
+            return True
     return False
 
 
@@ -181,17 +198,17 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         except Exception as exc:
             _LOGGER.debug("ha_creality_ws: failed to detect camera from telemetry: %s", exc)
         
-        # Fallback: probe WebRTC signaling endpoint
-        webrtc_url = WEBRTC_URL_TEMPLATE.format(host=host)
-        if await _probe_webrtc_signaling(self.hass, webrtc_url, timeout=2.0):
+        # Fallback: probe WebRTC signaling endpoints (both /call and /call/webrtc_local)
+        if await _has_webrtc_signaling(self.hass, host):
             _LOGGER.debug("ha_creality_ws: detected WebRTC via probe")
             return CAM_MODE_WEBRTC
-        
+
         # Default to MJPEG
         _LOGGER.debug("ha_creality_ws: defaulting to MJPEG")
         return CAM_MODE_MJPEG
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
             # Handle IP/Host update
             new_host = user_input.pop(CONF_HOST, None)
@@ -230,8 +247,16 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 user_input[CONF_CAMERA_MODE] = detected_type
                 _LOGGER.info("ha_creality_ws: auto mode detected camera type: %s", detected_type)
                 camera_mode = detected_type
-            
-            # Only save go2rtc config if using WebRTC
+
+            # Validate the custom camera URL when that mode is selected.
+            if camera_mode == CAM_MODE_CUSTOM:
+                custom_url = str(user_input.get(CONF_CUSTOM_CAMERA_URL) or "").strip()
+                if "://" not in custom_url:
+                    errors[CONF_CUSTOM_CAMERA_URL] = "invalid_camera_url"
+                else:
+                    user_input[CONF_CUSTOM_CAMERA_URL] = custom_url
+
+            # Only save go2rtc config if using the go2rtc WebRTC bridge
             if camera_mode != CAM_MODE_WEBRTC:
                 user_input.pop(CONF_GO2RTC_URL, None)
                 user_input.pop(CONF_GO2RTC_PORT, None)
@@ -242,8 +267,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         user_input[CONF_GO2RTC_PORT] = int(user_input[CONF_GO2RTC_PORT])
                     except (ValueError, TypeError):
                         user_input[CONF_GO2RTC_PORT] = DEFAULT_GO2RTC_PORT
-            
-            return self.async_create_entry(title="Printer Configuration", data=user_input)
+
+            if not errors:
+                return self.async_create_entry(title="Printer Configuration", data=user_input)
 
         # Get current values with defaults  
         current_power_switch_raw = self._entry.options.get(CONF_POWER_SWITCH)
@@ -267,9 +293,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         current_camera_mode = self._entry.options.get(CONF_CAMERA_MODE, CAM_MODE_AUTO)
         current_go2rtc_url = self._entry.options.get(CONF_GO2RTC_URL, DEFAULT_GO2RTC_URL)
         current_go2rtc_port = self._entry.options.get(CONF_GO2RTC_PORT, DEFAULT_GO2RTC_PORT)
-        
-        # Build schema - show go2rtc options if WebRTC mode is selected or if in auto mode
+        current_custom_url = self._entry.options.get(CONF_CUSTOM_CAMERA_URL, "")
+
+        # Build schema - show go2rtc options if the go2rtc WebRTC bridge is in play
         show_go2rtc = current_camera_mode in (CAM_MODE_WEBRTC, CAM_MODE_AUTO)
+        # Show the custom URL field only when the custom camera mode is selected
+        show_custom_url = current_camera_mode == CAM_MODE_CUSTOM
         
         # Get notification & performance settings
         notify_device = self._entry.options.get(CONF_NOTIFY_DEVICE)
@@ -326,16 +355,18 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=[
-                        selector.SelectOptionDict(value=CAM_MODE_AUTO, label="Auto (Detect)"),
+                        selector.SelectOptionDict(value=CAM_MODE_AUTO, label="Auto (detect by model)"),
                         selector.SelectOptionDict(value=CAM_MODE_MJPEG, label="MJPEG (K1 family)"),
-                        selector.SelectOptionDict(value=CAM_MODE_WEBRTC, label="WebRTC (K2 family)"),
+                        selector.SelectOptionDict(value=CAM_MODE_WEBRTC, label="WebRTC via go2rtc (K2 family)"),
+                        selector.SelectOptionDict(value=CAM_MODE_WEBRTC_DIRECT, label="WebRTC direct, no go2rtc (alternative)"),
+                        selector.SelectOptionDict(value=CAM_MODE_CUSTOM, label="Custom camera URL (MJPEG / RTSP)"),
                     ],
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
             ),
         })
-        
-        # Add go2rtc options if WebRTC mode is selected or in auto mode
+
+        # Add go2rtc options when the go2rtc WebRTC bridge is in play
         if show_go2rtc:
             schema_dict.update({
                 vol.Optional(CONF_GO2RTC_URL, default=current_go2rtc_url): selector.TextSelector(
@@ -343,6 +374,17 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ),
                 vol.Optional(CONF_GO2RTC_PORT, default=current_go2rtc_port): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=1, max=65535, mode=selector.NumberSelectorMode.BOX)
+                ),
+            })
+
+        # Add the custom camera URL field only for the custom camera mode
+        if show_custom_url:
+            schema_dict.update({
+                vol.Optional(
+                    CONF_CUSTOM_CAMERA_URL,
+                    default=(current_custom_url or vol.UNDEFINED),
+                ): selector.TextSelector(
+                    selector.TextSelectorConfig(type=selector.TextSelectorType.URL)
                 ),
             })
 
@@ -370,8 +412,16 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="init",
             data_schema=schema,
+            errors=errors,
             description_placeholders={
                 "power_help": "Optional power switch entity ID (e.g., switch.smart_plug_name) to enable accurate 'Off' state detection",
-                "camera_help": "Camera streaming mode - Auto automatically detects based on printer model",
+                "camera_help": (
+                    "Camera streaming mode. Auto detects from the printer model. "
+                    "WebRTC via go2rtc is the default for K2-family printers; "
+                    "WebRTC direct is an alternative that signals the printer itself "
+                    "(no go2rtc) — try it if the default does not work, e.g. on newer "
+                    "K1C firmware. Custom lets you point at any http(s) MJPEG/snapshot "
+                    "URL or an rtsp:// stream (served via go2rtc)."
+                ),
             }
         )

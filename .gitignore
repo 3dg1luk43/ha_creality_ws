@@ -7,3 +7,5 @@ tools/test_files
 .agent
 .issues
 conductor
+.webrtc_test_server.log
+.webrtc_test_server.pid
