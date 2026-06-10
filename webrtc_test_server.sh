@@ -36,6 +36,18 @@ start() {
         echo "Already running (PID $(cat "$PID_FILE"))."
         return 0
     fi
+    # Validate the interpreter up front so a missing venv doesn't fail cryptically.
+    if [[ ! -x "$PYTHON" ]] && ! command -v "$PYTHON" >/dev/null 2>&1; then
+        local resolved
+        resolved="$(command -v python3 || command -v python || true)"
+        if [[ -z "$resolved" ]]; then
+            echo "Error: Python interpreter not found at '$PYTHON' and no python3/python on PATH." >&2
+            echo "       Set PYTHON=/path/to/python and retry." >&2
+            return 1
+        fi
+        echo "Note: '$PYTHON' not found; falling back to '$resolved'." >&2
+        PYTHON="$resolved"
+    fi
     echo "Starting WebRTC test server (model=$MODEL, print-seconds=$PRINT_SECONDS)..."
     nohup "$PYTHON" "$SERVER" \
         --model "$MODEL" \

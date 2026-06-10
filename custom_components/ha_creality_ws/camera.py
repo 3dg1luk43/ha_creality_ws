@@ -1045,7 +1045,7 @@ class CrealityWebRTCCamera(_BaseCamera):
 
     def _ha_direct_answer_sdp(self, offer_sdp: str, printer_answer_sdp: str) -> str:
         """Return an answer SDP whose m-line order matches HA's original offer."""
-        offer_session, offer_sections = self._split_sdp(offer_sdp)
+        _, offer_sections = self._split_sdp(offer_sdp)
         answer_session, answer_sections = self._split_sdp(printer_answer_sdp)
         if len(offer_sections) <= 1:
             return printer_answer_sdp
