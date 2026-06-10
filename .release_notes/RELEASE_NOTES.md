@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Custom camera URL mode** (#92, thanks @OptimusGREEN):
   - New **"Custom camera URL"** mode to point the camera at any external stream — `http(s)` MJPEG/snapshot URLs are served directly, and `rtsp://` (and similar) streams are ingested through go2rtc.
   - Useful for printers without a built-in camera, or to substitute an existing IP camera.
+- **Spanish translations** (`es.json`, thanks @ofdezdz / Óscar Fernández Díaz):
+  - Adds a full Spanish translation of the integration's config and options UI, extended to cover the reorganized options menu and the new custom-camera-URL field.
 
 ### Changed
 - **Options flow reorganized into a menu**:
@@ -27,7 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The camera-mode dropdown now lists Auto, MJPEG, WebRTC (go2rtc), WebRTC direct, and Custom URL, with clearer labels and help text.
   - The custom-URL field appears when the custom mode is selected, with validation for a complete URL.
   - Auto-detection now probes both `/call` and `/call/webrtc_local` WebRTC signaling endpoints.
-- **Spanish translations** updated for the new options layout.
 - **WebSocket handshake parity**:
   - The client now advertises the printer web UI's `wsslicer` subprotocol on the WebSocket handshake. Servers that don't use it simply ignore it (RFC 6455), so this is compatible with existing printers.
 
