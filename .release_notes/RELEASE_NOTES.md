@@ -6,6 +6,64 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.9.6] - 2026-06-10
+> [List of issues (0.9.6)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.6)
+
+### Added
+- **Direct WebRTC camera mode** (idea recycled from #95, thanks @erus71an):
+  - New opt-in **"WebRTC direct, no go2rtc"** camera mode that signals the printer's WebRTC endpoint directly from Home Assistant (browser-style base64-JSON SDP on `:8000/call/webrtc_local`), bypassing go2rtc entirely.
+  - Available as an alternative for any WebRTC-capable printer — try it if the default go2rtc path doesn't work on your firmware (e.g. newer K1C). The K2-family go2rtc path is unchanged and remains the default.
+  - The frontend offer is reduced to video-only, wrapped/unwrapped as the printer expects, and the answer's media-line order is rebuilt to match Home Assistant's original offer.
+- **Custom camera URL mode** (#92, thanks @OptimusGREEN):
+  - New **"Custom camera URL"** mode to point the camera at any external stream — `http(s)` MJPEG/snapshot URLs are served directly, and `rtsp://` (and similar) streams are ingested through go2rtc.
+  - Useful for printers without a built-in camera, or to substitute an existing IP camera.
+
+### Changed
+- **Options flow reorganized into a menu**:
+  - The printer Options dialog is now a menu with **Camera**, **Notifications**, **Power switch**, and **Connection & performance** sub-pages.
+  - Each sub-page loads fresh, so mode-dependent fields are always correct — previously a single combined page couldn't re-render when the camera mode changed, leaving stale/irrelevant fields (e.g. go2rtc fields showing while "Custom URL" was selected).
+  - Submitting a sub-page stages its changes and returns you to the menu (the back arrow returns without staging); **Save and apply** writes everything at once, so the printer reloads only once no matter how many sections you edit.
+- **Camera options refresh**:
+  - The camera-mode dropdown now lists Auto, MJPEG, WebRTC (go2rtc), WebRTC direct, and Custom URL, with clearer labels and help text.
+  - The custom-URL field appears when the custom mode is selected, with validation for a complete URL.
+  - Auto-detection now probes both `/call` and `/call/webrtc_local` WebRTC signaling endpoints.
+- **Spanish translations** updated for the new options layout.
+- **WebSocket handshake parity**:
+  - The client now advertises the printer web UI's `wsslicer` subprotocol on the WebSocket handshake. Servers that don't use it simply ignore it (RFC 6455), so this is compatible with existing printers.
+
+### Fixed
+- **WebSocket availability now requires real data**:
+  - The printer is reported available/connected only after the first valid telemetry frame, not on the bare TCP/WebSocket handshake — preventing brief "available" flashes against a socket that never streams data.
+  - Reconnect backoff is reset only after a connection survives at least 10 seconds, so rapid connect/drop flapping keeps backing off instead of masquerading as healthy reconnects.
+  - The heartbeat watchdog measures silence from the connect time until the first frame, avoiding a premature "connection dead" verdict right after connecting.
+
+### Internal
+- **#88 diagnostics**: added debug logging of the negotiated WebRTC video codec/profile on stream start, to help diagnose the brief pre-keyframe visual artifact reported on some K2 cameras (no behavior change).
+
+
+## [0.9.5] - 2026-05-22
+> [List of issues (0.9.5)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.5)
+
+### Fixed
+- **K2 WebRTC Camera Instability after 0.9.4** (#88 follow-up):
+  - Fixed an `'Stream' object has no attribute 'get'` error that fired on every snapshot and WebRTC offer when the go2rtc stream already existed.
+  - The 0.9.4 "verify existing source matches" check incorrectly treated `streams.list()` entries as dicts; the `go2rtc-client` library actually returns `Stream` dataclasses with a `producers: list[Producer]` field. The misuse raised on every call, was swallowed by the generic exception handler, and forced a delete-and-recreate of the active stream on every snapshot / offer — producing the flicker, repeated 30s loads, and intermittent unavailability reported on 0.9.4.
+  - The verification now inspects `Stream.producers[*].url`, so the upgrade-path self-healing (recreate a leftover stream that points at a wrong source) is preserved without breaking the steady state.
+
+### Changed
+- **Printer Card Sizing for Wrapped Telemetry** (#91, thanks @Ahmed-max):
+  - The printer Lovelace card now reports a larger card size when its telemetry pills naturally wrap onto a second line, so Home Assistant reserves the right amount of vertical space and the next dashboard tile no longer overlaps the wrapped row.
+  - Added a debounced `ResizeObserver` on the telemetry area; observers and timers are cleaned up on disconnect. Wrapping behavior itself is unchanged.
+
+### Internal
+- **Shutdown Robustness**:
+  - WebSocket client shutdown now reliably ignores expected `asyncio.CancelledError` during teardown so it no longer surfaces as a spurious error in logs.
+
+### Testing
+- Added regression tests covering the `Stream` dataclass shape returned by `go2rtc_client.streams.list()` — both "existing stream with correct source is left alone" and "existing stream with stale source is recreated".
+- Stabilized the static pytest suite by reading source files as UTF-8 and added layout tests for telemetry-driven card sizing.
+
+
 ## [0.9.4] - 2026-05-21
 > [List of issues (0.9.4)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.4)
 
