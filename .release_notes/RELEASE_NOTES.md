@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.9.6.1] - 2026-06-11
+> [List of issues (0.9.6.1)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.6.1)
+
+### Fixed
+- **CFS sensors stuck unavailable after upgrading to 0.9.6** (#99, regression):
+  - All CFS sensors (box temp/humidity, every slot's filament/color/percent, the external slot) and the **Active Filament Slot** sensor stayed `unavailable` after a few minutes and never recovered, even across Home Assistant and printer restarts. Rolling back to 0.9.4 worked around it.
+  - `boxsInfo` (the CFS payload) is only sent by the printer in response to an explicit poll, never in the regular telemetry stream. The 0.9.6 rework of the periodic-GET loop started its poll timers at the current time instead of zero, which pushed the **first** CFS poll a full 5 minutes (`GET_BOXS_INFO_SEC`) past connect. Because every reconnect restarts that timer, any printer that dropped and reconnected more often than every 5 minutes never got polled at all — so the CFS entities were never discovered and sat unavailable.
+  - The first poll of each periodic GET (printer params, print objects, and CFS box info) now fires immediately once the connection is ready, restoring the pre-0.9.6 behavior. The 5-minute steady-state cadence for CFS is unchanged, and the 0.9.6 "availability requires real data" gate still applies.
+
+
 ## [0.9.6] - 2026-06-10
 > [List of issues (0.9.6)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.6)
 
