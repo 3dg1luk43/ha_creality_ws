@@ -432,9 +432,16 @@ class KClient:
         try:
             await asyncio.sleep(2.0)
             now = time.monotonic()
-            t_para = now
-            t_objs = now
-            t_cfs = now
+            # Back-date each timer by its own interval so the first poll of each
+            # fires on the first ready iteration instead of a full interval after
+            # connect. Critical for CFS: boxsInfo is only sent on request (never
+            # in the regular stream), so a `now`-initialised t_cfs left CFS
+            # sensors unavailable for the full 5-minute interval after every
+            # (re)connect (issue #99). The _ws_ready gate below still prevents
+            # sending before the connection has proven it's talking.
+            t_para = now - GET_REQPRINTERPARA_SEC
+            t_objs = now - GET_PRINT_OBJECTS_SEC
+            t_cfs = now - GET_BOXS_INFO_SEC
             # Staggered loop to avoid bursts
             while True:
                 now = time.monotonic()
