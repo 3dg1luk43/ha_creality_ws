@@ -22,7 +22,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
 
 class _KLight(KEntity, LightEntity):
-    _attr_name = "Light"
+    _attr_translation_key = "light"
     _attr_icon = "mdi:lightbulb"
     _attr_supported_color_modes = {ColorMode.ONOFF}
     _attr_color_mode = ColorMode.ONOFF
@@ -31,7 +31,7 @@ class _KLight(KEntity, LightEntity):
     _attr_entity_registry_enabled_default = True
 
     def __init__(self, coordinator) -> None:
-        super().__init__(coordinator, self._attr_name, "light")
+        super().__init__(coordinator, unique_id="light")
 
     @property
     def is_on(self) -> bool | None:

@@ -91,6 +91,8 @@ class _BaseCamera(KEntity, Camera):
     - Common error handling patterns
     """
 
+    _attr_translation_key = "printer_camera"
+
     # Tiny 1x1 white JPEG as last-resort fallback (valid JFIF with proper quantization tables)
     # This ensures we always have a valid image to return even when the camera is unavailable
     _TINY_JPEG = (
@@ -99,15 +101,9 @@ class _BaseCamera(KEntity, Camera):
         b"\xff\xda\x00\x0c\x03\x01\x00\x02\x11\x03\x11\x00?\x00\xd2\xcf \xff\xd9"
     )
 
-    def __init__(self, coordinator, name: str, unique_suffix: str) -> None:
-        """Initialize the base camera.
-        
-        Args:
-            coordinator: The printer coordinator
-            name: Display name for the camera
-            unique_suffix: Unique suffix for the entity ID
-        """
-        KEntity.__init__(self, coordinator, name, unique_suffix)
+    def __init__(self, coordinator, unique_suffix: str) -> None:
+        """Initialize the base camera."""
+        KEntity.__init__(self, coordinator, unique_id=unique_suffix)
         Camera.__init__(self)
         self._last_frame: bytes | None = None
 
@@ -143,7 +139,7 @@ class CrealityMjpegCamera(_BaseCamera):
             coordinator: The printer coordinator
             url: MJPEG stream URL from the printer
         """
-        super().__init__(coordinator, "Printer Camera", "camera")
+        super().__init__(coordinator, "camera")
         self._url = url
         # Snapshot throttling to avoid repeatedly opening MJPEG streams
         self._last_snapshot_ts: float = 0.0
@@ -364,7 +360,7 @@ class CrealityWebRTCCamera(_BaseCamera):
                 set it overrides the printer's Creality WebRTC source. Only used when
                 direct_signaling is False.
         """
-        super().__init__(coordinator, "Printer Camera", "camera")
+        super().__init__(coordinator, "camera")
         self._upstream_signaling_url = signaling_url
         self._use_proxy = use_proxy  # Deprecated, kept for compatibility
         self._custom_go2rtc_url = go2rtc_url
