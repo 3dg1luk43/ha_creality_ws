@@ -18,10 +18,10 @@
 #
 # FEATURES:
 # - Live camera feed
-# - Print status: progress, layer, time, speed, flow, material
+# - Print status: progress, layer, time left + ETA, speed, flow, material
 # - Current model preview image
 # - Temperature gauges (nozzle, bed, chamber) with severity colors
-# - Adjustable temperature targets
+# - Adjustable temperature targets + print tuning (inline sliders)
 # - XYZ position display
 # - Print controls: Pause, Resume, Stop (with confirmation), Home
 # - Print tuning and flow rate
@@ -31,6 +31,8 @@
 # - External filament status
 # - 2-hour temperature history graph
 # - System status, filament status, reconnect button
+# - Progress + model preview auto-hide when idle
+# - Attention banner appears on error or stopped
 #
 # TESTED ON: Creality K2 Plus with dual CFS boxes
 # ============================================================
@@ -41,6 +43,19 @@ views:
     path: printer
     badges: []
     cards:
+
+      # ── Alert: only shows when the printer needs attention ─────────────────
+      - type: markdown
+        visibility:
+          - condition: state
+            entity: sensor.k2plus_1516_print_status
+            state:
+              - error
+              - stopped
+        content: >
+          # ⚠️ Printer needs attention
+
+          **Status: {{ states('sensor.k2plus_1516_print_status') | title }}.** Check the printer.
 
       # ── Camera Feed ────────────────────────────────────────────────────────
       - type: picture-entity
@@ -58,8 +73,8 @@ views:
           {% set progress = states('sensor.k2plus_1516_print_progress') | float(0) %}
           {% set layer = states('sensor.k2plus_1516_working_layer') %}
           {% set total = states('sensor.k2plus_1516_total_layers') %}
-          {% set time_left = states('sensor.k2plus_1516_print_time_left') %}
-          {% set job_time = states('sensor.k2plus_1516_print_job_time') %}
+          {% set time_left = states('sensor.k2plus_1516_print_time_left') | int(0) %}
+          {% set job_time = states('sensor.k2plus_1516_print_job_time') | int(0) %}
           {% set obj = states('sensor.k2plus_1516_current_object') %}
           {% set obj_count = states('sensor.k2plus_1516_object_count') %}
           {% set material = states('sensor.k2plus_1516_used_material_length') %}
@@ -69,7 +84,7 @@ views:
 
           **Progress:** {{ progress }}% &nbsp;|&nbsp; **Layer:** {{ layer }} / {{ total }}
 
-          **Time Left:** {{ time_left }} &nbsp;|&nbsp; **Elapsed:** {{ job_time }}
+          **Time Left:** {{ time_left // 3600 }}h {{ '%02d' | format(time_left % 3600 // 60) }}m &nbsp;|&nbsp; **Elapsed:** {{ job_time // 3600 }}h {{ '%02d' | format(job_time % 3600 // 60) }}m{% if time_left > 0 %} &nbsp;|&nbsp; **ETA:** {{ (now() + timedelta(seconds=time_left)).strftime('%I:%M %p') }}{% endif %}
 
           **Object:** {{ obj }} ({{ obj_count }} total) &nbsp;|&nbsp; **Active Slot:** {{ active_slot }}
 
@@ -80,6 +95,14 @@ views:
         entity: sensor.k2plus_1516_print_progress
         name: Print Progress
         icon: mdi:progress-clock
+        visibility:
+          - condition: state
+            entity: sensor.k2plus_1516_print_status
+            state:
+              - printing
+              - paused
+              - processing
+              - completed
 
       # ── Current Print Preview ──────────────────────────────────────────────
       - type: picture-entity
@@ -87,6 +110,14 @@ views:
         name: Current Model
         show_state: false
         show_name: true
+        visibility:
+          - condition: state
+            entity: sensor.k2plus_1516_print_status
+            state:
+              - printing
+              - paused
+              - processing
+              - completed
 
       # ── Temperature Gauges ─────────────────────────────────────────────────
       - type: horizontal-stack
@@ -208,10 +239,13 @@ views:
       # ── Print Tuning ───────────────────────────────────────────────────────
       - type: horizontal-stack
         cards:
-          - type: entity
+          - type: tile
             entity: number.k2plus_1516_print_tuning
             name: Print Tuning
             icon: mdi:tune
+            features:
+              - type: numeric-input
+                style: slider
           - type: entity
             entity: sensor.k2plus_1516_flow_rate
             name: Flow Rate
