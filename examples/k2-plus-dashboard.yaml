@@ -75,7 +75,7 @@ views:
 
           **Flow:** {{ flow }} &nbsp;|&nbsp; **Speed:** {{ speed }} &nbsp;|&nbsp; **Material Used:** {{ material }}
 
-      # ── Progress Bar ───────────────────────────────────────────────────────
+      # ── Progress ───────────────────────────────────────────────────────────
       - type: entity
         entity: sensor.k2plus_1516_print_progress
         name: Print Progress
@@ -125,18 +125,27 @@ views:
       # ── Temperature Targets ────────────────────────────────────────────────
       - type: horizontal-stack
         cards:
-          - type: entity
+          - type: tile
             entity: number.k2plus_1516_nozzle_target
             name: Nozzle Target
             icon: mdi:thermometer
-          - type: entity
+            features:
+              - type: numeric-input
+                style: slider
+          - type: tile
             entity: number.k2plus_1516_bed_target
             name: Bed Target
             icon: mdi:thermometer
-          - type: entity
+            features:
+              - type: numeric-input
+                style: slider
+          - type: tile
             entity: number.k2plus_1516_chamber_target
             name: Chamber Target
             icon: mdi:thermometer
+            features:
+              - type: numeric-input
+                style: slider
 
       # ── XYZ Position ──────────────────────────────────────────────────────
       - type: horizontal-stack
