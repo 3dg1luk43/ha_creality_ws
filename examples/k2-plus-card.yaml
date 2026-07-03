@@ -1,0 +1,306 @@
+# ============================================================
+# Creality K2 Plus Dashboard Card for Home Assistant
+# Integration: https://github.com/3dg1luk43/ha_creality_ws
+#
+# SINGLE-CARD VERSION. Add it to any existing dashboard via:
+#   Edit dashboard → + Add Card → Manual → paste this whole file.
+# (For a full dashboard view instead, use k2-plus-dashboard.yaml.)
+#
+# SETUP:
+# 1. Install the ha_creality_ws integration via HACS
+# 2. Find your printer's entity prefix by running this template
+#    in Developer Tools → Template:
+#
+#    {% for state in states %}
+#      {% if 'k2plus' in state.entity_id | lower %}
+#        {{ state.entity_id }}
+#      {% endif %}
+#    {% endfor %}
+#
+# 3. Replace 'k2plus_1516' throughout this file with your prefix
+#
+# FEATURES:
+# - Live camera feed, print status, current model preview
+# - Temperature gauges + adjustable targets (tile sliders)
+# - XYZ position, print controls, tuning, chamber light, fans
+# - Dual CFS filament tables, external filament, temperature history
+# - System status, filament status, reconnect button
+#
+# TESTED ON: Creality K2 Plus with dual CFS boxes
+# ============================================================
+
+type: vertical-stack
+cards:
+  # ── Camera Feed ────────────────────────────────────────────────────────
+  - type: picture-entity
+    entity: camera.k2plus_1516_printer_camera
+    name: K2 Plus Live
+    show_state: false
+    show_name: false
+    camera_view: auto
+
+  # ── Print Status ───────────────────────────────────────────────────────
+  - type: markdown
+    content: >
+      ## 🖨️ K2 Plus: {{ states('sensor.k2plus_1516_print_status') | title }}
+
+      {% set progress = states('sensor.k2plus_1516_print_progress') | float(0) %}
+      {% set layer = states('sensor.k2plus_1516_working_layer') %}
+      {% set total = states('sensor.k2plus_1516_total_layers') %}
+      {% set time_left = states('sensor.k2plus_1516_print_time_left') %}
+      {% set job_time = states('sensor.k2plus_1516_print_job_time') %}
+      {% set obj = states('sensor.k2plus_1516_current_object') %}
+      {% set obj_count = states('sensor.k2plus_1516_object_count') %}
+      {% set material = states('sensor.k2plus_1516_used_material_length') %}
+      {% set flow = states('sensor.k2plus_1516_real_time_flow') %}
+      {% set speed = states('sensor.k2plus_1516_print_speed') %}
+      {% set active_slot = states('sensor.k2plus_1516_active_filament_slot') %}
+
+      **Progress:** {{ progress }}% &nbsp;|&nbsp; **Layer:** {{ layer }} / {{ total }}
+
+      **Time Left:** {{ time_left }} &nbsp;|&nbsp; **Elapsed:** {{ job_time }}
+
+      **Object:** {{ obj }} ({{ obj_count }} total) &nbsp;|&nbsp; **Active Slot:** {{ active_slot }}
+
+      **Flow:** {{ flow }} &nbsp;|&nbsp; **Speed:** {{ speed }} &nbsp;|&nbsp; **Material Used:** {{ material }}
+
+  # ── Progress ───────────────────────────────────────────────────────────
+  - type: entity
+    entity: sensor.k2plus_1516_print_progress
+    name: Print Progress
+    icon: mdi:progress-clock
+
+  # ── Current Print Preview ──────────────────────────────────────────────
+  - type: picture-entity
+    entity: image.k2plus_1516_current_print_preview
+    name: Current Model
+    show_state: false
+    show_name: true
+
+  # ── Temperature Gauges ─────────────────────────────────────────────────
+  - type: horizontal-stack
+    cards:
+      - type: gauge
+        entity: sensor.k2plus_1516_nozzle_temperature
+        name: Nozzle
+        min: 0
+        max: 300
+        needle: true
+        severity:
+          green: 0
+          yellow: 180
+          red: 260
+      - type: gauge
+        entity: sensor.k2plus_1516_bed_temperature
+        name: Bed
+        min: 0
+        max: 120
+        needle: true
+        severity:
+          green: 0
+          yellow: 50
+          red: 100
+      - type: gauge
+        entity: sensor.k2plus_1516_chamber_temperature
+        name: Chamber
+        min: 0
+        max: 60
+        needle: true
+        severity:
+          green: 0
+          yellow: 35
+          red: 50
+
+  # ── Temperature Targets ────────────────────────────────────────────────
+  - type: horizontal-stack
+    cards:
+      - type: tile
+        entity: number.k2plus_1516_nozzle_target
+        name: Nozzle Target
+        icon: mdi:thermometer
+        features:
+          - type: numeric-input
+            style: slider
+      - type: tile
+        entity: number.k2plus_1516_bed_target
+        name: Bed Target
+        icon: mdi:thermometer
+        features:
+          - type: numeric-input
+            style: slider
+      - type: tile
+        entity: number.k2plus_1516_chamber_target
+        name: Chamber Target
+        icon: mdi:thermometer
+        features:
+          - type: numeric-input
+            style: slider
+
+  # ── XYZ Position ──────────────────────────────────────────────────────
+  - type: horizontal-stack
+    cards:
+      - type: entity
+        entity: sensor.k2plus_1516_position_x
+        name: X
+        icon: mdi:axis-x-arrow
+      - type: entity
+        entity: sensor.k2plus_1516_position_y
+        name: Y
+        icon: mdi:axis-y-arrow
+      - type: entity
+        entity: sensor.k2plus_1516_position_z
+        name: Z
+        icon: mdi:axis-z-arrow
+
+  # ── Print Controls ─────────────────────────────────────────────────────
+  - type: horizontal-stack
+    cards:
+      - type: button
+        name: Pause
+        icon: mdi:pause-circle
+        show_state: false
+        tap_action:
+          action: perform-action
+          perform_action: button.press
+          target:
+            entity_id: button.k2plus_1516_pause_print
+      - type: button
+        name: Resume
+        icon: mdi:play-circle
+        show_state: false
+        tap_action:
+          action: perform-action
+          perform_action: button.press
+          target:
+            entity_id: button.k2plus_1516_resume_print
+      - type: button
+        name: Stop
+        icon: mdi:stop-circle
+        show_state: false
+        tap_action:
+          action: perform-action
+          perform_action: button.press
+          target:
+            entity_id: button.k2plus_1516_stop_print
+          confirmation:
+            text: Stop the current print? This cannot be undone.
+      - type: button
+        name: Home
+        icon: mdi:home
+        show_state: false
+        tap_action:
+          action: perform-action
+          perform_action: button.press
+          target:
+            entity_id: button.k2plus_1516_home_xy_then_z
+
+  # ── Print Tuning ───────────────────────────────────────────────────────
+  - type: horizontal-stack
+    cards:
+      - type: entity
+        entity: number.k2plus_1516_print_tuning
+        name: Print Tuning
+        icon: mdi:tune
+      - type: entity
+        entity: sensor.k2plus_1516_flow_rate
+        name: Flow Rate
+        icon: mdi:water-percent
+
+  # ── Chamber Light ──────────────────────────────────────────────────────
+  - type: button
+    name: Chamber Light
+    icon: mdi:lightbulb
+    entity: light.k2plus_1516_light
+    tap_action:
+      action: toggle
+
+  # ── Fans ───────────────────────────────────────────────────────────────
+  - type: horizontal-stack
+    cards:
+      - type: entity
+        entity: fan.k2plus_1516_model_fan
+        name: Model Fan
+        icon: mdi:fan
+      - type: entity
+        entity: fan.k2plus_1516_case_fan
+        name: Case Fan
+        icon: mdi:fan
+      - type: entity
+        entity: fan.k2plus_1516_side_fan
+        name: Side Fan
+        icon: mdi:fan
+
+  # ── CFS Box 1 ──────────────────────────────────────────────────────────
+  # Remove this section if you don't have a CFS box
+  - type: markdown
+    content: >
+      ## 📦 CFS Box 1
+
+      🌡️ **Temp:** {{ states('sensor.k2plus_1516_cfs_box_1_temp') }}°C &nbsp;|&nbsp;
+      💧 **Humidity:** {{ states('sensor.k2plus_1516_cfs_box_1_humidity') }}%
+
+      | Slot | Filament | Color | Remaining |
+      |------|----------|-------|-----------|
+      | 1 | {{ states('sensor.k2plus_1516_cfs_box_1_slot_1_filament') }} | {{ states('sensor.k2plus_1516_cfs_box_1_slot_1_color') }} | {{ states('sensor.k2plus_1516_cfs_box_1_slot_1_percent') }}% |
+      | 2 | {{ states('sensor.k2plus_1516_cfs_box_1_slot_2_filament') }} | {{ states('sensor.k2plus_1516_cfs_box_1_slot_2_color') }} | {{ states('sensor.k2plus_1516_cfs_box_1_slot_2_percent') }}% |
+      | 3 | {{ states('sensor.k2plus_1516_cfs_box_1_slot_3_filament') }} | {{ states('sensor.k2plus_1516_cfs_box_1_slot_3_color') }} | {{ states('sensor.k2plus_1516_cfs_box_1_slot_3_percent') }}% |
+      | 4 | {{ states('sensor.k2plus_1516_cfs_box_1_slot_4_filament') }} | {{ states('sensor.k2plus_1516_cfs_box_1_slot_4_color') }} | {{ states('sensor.k2plus_1516_cfs_box_1_slot_4_percent') }}% |
+
+  # ── CFS Box 2 ──────────────────────────────────────────────────────────
+  # Remove this section if you only have one CFS box
+  - type: markdown
+    content: >
+      ## 📦 CFS Box 2
+
+      🌡️ **Temp:** {{ states('sensor.k2plus_1516_cfs_box_2_temp') }}°C &nbsp;|&nbsp;
+      💧 **Humidity:** {{ states('sensor.k2plus_1516_cfs_box_2_humidity') }}%
+
+      | Slot | Filament | Color | Remaining |
+      |------|----------|-------|-----------|
+      | 1 | {{ states('sensor.k2plus_1516_cfs_box_2_slot_1_filament') }} | {{ states('sensor.k2plus_1516_cfs_box_2_slot_1_color') }} | {{ states('sensor.k2plus_1516_cfs_box_2_slot_1_percent') }}% |
+      | 2 | {{ states('sensor.k2plus_1516_cfs_box_2_slot_2_filament') }} | {{ states('sensor.k2plus_1516_cfs_box_2_slot_2_color') }} | {{ states('sensor.k2plus_1516_cfs_box_2_slot_2_percent') }}% |
+      | 3 | {{ states('sensor.k2plus_1516_cfs_box_2_slot_3_filament') }} | {{ states('sensor.k2plus_1516_cfs_box_2_slot_3_color') }} | {{ states('sensor.k2plus_1516_cfs_box_2_slot_3_percent') }}% |
+      | 4 | {{ states('sensor.k2plus_1516_cfs_box_2_slot_4_filament') }} | {{ states('sensor.k2plus_1516_cfs_box_2_slot_4_color') }} | {{ states('sensor.k2plus_1516_cfs_box_2_slot_4_percent') }}% |
+
+  # ── CFS External Filament ──────────────────────────────────────────────
+  # Remove this section if you don't use external filament
+  - type: markdown
+    content: >
+      ## 🧵 External Filament
+
+      **Type:** {{ states('sensor.k2plus_1516_cfs_external_filament') }} &nbsp;|&nbsp;
+      **Color:** {{ states('sensor.k2plus_1516_cfs_external_color') }} &nbsp;|&nbsp;
+      **Remaining:** {{ states('sensor.k2plus_1516_cfs_external_percent') }}%
+
+  # ── Temperature History ────────────────────────────────────────────────
+  - type: history-graph
+    title: Temperature History (2hr)
+    hours_to_show: 2
+    entities:
+      - entity: sensor.k2plus_1516_nozzle_temperature
+        name: Nozzle
+      - entity: sensor.k2plus_1516_bed_temperature
+        name: Bed
+      - entity: sensor.k2plus_1516_chamber_temperature
+        name: Chamber
+
+  # ── System Status ──────────────────────────────────────────────────────
+  - type: horizontal-stack
+    cards:
+      - type: entity
+        entity: sensor.k2plus_1516_system
+        name: System
+        icon: mdi:information
+      - type: entity
+        entity: sensor.k2plus_1516_filament_status
+        name: Filament
+        icon: mdi:spool
+      - type: button
+        name: Reconnect
+        icon: mdi:connection
+        show_state: false
+        tap_action:
+          action: perform-action
+          perform_action: button.press
+          target:
+            entity_id: button.k2plus_1516_reconnect
