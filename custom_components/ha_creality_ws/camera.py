@@ -91,8 +91,6 @@ class _BaseCamera(KEntity, Camera):
     - Common error handling patterns
     """
 
-    _attr_translation_key = "printer_camera"
-
     # Tiny 1x1 white JPEG as last-resort fallback (valid JFIF with proper quantization tables)
     # This ensures we always have a valid image to return even when the camera is unavailable
     _TINY_JPEG = (
@@ -121,16 +119,18 @@ class _BaseCamera(KEntity, Camera):
 
 class CrealityMjpegCamera(_BaseCamera):
     """MJPEG camera for Creality K1 family printers.
-    
+
     This camera handles MJPEG streams from Creality K1 family printers,
     providing both static image capture and live streaming capabilities.
-    
+
     Features:
     - Automatic MJPEG stream detection and parsing
     - Fallback image handling when printer is offline
     - Live streaming support via handle_async_mjpeg_stream
     - JPEG validation and error recovery
     """
+
+    _attr_translation_key = "printer_camera"
 
     def __init__(self, coordinator, url: str) -> None:
         """Initialize the MJPEG camera.
@@ -322,19 +322,21 @@ class CrealityWebRTCCamera(_BaseCamera):
 
     This camera provides native WebRTC streaming support for Creality K2 family
     printers by integrating with Home Assistant's built-in go2rtc service.
-    
+
     Architecture:
     1. Configures go2rtc to pull WebRTC stream from the Creality K2 printer
     2. Exposes go2rtc's WebRTC endpoint as the camera's stream source
     3. Forwards WebRTC offers/answers between Home Assistant frontend and go2rtc
     4. Provides static image capture via go2rtc's snapshot API
-    
+
     Features:
     - Native WebRTC streaming without additional HACS integrations
     - Automatic go2rtc stream configuration
     - Graceful fallback to static images when streaming is unavailable
     - Full WebRTC offer/answer negotiation support
     """
+
+    _attr_translation_key = "printer_camera"
 
     def __init__(
         self,
