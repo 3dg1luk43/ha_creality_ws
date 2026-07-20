@@ -164,7 +164,8 @@
       "light": { "name": "Light" }
     },
     "switch": {
-      "light": { "name": "Light" }
+      "light": { "name": "Light" },
+      "sleep": { "name": "Sleep Mode" }
     },
     "camera": {
       "printer_camera": { "name": "Printer Camera" }
