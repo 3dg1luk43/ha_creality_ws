@@ -252,6 +252,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 new_data["_cached_has_box_control"] = printermodel.has_box_control
                 # Feature Promotion: Trust telemetry over model defaults
                 # If printer reports chamber targets/temps, ENABLE capabilities
+                if "sleepMode" in d:
+                    new_data["_cached_has_sleep"] = True
                 if "targetBoxTemp" in d:
                     new_data["_cached_has_chamber_control"] = True
                     new_data["_cached_has_box_control"] = True

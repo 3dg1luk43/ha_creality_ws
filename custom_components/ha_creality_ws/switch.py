@@ -9,6 +9,7 @@ from .const import DOMAIN
 # Switch mappings (fans controlled via number entities, not switches)
 MAP = {
     "light": ("Light", "lightSw", "light"),
+    "sleep": ("Sleep mode" "sleepMode", "sleep"),
 }
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -20,10 +21,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
         # Fallback: if telemetry already exposes lightSw field, allow switch.
         if "lightSw" in (coord.data or {}):
             has_light = True
+    has_sleep = entry.data.get("_cached_has_sleep", True)
+    if not has_sleep:
+        # Fallback: if telemetry already exposes sleepMode field, allow switch.
+        if "sleepMode" in (coord.data or {}):
+            has_sleep = True
     
     ents = []
     for key, (name, field, tk) in MAP.items():
-        if key == "light" and not has_light:
+        if (key == "light" and not has_light) or (key == sleepMode and not has_sleep):
             continue
         # Only create the legacy light switch if it already exists in the registry (migration safety)
         if key == "light":

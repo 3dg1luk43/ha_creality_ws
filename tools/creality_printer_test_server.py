@@ -80,6 +80,7 @@ MODEL_CONFIGS: dict[str, dict[str, Any]] = {
     "e3v3plus": {"name": "F002", "box_sensor": False, "box_control": False, "light": False, "camera": "mjpeg"},
     # Creality Hi (F018): no box sensor/control, light only
     "crealityhi": {"name": "F018", "box_sensor": False, "box_control": False, "light": True, "camera": "mjpeg"},
+    "sparkxi7": {"name": "F022", "box_sensor": False, "box_control": False, "light": True, "camera": "webrtc"},
 }
 
 

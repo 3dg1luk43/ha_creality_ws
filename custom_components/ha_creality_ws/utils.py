@@ -235,6 +235,12 @@ class ModelDetection:
             ("F018" in self.model) or ("F018" in self.model_ver_u) or
             ("hi" in self.model_l)
         )
+
+        # Sparkx i7 - "F022"
+        self.is_sparkx_i7 = (
+            ("F022" in self.model) or ("F022" in self.model_ver_u) or
+            ("i7" in self.model_l)
+        )
         
         # Family groupings
         # K1 Family
@@ -269,10 +275,10 @@ class ModelDetection:
         self.has_box_control = self.has_chamber_control
 
         # Chamber temperature sensor is present on K1 family (except K1 SE) and K2 family.
-        # Not present on Ender V3 family, K1 SE, or Creality Hi.
+        # Not present on Ender V3 family, K1 SE, Creality Hi or Sparkx i7.
         self.has_chamber_sensor = (
             (self.is_k1_base or self.is_k1c or self.is_k1_max) or self.is_k2_family
-        ) and not self.is_ender_v3_family and not self.is_k1_se
+        ) and not self.is_ender_v3_family and not self.is_k1_se and not self.is_sparkx_i7
         # Back-compat alias
         self.has_box_sensor = self.has_chamber_sensor
 
@@ -302,6 +308,9 @@ class ModelDetection:
         # Creality Hi
         if self.is_creality_hi:
             return "Creality Hi"
+        # Sparkx i7
+        if self.is_sparkx_i7:
+            return "Sparkx i7"
         return None
 
     def resolved_model(self) -> str:
