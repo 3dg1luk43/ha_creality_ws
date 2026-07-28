@@ -314,6 +314,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if not new_data.get("_cached_model"):
                 new_data["_cached_model"] = "K by Creality"
                 new_data["_cached_has_light"] = True
+                # No brightness control until we can detect the model online.
+                new_data["_cached_has_brightness_control"] = False
+                new_data["_cached_led_pin"] = None
                 new_data["_cached_has_chamber_sensor"] = False
                 new_data["_cached_has_chamber_control"] = False
                 # Legacy mirrors
