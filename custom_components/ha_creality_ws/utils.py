@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional
 
 __all__ = [
     "coerce_numbers",
@@ -175,7 +175,7 @@ class ModelDetection:
     # Keys are ModelDetection boolean-attribute names (evaluated in order); the
     # value is the Klipper output_pin name. Extend this to enable dimming for
     # more models, e.g. add "is_k2_base": "LED" once its PWM support is confirmed.
-    LED_PIN_BY_MODEL: dict[str, str] = {
+    LED_PIN_BY_MODEL: ClassVar[dict[str, str]] = {
         "is_k2_pro": "LED",
         "is_k2_plus": "LED",
     }

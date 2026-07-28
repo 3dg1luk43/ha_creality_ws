@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components.light import (  # type: ignore[import]
     ATTR_BRIGHTNESS,
     ColorMode,
@@ -29,7 +31,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if has_brightness_control and not led_pin:
         has_brightness_control = False
 
-    async_add_entities([_KLight(coord, has_brightness_control, led_pin)])
+    async_add_entities(
+        [_KLight(coord, has_brightness_control=has_brightness_control, led_pin=led_pin)]
+    )
 
 
 class _KLight(KEntity, LightEntity):
@@ -39,7 +43,7 @@ class _KLight(KEntity, LightEntity):
     # Native light entity should be enabled by default
     _attr_entity_registry_enabled_default = True
 
-    def __init__(self, coordinator, has_brightness_control: bool = False, led_pin: str | None = None) -> None:
+    def __init__(self, coordinator, *, has_brightness_control: bool = False, led_pin: str | None = None) -> None:
         super().__init__(coordinator, unique_id="light")
         self._has_brightness_control = has_brightness_control
         # Klipper output_pin name for SET_PIN dimming; None when the model has no
@@ -82,7 +86,8 @@ class _KLight(KEntity, LightEntity):
         # value (or full brightness if we never set one).
         return self._brightness if self._brightness is not None else 255
 
-    async def async_turn_on(self, **kwargs):
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Turn on the light, optionally setting its brightness."""
         brightness = kwargs.get(ATTR_BRIGHTNESS)
         if brightness is None or not self._led_pin:
             # Plain on: the lightSw switch turns the LED to full brightness.
@@ -106,5 +111,6 @@ class _KLight(KEntity, LightEntity):
         self._brightness = b
         self.async_write_ha_state()
 
-    async def async_turn_off(self, **kwargs):
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn off the light."""
         await self.coordinator.client.send_set_retry(lightSw=0)

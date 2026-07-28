@@ -323,6 +323,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 new_data["_cached_has_box_sensor"] = False
                 new_data["_cached_has_box_control"] = False
                 new_data["_cached_camera_type"] = "mjpeg"
+            elif (
+                "_cached_has_brightness_control" not in new_data
+                or "_cached_led_pin" not in new_data
+            ):
+                # Migration from before LED-dimming support: the printer is
+                # offline so we can't read live telemetry, but the model was
+                # cached on a previous online run. Derive the brightness
+                # capability from that cached model so the light exposes dimming
+                # without waiting for the printer to be online again.
+                cached_model = ModelDetection({
+                    "model": new_data.get("_cached_model"),
+                    "modelVersion": new_data.get("_cached_model_version"),
+                })
+                new_data["_cached_has_brightness_control"] = cached_model.has_brightness_control
+                new_data["_cached_led_pin"] = cached_model.led_pin
             
             hass.config_entries.async_update_entry(entry, data=new_data)
             
