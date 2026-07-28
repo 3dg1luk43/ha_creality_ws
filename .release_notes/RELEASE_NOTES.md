@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.9.7] - 2026-07-28
+> [List of issues (0.9.7)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.7)
+
+### Added
+- **Localization / i18n support** (#104, thanks @oscfdezdz / Óscar Fernández Díaz):
+  - Entities, services, and both Lovelace cards (printer + CFS) are now fully translatable via `strings.json` / `translations/*.json` and bundled `www/i18n/*.json`, shipping with English and Spanish.
+  - Entity classes use `_attr_translation_key` instead of hardcoded names; the cards resolve strings through `hass.localize` with a bundled JSON fallback and automatic language fallback while backend translations load.
+- **Dimmable chamber light** (#108, closes #102, thanks @RobertJansen1):
+  - The chamber LED is now exposed as a brightness-capable light on printers with confirmed PWM support (**K2 Pro**, **K2 Plus**), matching the 0–100% slider in the printer's local UI.
+  - Brightness capability is model-detected (`LED_PIN_BY_MODEL`); every other printer keeps the plain on/off light. Because the firmware only reports on/off, the dim level is remembered locally, and the capability migrates onto existing config entries — even while the printer is offline — from cached model info.
+- **Power-off confirmation on the printer card** (#110, closes #101):
+  - The card's power button now asks for confirmation before turning the printer **off** (never when turning it on), with a stronger warning while a print is in progress so an accidental tap can't kill a running job.
+
+### Changed
+- **⚠️ Breaking — `filament_status` now reports lowercase slugs** (#104):
+  - As part of state translation, the **Filament Status** sensor now reports `normal` / `runout` instead of `Normal` / `Filament Runout`. Any automation or template matching the old capitalized values must be updated — the displayed (translated) label is unchanged.
+- **Print Tuning range raised to 200%** (#107, thanks @RobertJansen1):
+  - The **Print Tuning %** slider now goes up to 200% (was 100%), matching the feedrate/flowrate hardware limit so the control is actually usable.
+- **Printer-card display refinements** (#110, closes #101, #103):
+  - The layer readout shows `—/—` (consistent with the temperature pills) instead of `?/?` when the printer is off or idle.
+  - The chamber-temperature pill is hidden automatically when no chamber entity is configured (or it is absent from HA), so chamber-less printers such as the Ender 3 V3 KE no longer render a stray thermometer icon.
+
+### Fixed
+- **`Current Object` sensor crash-looping the log** (#110, closes #106):
+  - `'int' object has no attribute 'strip'` was raised roughly every 5 seconds when the firmware reports `currentObject` as a non-string. The whitespace check is now guarded so only strings are stripped; all other outputs are unchanged.
+- **Fluctuating fractional print-time on the card** (#110, closes #103):
+  - Time-remaining rendered many-digit fractional seconds (e.g. `2:25.6789`) and reflowed the adjacent telemetry every poll. It is now floored to whole seconds, which also stabilizes the row layout.
+
+### Internal
+- **Entity/translation hardening** (#104): `KEntity` now requires a non-empty `unique_id` and honors class-level translation keys; camera translation keys moved onto the concrete camera classes.
+- **LED-brightness plumbing** (#108): added the `LED_PIN_BY_MODEL` capability table and brightness-capability caching/migration, plus `ClassVar` and keyword-only-argument cleanups.
+
+
 ## [0.9.6.1] - 2026-06-11
 > [List of issues (0.9.6.1)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.6.1)
 
