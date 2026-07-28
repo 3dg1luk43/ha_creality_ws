@@ -123,7 +123,9 @@ function generateCardId(config) {
 }
 
 function fmtTimeLeft(seconds) {
-  const s = Number(seconds) || 0;
+  // Floor to whole seconds so a fractional value (some firmwares report a float)
+  // renders as e.g. 2:25 instead of 2:25.6789 and doesn't reflow the row every poll.
+  const s = Math.floor(Number(seconds) || 0);
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
   if (m > 0) return `${m}:${String(sec).padStart(2, "0")}`;
@@ -465,6 +467,15 @@ class KPrinterCard extends HTMLElement {
 
       if (id === "power") {
         const eid = this._resolveEntityId(this._cfg.power, ["switch"]);
+        // Confirm only when the press would turn the printer OFF (not when
+        // turning it on), with a stronger warning while a print is in progress
+        // so an accidental tap can't kill a running job.
+        if (this._hass?.states?.[eid]?.state === "on") {
+          const st = normStr(this._hass?.states?.[this._cfg.status]?.state);
+          const printing = ["printing", "resuming", "pausing", "paused"].includes(st);
+          const msg = printing ? this._t("confirm_power_off_printing") : this._t("confirm_power_off");
+          if (!confirm(msg)) return;
+        }
         this._toggleEntity(eid);
       } else if (id === "light") {
         const eid = this._resolveEntityId(this._cfg.light, ["light", "switch"]);
@@ -823,16 +834,18 @@ class KPrinterCard extends HTMLElement {
     this._root.getElementById("bed").textContent = bedStr;
     this._root.getElementById("box").textContent = boxStr;
     this._root.getElementById("time").textContent = fmtTimeLeft(timeLeft);
-    this._root.getElementById("layers").textContent = `${layer || "?"}/${totalLayers || "?"}`;
+    this._root.getElementById("layers").textContent = `${layer || "—"}/${totalLayers || "—"}`;
 
-    // Toggle Chamber Temp visibility
+    // Toggle Chamber Temp visibility.
+    // Hide when explicitly hidden, when no chamber entity is configured, or when
+    // the configured entity does not exist in HA (printers without a chamber,
+    // e.g. Ender 3 V3 KE) so we don't render a stray thermometer icon that
+    // offsets the adjacent telemetry. A configured-but-unavailable entity stays
+    // visible and shows "—", matching the nozzle/bed pills.
     const boxPill = this._root.getElementById("box-pill");
     if (boxPill) {
-      if (this._cfg.hide_box_temp) {
-        boxPill.style.display = "none";
-      } else {
-        boxPill.style.display = "";
-      }
+      const boxConfigured = Boolean(this._cfg.box) && Boolean(this._hass?.states?.[this._cfg.box]);
+      boxPill.style.display = (this._cfg.hide_box_temp || !boxConfigured) ? "none" : "";
     }
     this._scheduleTelemetrySizeUpdate();
   }
@@ -841,6 +854,8 @@ const CARD_TRANSLATIONS = {
   en: {
     status_unknown: "Unknown",
     confirm_stop: "Are you sure you want to stop the print?",
+    confirm_power_off: "Are you sure you want to power off the printer?",
+    confirm_power_off_printing: "A print is in progress. Are you sure you want to power off the printer?",
     chip_pause: "Pause",
     chip_resume: "Resume",
     chip_stop: "Stop",
