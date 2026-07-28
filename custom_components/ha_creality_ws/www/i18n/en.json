@@ -2,6 +2,8 @@
   "printer_card": {
     "status_unknown": "Unknown",
     "confirm_stop": "Are you sure you want to stop the print?",
+    "confirm_power_off": "Are you sure you want to power off the printer?",
+    "confirm_power_off_printing": "A print is in progress. Are you sure you want to power off the printer?",
     "chip_pause": "Pause",
     "chip_resume": "Resume",
     "chip_stop": "Stop",

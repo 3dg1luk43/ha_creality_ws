@@ -491,15 +491,17 @@ class CurrentObjectSensor(KEntity, SensorEntity):
         
         d = self.coordinator.data or {}
         v = d.get("current_object") or d.get("currentObject")
-        
-        # If no current object and printer is not printing, show "not printing"
-        if not v or v.strip() == "":
+
+        # If no current object and printer is not printing, show "not printing".
+        # Firmware may send this as a non-string (e.g. an int object index), so
+        # only run the whitespace check on actual strings to avoid AttributeError.
+        if not v or (isinstance(v, str) and not v.strip()):
             # Check if printer is actually printing
             fname = d.get("printFileName") or ""
             if not fname:
                 return "not printing"
             return None
-        
+
         return str(v)
 
     @property

@@ -2,6 +2,8 @@
   "printer_card": {
     "status_unknown": "Desconocido",
     "confirm_stop": "¿Seguro que deseas detener la impresión?",
+    "confirm_power_off": "¿Seguro que deseas apagar la impresora?",
+    "confirm_power_off_printing": "Hay una impresión en curso. ¿Seguro que deseas apagar la impresora?",
     "chip_pause": "Pausar",
     "chip_resume": "Reanudar",
     "chip_stop": "Detener",
