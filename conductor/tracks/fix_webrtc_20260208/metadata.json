@@ -1,0 +1,8 @@
+{
+  "track_id": "fix_webrtc_20260208",
+  "type": "bug",
+  "status": "new",
+  "created_at": "2026-02-08T10:00:00Z",
+  "updated_at": "2026-02-08T10:00:00Z",
+  "description": "Fix WebRTC camera stream regression for Home Assistant 2026.2.1+ (go2rtc 1.9.14)"
+}

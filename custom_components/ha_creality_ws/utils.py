@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional
 
 __all__ = [
     "coerce_numbers",
@@ -9,6 +9,9 @@ __all__ = [
     "parse_position",
     "safe_float",
     "extract_host_from_zeroconf",
+    "normalize_color_hex",
+    "format_filament_label",
+    "build_spool_key",
 ]
 
 
@@ -171,6 +174,15 @@ class ModelDetection:
     Provides capability flags and a resolved model name if possible.
     """
     
+    # Klipper output_pin name per model for LED brightness (SET_PIN dimming).
+    # Keys are ModelDetection boolean-attribute names (evaluated in order); the
+    # value is the Klipper output_pin name. Extend this to enable dimming for
+    # more models, e.g. add "is_k2_base": "LED" once its PWM support is confirmed.
+    LED_PIN_BY_MODEL: ClassVar[dict[str, str]] = {
+        "is_k2_pro": "LED",
+        "is_k2_plus": "LED",
+    }
+
     def __init__(self, coord_data):
         d = coord_data or {}
         self.model = d.get("model") or ""
@@ -279,6 +291,12 @@ class ModelDetection:
         # Light is present on most models except K1 SE and Ender V3 family
         self.has_light = not (self.is_k1_se or self.is_ender_v3_family)
 
+        self.led_pin: str | None = next(
+            (pin for attr, pin in self.LED_PIN_BY_MODEL.items() if getattr(self, attr, False)),
+            None,
+        )
+        self.has_brightness_control = self.led_pin is not None
+
     # ---- Resolved/canonical model name helpers ----
     def canonical_model(self) -> str | None:
         """Return a canonical model name if derivable from codes.
@@ -316,3 +334,117 @@ class ModelDetection:
         if can:
             return can
         return "K by Creality"
+
+
+# ---------- CFS filament helpers ----------
+
+_HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
+
+
+def _normalize_color_token(token: str) -> str:
+    """Normalise one colour token to ``#rrggbb``, or return it unchanged."""
+    raw = token.strip()
+    if not raw:
+        return token
+    body = raw[1:] if raw.startswith("#") else raw
+    if not _HEX_RE.match(body):
+        return token
+    if len(body) == 3:
+        return f"#{body.lower()}"
+    if len(body) >= 6:
+        # Creality pads the colour with a leading character, so the *last* six
+        # hex digits are the real RRGGBB value.
+        return f"#{body[-6:].lower()}"
+    return token
+
+
+def normalize_color_hex(value: Any) -> Any:
+    """Normalise a CFS filament colour to ``#rrggbb``.
+
+    Creality RFID tags store the colour as seven hex characters -- one padding
+    character followed by the real ``RRGGBB`` -- and the printer streams that
+    verbatim (e.g. ``#0ffffff``). Reading the first six characters yields the
+    wrong colour, so the last six are kept instead (issues #113, #117).
+
+    Anything that is not a recognisable hex colour is returned untouched, so
+    sentinels ("N/A"), named colours and unexpected formats survive intact.
+    Comma/semicolon separated lists are normalised element-wise for spools that
+    report more than one colour.
+    """
+    if not isinstance(value, str):
+        return value
+    for sep in (",", ";"):
+        if sep in value:
+            return sep.join(_normalize_color_token(part) for part in value.split(sep))
+    return _normalize_color_token(value)
+
+
+def format_filament_label(vendor: Any, name: Any, material_type: Any = None) -> str:
+    """Build the human-readable filament label for a CFS slot.
+
+    The printer often repeats the vendor inside the material name (vendor
+    ``Generic`` with name ``Generic PLA``), which naively joining the two turned
+    into "Generic Generic PLA" (issue #115). An absent vendor is left out rather
+    than replaced with a guess.
+    """
+    vendor_txt = str(vendor).strip() if vendor not in (None, "") else ""
+    name_txt = str(name).strip() if name not in (None, "") else ""
+    if not name_txt:
+        name_txt = str(material_type).strip() if material_type not in (None, "") else ""
+    if not name_txt:
+        name_txt = "Unknown"
+    if not vendor_txt:
+        return name_txt
+    if name_txt.casefold().startswith(vendor_txt.casefold()):
+        return name_txt
+    return f"{vendor_txt} {name_txt}"
+
+
+def _spool_key_part(value: Any) -> str:
+    text = str(value).strip() if value not in (None, "") else ""
+    return text.replace(" ", "-").lower()
+
+
+def build_spool_key(
+    *,
+    rfid: Any = None,
+    vendor: Any = None,
+    material_type: Any = None,
+    name: Any = None,
+    color: Any = None,
+) -> Optional[str]:
+    """Derive a stable per-spool identifier for external trackers.
+
+    The printer's ``rfid`` field is a material/filament id, so two spools of the
+    same material and vendor share it even when their colours differ, which
+    stops tools like spoolmansync from telling them apart (issue #117).
+    Appending the normalised colour disambiguates those.
+
+    This is a *derived* key, not a tag serial: the telemetry carries no per-tag
+    serial, so two genuinely identical spools still produce the same key.
+    """
+    ident = _spool_key_part(rfid)
+    if not ident:
+        ident = "-".join(
+            part
+            for part in (
+                _spool_key_part(vendor),
+                _spool_key_part(name) or _spool_key_part(material_type),
+            )
+            if part
+        )
+
+    # A multi-colour spool reports several values ("#0ffa800,#0ff97e1"); join
+    # them with '-' so the key stays a single flat token.
+    normalized = normalize_color_hex(color)
+    color_part = ""
+    if isinstance(normalized, str):
+        tokens = [
+            token.strip().lstrip("#").lower()
+            for token in re.split(r"[,;]", normalized)
+            if token.strip().lstrip("#")
+        ]
+        if tokens and all(_HEX_RE.match(token) for token in tokens):
+            color_part = "-".join(tokens)
+
+    return "_".join(part for part in (ident, color_part) if part) or None

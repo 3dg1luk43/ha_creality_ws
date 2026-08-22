@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 
 from homeassistant.components.number import NumberEntity, NumberMode, NumberDeviceClass
 
@@ -11,8 +12,12 @@ except Exception:  # older cores
     from homeassistant.const import TEMP_CELSIUS as UNIT_CELSIUS, PERCENTAGE as UNIT_PERCENT
 
 from homeassistant.helpers import entity_registry as er  # type: ignore[import]
+from homeassistant.helpers.dispatcher import async_dispatcher_connect  # type: ignore[import]
 from .const import DOMAIN
 from .entity import KEntity
+
+_LOGGER = logging.getLogger(__name__)
+
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up the number entities."""
@@ -23,25 +28,61 @@ async def async_setup_entry(hass, entry, async_add_entities):
     ents.append(PrintTuningPercent(coord))
     ents.append(NozzleTargetNumber(coord))
     ents.append(BedTargetNumber(coord, bed_index=0))
-    
-    # Chamber temperature control (K2 Pro/Plus only)
+
+    # Chamber temperature control (K2 Pro/Plus only).
+    #
+    # This used to be gated purely on live `maxBoxTemp`, which the printer only
+    # reports once it is reachable. Platform setup deliberately does not wait for
+    # the printer, so a Home Assistant restart while the printer was off left the
+    # entity uncreated -- and nothing recreated it when the printer came back, so
+    # it stayed `unavailable` until the next restart that happened to win the
+    # race. It is now satisfied by the capability cached during onboarding, and
+    # created late via the discovery signal if neither is available yet.
     has_box_control = entry.data.get("_cached_has_chamber_control", entry.data.get("_cached_has_box_control", False))
-    if coord.data.get("maxBoxTemp") and has_box_control:
-        ents.append(BoxTargetNumber(coord))
-    
+    added: set[str] = set()
+
+    def _chamber_entities() -> list[NumberEntity]:
+        if not has_box_control or "box_target" in added:
+            return []
+        cached_max = entry.data.get(
+            "_cached_max_chamber_temp", entry.data.get("_cached_max_box_temp")
+        )
+        if not coord.data.get("maxBoxTemp") and not cached_max:
+            return []
+        added.add("box_target")
+        return [BoxTargetNumber(coord)]
+
+    ents.extend(_chamber_entities())
+
+    def _on_new_entities() -> None:
+        """Late discovery: the printer has just reported a gating field."""
+        new_ents = _chamber_entities()
+        if new_ents:
+            _LOGGER.info("Adding %d late-discovered number entities", len(new_ents))
+            # Deferred, not inline: see the matching note in sensor.py.
+            hass.loop.call_soon(async_add_entities, new_ents)
+
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass,
+            f"{DOMAIN}_new_entities_{entry.entry_id}",
+            _on_new_entities,
+        )
+    )
+
     # Fan controls (legacy). Only create if entity already exists to avoid duplicates with native fan platform.
     reg = er.async_get(hass)
     host = coord.client._host
     legacy_uids = [
-        ("model_fan_pct", "modelFanPct", "Model Fan %", 0),
-        ("case_fan_pct", "caseFanPct", "Case Fan %", 1),
-        ("side_fan_pct", "auxiliaryFanPct", "Side Fan %", 2),
+        ("model_fan_pct", "modelFanPct", "Model Fan %", 0, "model_fan_pct"),
+        ("case_fan_pct", "caseFanPct", "Case Fan %", 1, "case_fan_pct"),
+        ("side_fan_pct", "auxiliaryFanPct", "Side Fan %", 2, "side_fan_pct"),
     ]
-    for uid, field, name, ch in legacy_uids:
+    for uid, field, name, ch, tk in legacy_uids:
         unique = f"{host}-{uid}"
         existing = reg.async_get_entity_id("number", DOMAIN, unique)
         if existing:
-            ents.append(_FanPctNumber(coord, name, field, uid, channel=ch))
+            ents.append(_FanPctNumber(coord, name, field, uid, channel=ch, translation_key=tk))
 
     async_add_entities(ents)
 
@@ -53,16 +94,16 @@ class PrintTuningPercent(KEntity, NumberEntity):
     Writes: setFeedratePct=value and setFlowratePct=value.
     Reads:  curFeedratePct if present; falls back to curFlowratePct.
     """
-    _attr_name = "Print Tuning %"
+    _attr_translation_key = "print_tuning_pct"
     _attr_icon = "mdi:speedometer"
     _attr_native_unit_of_measurement = UNIT_PERCENT
     _attr_mode = NumberMode.SLIDER
     _attr_native_min_value = 1.0
-    _attr_native_max_value = 1000.0
+    _attr_native_max_value = 200.0
     _attr_native_step = 1.0
 
     def __init__(self, coordinator) -> None:
-        super().__init__(coordinator, self._attr_name, "print_tuning_pct")
+        super().__init__(coordinator, unique_id="print_tuning_pct")
 
     @property
     def native_value(self) -> float | None:
@@ -88,7 +129,7 @@ class PrintTuningPercent(KEntity, NumberEntity):
 
 # ---------- Temperature targets (BOX inputs) ----------
 class NozzleTargetNumber(KEntity, NumberEntity):
-    _attr_name = "Nozzle Target"
+    _attr_translation_key = "nozzle_target"
     _attr_icon = "mdi:thermometer"
     _attr_mode = NumberMode.BOX
     _attr_native_unit_of_measurement = UNIT_CELSIUS
@@ -97,7 +138,7 @@ class NozzleTargetNumber(KEntity, NumberEntity):
     _attr_native_step = 1.0
 
     def __init__(self, coordinator) -> None:
-        super().__init__(coordinator, self._attr_name, "nozzle_target")
+        super().__init__(coordinator, unique_id="nozzle_target")
         # Use cached max temperature value with fallback to live data
         max_temps = self._get_cached_max_temps()
         max_nozzle_temp = max_temps.get("max_nozzle_temp")
@@ -126,7 +167,7 @@ class NozzleTargetNumber(KEntity, NumberEntity):
 
 
 class BedTargetNumber(KEntity, NumberEntity):
-    _attr_name = "Bed Target"
+    _attr_translation_key = "bed_target"
     _attr_icon = "mdi:radiator"
     _attr_mode = NumberMode.BOX
     _attr_native_unit_of_measurement = UNIT_CELSIUS
@@ -135,7 +176,7 @@ class BedTargetNumber(KEntity, NumberEntity):
     _attr_native_step = 1.0
 
     def __init__(self, coordinator, bed_index: int = 0) -> None:
-        super().__init__(coordinator, self._attr_name, f"bed_target_{bed_index}")
+        super().__init__(coordinator, unique_id=f"bed_target_{bed_index}")
         self._idx = int(bed_index)
         # Use cached max temperature value with fallback to live data
         max_temps = self._get_cached_max_temps()
@@ -166,7 +207,7 @@ class BedTargetNumber(KEntity, NumberEntity):
 
 
 class BoxTargetNumber(KEntity, NumberEntity):
-    _attr_name = "Chamber Target"
+    _attr_translation_key = "chamber_target"
     _attr_icon = "mdi:thermometer"
     _attr_mode = NumberMode.BOX
     _attr_native_unit_of_measurement = UNIT_CELSIUS
@@ -175,7 +216,7 @@ class BoxTargetNumber(KEntity, NumberEntity):
     _attr_native_step = 1.0
 
     def __init__(self, coordinator) -> None:
-        super().__init__(coordinator, self._attr_name, "box_target")
+        super().__init__(coordinator, unique_id="box_target")
         # Use cached max temperature value with fallback to live data
         max_temps = self._get_cached_max_temps()
         max_box_temp = max_temps.get("max_box_temp")
@@ -224,8 +265,8 @@ class _FanPctNumber(KEntity, NumberEntity):
     _attr_native_max_value = 100.0
     _attr_native_step = 1.0
 
-    def __init__(self, coordinator, name: str, read_field: str, uid: str, channel: int) -> None:
-        super().__init__(coordinator, name, uid)
+    def __init__(self, coordinator, name: str, read_field: str, uid: str, channel: int, translation_key: str | None = None) -> None:
+        super().__init__(coordinator, name, uid, translation_key=translation_key)
         self._read_field = read_field
         self._channel = int(channel)
 

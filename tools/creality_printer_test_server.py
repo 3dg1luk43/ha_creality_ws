@@ -38,8 +38,11 @@ import base64
 import json
 import logging
 import math
+import os
 import random
+import re
 import signal
+import tempfile
 import time
 from dataclasses import dataclass
 from fractions import Fraction
@@ -54,8 +57,15 @@ from aiortc.contrib.media import MediaBlackhole
 import av
 import shutil
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s:%(name)s:%(message)s",
+    datefmt="%H:%M:%S",
+)
 LOGGER = logging.getLogger("creality_printer_test_server")
+
+# Fan control the integration sends over `gcodeCmd`: M106 P<channel> S<0-255>
+_M106_RE = re.compile(r"^M106(?:\s+P(?P<p>\d+))?(?:\s+S(?P<s>\d+(?:\.\d+)?))?", re.IGNORECASE)
 
 
 # -----------------------------------------------------------------------------
@@ -190,6 +200,132 @@ class SyntheticAudioTrack(MediaStreamTrack):
 # -----------------------------------------------------------------------------
 
 
+class H264PassthroughTrack(MediaStreamTrack):
+    """Send pre-encoded H.264 packets through untouched, with a 1 s GOP.
+
+    aiortc's built-in H.264 encoder inherits libx264's default 250-frame
+    keyframe interval, so at these frame rates keyframes are 8-25 s apart. Home
+    Assistant's stream worker gives up long before that -- "Error demuxing
+    stream while finding first packet" -- and go2rtc's RTSP output cannot start
+    without a keyframe either, so the HLS/recording path looked broken against
+    the simulator even though real printers work.
+
+    Real Creality cameras emit a keyframe roughly every second, so a short clip
+    is pre-encoded with `keyint=fps` and its packets are looped. aiortc detects
+    an `av.Packet` (rather than a `VideoFrame`) and packetises it directly,
+    skipping its own encoder entirely.
+    """
+
+    kind = "video"
+
+    def __init__(self, width: int, height: int, fps: int, ffmpeg_bin: str = "ffmpeg",
+                 seconds: int = 4):
+        super().__init__()
+        self.width = width
+        self.height = height
+        self.fps = max(1, int(fps))
+        self.ffmpeg_bin = ffmpeg_bin
+        self.seconds = max(2, int(seconds))
+        self._packets: list[Any] = []
+        self._time_base = Fraction(1, 90000)
+        self._idx = 0
+        self._pts_offset = 0
+        self._clip_duration_pts = 0
+        self._t0: Optional[float] = None
+
+    @staticmethod
+    def available(ffmpeg_bin: str = "ffmpeg") -> bool:
+        return shutil.which(ffmpeg_bin) is not None
+
+    async def _ensure_clip(self) -> None:
+        if self._packets:
+            return
+        if not shutil.which(self.ffmpeg_bin):
+            raise RuntimeError("ffmpeg binary not found")
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".h264", delete=False)
+        tmp.close()
+        path = tmp.name
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                self.ffmpeg_bin,
+                "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi",
+                "-i", f"testsrc2=size={self.width}x{self.height}:rate={self.fps}",
+                "-t", str(self.seconds),
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-tune", "zerolatency",
+                "-profile:v", "baseline",
+                "-pix_fmt", "yuv420p",
+                # keyframe every second, no B-frames, SPS/PPS before every IDR so a
+                # consumer joining mid-clip can start decoding immediately
+                "-x264-params",
+                f"keyint={self.fps}:min-keyint={self.fps}:scenecut=0:repeat-headers=1",
+                "-bsf:v", "dump_extra",
+                "-f", "h264", path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, err = await proc.communicate()
+            if proc.returncode != 0:
+                raise RuntimeError(f"ffmpeg failed: {err.decode(errors='replace')[:200]}")
+
+            container = av.open(path)
+            try:
+                stream = container.streams.video[0]
+                # Annex-B raw H.264 has no container timestamps; synthesise them.
+                step = int(90000 / self.fps)
+                for i, packet in enumerate(container.demux(stream)):
+                    if packet.size == 0:
+                        continue
+                    packet.pts = i * step
+                    packet.dts = packet.pts
+                    packet.time_base = self._time_base
+                    self._packets.append(packet)
+            finally:
+                container.close()
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+        if not self._packets:
+            raise RuntimeError("pre-encoded clip contained no packets")
+        step = int(90000 / self.fps)
+        self._clip_duration_pts = len(self._packets) * step
+        LOGGER.info(
+            "H.264 passthrough clip ready: %d packets, %.1fs, keyframe every %ds",
+            len(self._packets), self.seconds, 1,
+        )
+
+    async def recv(self):
+        await self._ensure_clip()
+
+        packet = self._packets[self._idx]
+        pts = self._pts_offset + packet.pts
+
+        # Pace to wall clock so the consumer sees a real-time stream.
+        if self._t0 is None:
+            self._t0 = time.monotonic()
+        target = self._t0 + (pts / 90000.0)
+        delay = target - time.monotonic()
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+        out = av.Packet(bytes(packet))
+        out.pts = pts
+        out.dts = pts
+        out.time_base = self._time_base
+
+        self._idx += 1
+        if self._idx >= len(self._packets):
+            self._idx = 0
+            self._pts_offset += self._clip_duration_pts
+        return out
+
+
 class FFmpegVideoTrack(MediaStreamTrack):
     """Video track reading raw frames from an ffmpeg testsrc2 pipeline.
 
@@ -282,11 +418,21 @@ class PrinterState:
         simulate_print: bool,
         sim: SimOptions,
         targets: dict[str, float],
+        deterministic: bool = False,
+        cfs_variant: str = "default",
     ) -> None:
         self._cfg = MODEL_CONFIGS.get(model_key, MODEL_CONFIGS["k2plus"])  # default
         self.model_key = model_key
         self.simulate_print = simulate_print
         self.sim = sim
+        # Deterministic mode strips every source of randomness (temperature
+        # oscillation, fan jitter, XYZ drift) so two runs produce byte-identical
+        # telemetry. That is what makes an entity-state diff between two versions
+        # of the integration meaningful as a regression check.
+        self.deterministic = deterministic
+        self.cfs_variant = cfs_variant
+        # Fields forced by POST /test/set, applied last in snapshot().
+        self._overrides: Dict[str, Any] = {}
         self._t0 = time.monotonic()
         self._paused = False
         self._light_on = False
@@ -333,9 +479,123 @@ class PrinterState:
         self._case_fan = 0
         self._model_fan = 0
         self._side_fan = 0
+        # M106 channels the client has taken manual control of
+        self._manual_fans: set[int] = set()
 
         # CFS state
-        self._cfs_boxes = [
+        self._cfs_boxes = self._build_cfs_boxes()
+
+        # errors
+        self._error_code = 0
+
+        if self.simulate_print:
+            self._state_code = 2 if time.monotonic() < self._self_test_end else 1
+            if self._state_code == 1:
+                self._print_start_ts = time.monotonic()
+
+    # ----------------------- control mutations -----------------------
+    def set_material_status(self, status: int) -> None:
+        self._material_status = int(status)
+
+    def set_pause(self, paused: bool) -> None:
+        self._paused = paused
+        self._state_code = 5 if paused else (1 if self._progress < 100 else 0)
+
+    def set_stop(self) -> None:
+        self._paused = False
+        self._progress = 0
+        self._cur_layer = 0
+        self._used_material_length = 0.0
+        self._real_time_flow = 0.0
+        self._device_state = 0
+        self._print_start_ts = None
+        self._state_code = 0
+
+    def set_light(self, on: bool) -> None:
+        if self._cfg.get("light"):
+            self._light_on = on
+
+    def set_box_temp(self, temp: float) -> None:
+        if self._cfg.get("box_control"):
+            self._box_temp_target = float(temp)
+
+    def set_nozzle_temp(self, temp: float) -> None:
+        self._nozzle_temp_target = float(temp)
+
+    def set_bed_temp(self, temp: float) -> None:
+        self._bed_temp_target = float(temp)
+
+    def set_feedrate(self, pct: float) -> None:
+        self._feedrate_pct = float(pct)
+
+    def set_flowrate(self, pct: float) -> None:
+        self._flowrate_pct = float(pct)
+
+    def set_fan_pct(self, channel: int, pct: float) -> None:
+        """Apply an M106 fan command (P0 model, P1 case, P2 auxiliary/side)."""
+        value = int(round(max(0.0, min(100.0, float(pct)))))
+        if channel == 0:
+            self._model_fan = value
+        elif channel == 1:
+            self._case_fan = value
+        elif channel == 2:
+            self._side_fan = value
+        else:
+            return
+        self._manual_fans.add(channel)
+
+    def handle_gcode(self, cmd: str) -> bool:
+        """Handle the G-code commands the integration actually sends."""
+        m = _M106_RE.match((cmd or "").strip())
+        if not m:
+            return False
+        channel = int(m.group("p") or 0)
+        s_val = float(m.group("s") or 0)
+        self.set_fan_pct(channel, s_val / 255.0 * 100.0)
+        return True
+
+    def set_autohome(self, axes: str) -> None:
+        self._device_state = 7
+        # simulate quick homing pulse
+        self._pos_x = 0.0 if "X" in axes or "x" in axes else self._pos_x
+        self._pos_y = 0.0 if "Y" in axes or "y" in axes else self._pos_y
+        self._pos_z = 0.0 if "Z" in axes or "z" in axes else self._pos_z
+        self._device_state = 0
+
+    def get_cfs_info(self) -> dict[str, Any]:
+        """Generate a realistic CFS status payload."""
+        # Update dynamic fields in CFS boxes
+        for box in self._cfs_boxes:
+            if box.get("type") == 0:  # Box with sensors
+                if self.deterministic:
+                    box["temp"] = 28.0
+                    box["humidity"] = 40.0
+                else:
+                    box["temp"] = round(_osc(28.0, 0.5, 1.0), 1)
+                    box["humidity"] = round(_osc(40.0, 1.0, 2.0), 1)
+
+        return {
+            "boxsInfo": {
+                "same_material": [
+                    ["001001", "0000000", [{"boxId": 1, "materialId": 0}], "PLA"],
+                    ["001001", "0ffffff", [{"boxId": 1, "materialId": 1}], "PLA"],
+                ],
+                "materialBoxs": self._cfs_boxes,
+            }
+        }
+
+    # ----------------------- tick/update loops -----------------------
+    def _build_cfs_boxes(self) -> list:
+        """CFS payload for the simulated printer.
+
+        `default` mirrors what a real K2 + CFS reports, including Creality's
+        seven-character colour strings (a pad character followed by RRGGBB).
+        `edge` adds the awkward shapes that broke parsing in the past so they
+        stay covered: an already-correct six-character colour, a slot with no
+        vendor at all, a comma-separated multi-colour spool, an rfid-bearing
+        slot, and an empty slot.
+        """
+        default_boxes = [
             {
                 "id": 0,
                 "state": 0,
@@ -404,80 +664,72 @@ class PrinterState:
             },
         ]
 
-        # errors
-        self._error_code = 0
+        if self.cfs_variant != "edge":
+            return default_boxes
 
-        if self.simulate_print:
-            self._state_code = 2 if time.monotonic() < self._self_test_end else 1
-            if self._state_code == 1:
-                self._print_start_ts = time.monotonic()
+        # NOTE: `rfid` is what the integration reads for spool identity, but no
+        # real-hardware dump confirming the field name has been seen yet -- it is
+        # exercised here only so the code path is covered.
+        default_boxes[1]["materials"] = [
+            {
+                "id": 0,
+                "vendor": "Creality",
+                "type": "PLA",
+                "name": "Hyper PLA",
+                "color": "#0000000",
+                "rfid": "001001",
+                "percent": 95,
+                "state": 1,
+                "selected": 1,
+            },
+            {
+                "id": 1,
+                "vendor": "Creality",
+                "type": "PLA",
+                "name": "Hyper PLA",
+                "color": "#0ffffff",
+                "rfid": "001001",
+                "percent": 80,
+                "state": 1,
+                "selected": 0,
+            },
+            {
+                # already-correct six-character colour, and no vendor reported
+                "id": 2,
+                "type": "PETG",
+                "name": "PETG",
+                "color": "#1b04ae",
+                "percent": 50,
+                "state": 1,
+                "selected": 0,
+            },
+            {
+                # multi-colour spool
+                "id": 3,
+                "vendor": "Generic",
+                "type": "PLA",
+                "name": "Generic PLA Silk",
+                "color": "#0ffa800,#0ff97e1",
+                "percent": 30,
+                "state": 1,
+                "selected": 0,
+            },
+        ]
+        # empty external slot
+        default_boxes[0]["materials"] = [
+            {"id": 0, "type": "", "name": "", "color": "", "percent": 0, "state": 0, "selected": 0}
+        ]
+        return default_boxes
 
-    # ----------------------- control mutations -----------------------
-    def set_material_status(self, status: int) -> None:
-        self._material_status = int(status)
-
-    def set_pause(self, paused: bool) -> None:
-        self._paused = paused
-        self._state_code = 5 if paused else (1 if self._progress < 100 else 0)
-
-    def set_stop(self) -> None:
-        self._paused = False
-        self._progress = 0
-        self._cur_layer = 0
-        self._used_material_length = 0.0
-        self._real_time_flow = 0.0
-        self._device_state = 0
-        self._print_start_ts = None
-        self._state_code = 0
-
-    def set_light(self, on: bool) -> None:
-        if self._cfg.get("light"):
-            self._light_on = on
-
-    def set_box_temp(self, temp: float) -> None:
-        if self._cfg.get("box_control"):
-            self._box_temp_target = float(temp)
-
-    def set_nozzle_temp(self, temp: float) -> None:
-        self._nozzle_temp_target = float(temp)
-
-    def set_bed_temp(self, temp: float) -> None:
-        self._bed_temp_target = float(temp)
-
-    def set_feedrate(self, pct: float) -> None:
-        self._feedrate_pct = float(pct)
-
-    def set_flowrate(self, pct: float) -> None:
-        self._flowrate_pct = float(pct)
-
-    def set_autohome(self, axes: str) -> None:
-        self._device_state = 7
-        # simulate quick homing pulse
-        self._pos_x = 0.0 if "X" in axes or "x" in axes else self._pos_x
-        self._pos_y = 0.0 if "Y" in axes or "y" in axes else self._pos_y
-        self._pos_z = 0.0 if "Z" in axes or "z" in axes else self._pos_z
-        self._device_state = 0
-
-    def get_cfs_info(self) -> dict[str, Any]:
-        """Generate a realistic CFS status payload."""
-        # Update dynamic fields in CFS boxes
-        for box in self._cfs_boxes:
-            if box.get("type") == 0:  # Box with sensors
-                box["temp"] = round(_osc(28.0, 0.5, 1.0), 1)
-                box["humidity"] = round(_osc(40.0, 1.0, 2.0), 1)
-
-        return {
-            "boxsInfo": {
-                "same_material": [
-                    ["001001", "0000000", [{"boxId": 1, "materialId": 0}], "PLA"],
-                    ["001001", "0ffffff", [{"boxId": 1, "materialId": 1}], "PLA"],
-                ],
-                "materialBoxs": self._cfs_boxes,
-            }
-        }
-
-    # ----------------------- tick/update loops -----------------------
     def _tick_temps(self):
+        if self.deterministic:
+            # Sit exactly on target: no convergence ramp, no oscillation.
+            self._nozzle_temp = self._nozzle_temp_target
+            self._bed_temp = self._bed_temp_target
+            if self._cfg.get("box_sensor"):
+                self._box_temp = self._box_temp_target or 26.0
+            return
+
         # move temps towards targets with slight oscillation
         def converge(cur: float, tgt: float) -> float:
             if tgt is None:
@@ -527,11 +779,24 @@ class PrinterState:
             self._cur_object_idx = min(self._objects_total, 1 + int(self._progress / (100 / max(1, self._objects_total))))
             self._real_time_flow = 0.5 + (self._progress / 100.0) * 0.5
 
-            # fans jitter; make side/model fans spike occasionally (bridges)
-            self._case_fan = int(min(100, max(0, random.gauss(60, 10))))
+            if self.deterministic:
+                for channel, value in ((0, 70), (1, 60), (2, 50)):
+                    if channel not in self._manual_fans:
+                        self.set_fan_pct(channel, value)
+                        self._manual_fans.discard(channel)
+                self._pos_x, self._pos_y, self._pos_z = 100.0, 100.0, 10.0
+                return
+
+            # fans jitter; make side/model fans spike occasionally (bridges).
+            # A fan driven by an explicit M106 holds its value so fan controls
+            # stay observable while a simulated print runs.
             bridge_boost = 20 if random.random() < 0.1 else 0
-            self._model_fan = int(min(100, max(0, random.gauss(70 + bridge_boost, 15))))
-            self._side_fan = int(min(100, max(0, random.gauss(50 + bridge_boost, 20))))
+            if 1 not in self._manual_fans:
+                self._case_fan = int(min(100, max(0, random.gauss(60, 10))))
+            if 0 not in self._manual_fans:
+                self._model_fan = int(min(100, max(0, random.gauss(70 + bridge_boost, 15))))
+            if 2 not in self._manual_fans:
+                self._side_fan = int(min(100, max(0, random.gauss(50 + bridge_boost, 20))))
 
             # random walk on XYZ
             def jitter(v: float, step: float, mx: float) -> float:
@@ -592,10 +857,11 @@ class PrinterState:
             "curFeedratePct": self._feedrate_pct,
             "curFlowratePct": self._flowrate_pct,
 
-            # fans
-            "caseFan": self._case_fan,
-            "modelFan": self._model_fan,
-            "sideFan": self._side_fan,
+            # fans -- names must match the printer's real telemetry, which the
+            # integration reads for both the fan and number platforms
+            "modelFanPct": self._model_fan,
+            "caseFanPct": self._case_fan,
+            "auxiliaryFanPct": self._side_fan,
             
             # extra
             "materialStatus": self._material_status,
@@ -612,7 +878,29 @@ class PrinterState:
         if self._cfg.get("light"):
             d["lightSw"] = 1 if self._light_on else 0
 
+        # Test overrides win, so a scenario can pin any field exactly.
+        d.update(self._overrides)
         return d
+
+    # ----------------------- test control -----------------------
+    def apply_overrides(self, values: Dict[str, Any]) -> None:
+        """Force telemetry fields (POST /test/set). None removes an override."""
+        for key, value in (values or {}).items():
+            if value is None:
+                self._overrides.pop(key, None)
+            else:
+                self._overrides[key] = value
+
+    def clear_overrides(self) -> None:
+        self._overrides.clear()
+
+    def set_cfs_materials(self, box_id: int, materials: list) -> bool:
+        """Replace a CFS box's slot list (POST /test/cfs)."""
+        for box in self._cfs_boxes:
+            if box.get("id") == box_id:
+                box["materials"] = materials
+                return True
+        return False
 
 
 # -----------------------------------------------------------------------------
@@ -674,7 +962,8 @@ async def ws_handle_conn(ws: Any, state: PrinterState):
                     state.set_flowrate(float(params.get("setFlowratePct") or 100))
                     handled = True
                 elif "gcodeCmd" in params:
-                    # no-op placeholder
+                    # M106 drives the fans; anything else is a no-op placeholder
+                    state.handle_gcode(str(params.get("gcodeCmd") or ""))
                     handled = True
                 elif "materialStatus" in params:
                     state.set_material_status(int(params.get("materialStatus") or 0))
@@ -725,7 +1014,8 @@ CALL_PATH = "/call/webrtc_local"
 
 class HttpServer:
     def __init__(self, host: str, port: int, cam_mode: str, width: int, height: int, fps: int, audio: bool,
-                 video_source: str = "synthetic", ffmpeg_bin: str = "ffmpeg") -> None:
+                 video_source: str = "synthetic", ffmpeg_bin: str = "ffmpeg",
+                 prefer_codec: str = "h264", state: "Optional[PrinterState]" = None) -> None:
         self.host = host
         self.port = port
         self.cam_mode = cam_mode  # "webrtc" or "mjpeg"
@@ -735,12 +1025,23 @@ class HttpServer:
         self.audio = audio
         self.video_source = video_source
         self.ffmpeg_bin = ffmpeg_bin
+        # Real K-series printers stream H.264. aiortc would otherwise answer with
+        # VP8 first, which Home Assistant's HLS pipeline cannot package -- the
+        # playlist then blocks forever and the camera looks broken for reasons
+        # that have nothing to do with the integration.
+        self.prefer_codec = prefer_codec
+        self.state = state
         self.app = web.Application()
         self.app.add_routes([
             web.get("/", self.handle_root),
             web.post(CALL_PATH, self.handle_call),
             web.get(CALL_PATH, self.handle_probe),
             web.get("/stream.mjpeg", self.handle_mjpeg),
+            # Test-only control surface (not present on real printers)
+            web.post("/test/set", self.handle_test_set),
+            web.post("/test/reset", self.handle_test_reset),
+            web.post("/test/cfs", self.handle_test_cfs),
+            web.get("/test/state", self.handle_test_state),
         ])
         self._sessions: set[MediaBlackhole | RTCPeerConnection] = set()
         self._runner: Optional[web.AppRunner] = None
@@ -755,6 +1056,53 @@ class HttpServer:
     async def handle_probe(self, request: web.Request):
         # match Creality behavior: GET returns 405 to signal presence
         return web.Response(status=405, text="Method Not Allowed")
+
+    # ---------------- test-only control endpoints ----------------
+    # These let a test pin telemetry exactly (progress, error codes, filament
+    # runout, remaining time) instead of waiting for a simulated print to get
+    # there. Real printers have no such endpoints.
+
+    def _require_state(self) -> "PrinterState":
+        if self.state is None:
+            raise web.HTTPServiceUnavailable(text="no printer state bound")
+        return self.state
+
+    async def handle_test_set(self, request: web.Request):
+        state = self._require_state()
+        try:
+            payload = await request.json()
+        except Exception:
+            return web.Response(status=400, text="expected a JSON object")
+        if not isinstance(payload, dict):
+            return web.Response(status=400, text="expected a JSON object")
+        state.apply_overrides(payload)
+        LOGGER.info("test/set applied: %s", json.dumps(payload))
+        return web.json_response({"ok": True, "overrides": state._overrides})
+
+    async def handle_test_reset(self, request: web.Request):
+        state = self._require_state()
+        state.clear_overrides()
+        LOGGER.info("test/reset: overrides cleared")
+        return web.json_response({"ok": True})
+
+    async def handle_test_cfs(self, request: web.Request):
+        state = self._require_state()
+        try:
+            payload = await request.json()
+        except Exception:
+            return web.Response(status=400, text="expected a JSON object")
+        box_id = int(payload.get("box_id", 1))
+        materials = payload.get("materials")
+        if not isinstance(materials, list):
+            return web.Response(status=400, text="materials must be a list")
+        if not state.set_cfs_materials(box_id, materials):
+            return web.Response(status=404, text=f"no CFS box with id {box_id}")
+        LOGGER.info("test/cfs: box %s -> %d slots", box_id, len(materials))
+        return web.json_response({"ok": True})
+
+    async def handle_test_state(self, request: web.Request):
+        state = self._require_state()
+        return web.json_response(state.snapshot())
 
     async def handle_call(self, request: web.Request):
         if self.cam_mode != "webrtc":
@@ -828,6 +1176,10 @@ class HttpServer:
                 return web.Response(status=400, text="invalid payload")
             offer_sdp = str(payload["sdp"]) or ""
             LOGGER.debug("offer SDP head: %s", offer_sdp[:32].replace("\n", "\\n"))
+            if LOGGER.isEnabledFor(logging.DEBUG):
+                for line in offer_sdp.splitlines():
+                    if line.startswith(("m=", "a=rtpmap", "a=fmtp")):
+                        LOGGER.debug("offer   %s", line.strip())
             if not offer_sdp.startswith("v=0"):
                 LOGGER.error("Offer SDP doesn't start with 'v=0' (head=%r)", offer_sdp[:16])
                 return web.Response(status=400, text="invalid sdp")
@@ -857,14 +1209,7 @@ class HttpServer:
         offer_has_audio = "m=audio" in offer_sdp
 
         if offer_has_video:
-            if self.video_source == "ffmpeg":
-                try:
-                    video_track = FFmpegVideoTrack(self.width, self.height, self.fps, ffmpeg_bin=self.ffmpeg_bin)
-                except Exception as exc:
-                    LOGGER.warning("FFmpeg not available (%s), falling back to synthetic video", exc)
-                    video_track = SyntheticVideoTrack(self.width, self.height, self.fps)
-            else:
-                video_track = SyntheticVideoTrack(self.width, self.height, self.fps)
+            video_track = self._make_video_track(offer_sdp)
             pc.addTrack(video_track)
         if offer_has_audio and self.audio:
             pc.addTrack(SyntheticAudioTrack())
@@ -875,6 +1220,8 @@ class HttpServer:
         async def on_track(track):
             await sink.start()
             sink.addTrack(track)
+
+        self._apply_codec_preference(pc)
 
         answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
@@ -888,22 +1235,125 @@ class HttpServer:
             LOGGER.error("Generated invalid SDP (head=%r)", answer_sdp[:16])
             return web.Response(status=500, text="invalid sdp")
         LOGGER.debug("answer SDP head: %s", answer_sdp[:32].replace("\n", "\\n"))
+        if LOGGER.isEnabledFor(logging.DEBUG):
+            for line in answer_sdp.splitlines():
+                if line.startswith(("m=", "a=rtpmap", "a=fmtp", "a=sendrecv", "a=recvonly", "a=sendonly")):
+                    LOGGER.debug("answer  %s", line.strip())
         payload = {"type": "answer", "sdp": answer_sdp}
         asyncio.create_task(self._cleanup_pc(pc, sink))
         # Always respond as base64(JSON) for Creality/go2rtc compatibility
         out = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
         return web.Response(status=200, text=out, headers={"Content-Type": "text/plain"})
 
+    def _make_video_track(self, offer_sdp: str) -> MediaStreamTrack:
+        """Pick the video track that suits the negotiated codec.
+
+        `auto` sends pre-encoded H.264 whenever the peer offers it (what real
+        printers do, and the only thing Home Assistant can package into HLS) and
+        falls back to synthetic frames otherwise.
+        """
+        source = (self.video_source or "auto").lower()
+        peer_wants_h264 = "H264/90000" in offer_sdp or "h264/90000" in offer_sdp
+        want_h264 = (self.prefer_codec or "").lower() == "h264"
+
+        if source in ("auto", "h264") and peer_wants_h264 and want_h264:
+            if H264PassthroughTrack.available(self.ffmpeg_bin):
+                return H264PassthroughTrack(
+                    self.width, self.height, self.fps, ffmpeg_bin=self.ffmpeg_bin
+                )
+            LOGGER.warning(
+                "ffmpeg not found; falling back to aiortc's H.264 encoder, whose "
+                "keyframe interval is too long for Home Assistant's HLS pipeline"
+            )
+
+        if source == "ffmpeg":
+            try:
+                return FFmpegVideoTrack(
+                    self.width, self.height, self.fps, ffmpeg_bin=self.ffmpeg_bin
+                )
+            except Exception as exc:
+                LOGGER.warning("FFmpeg not available (%s), using synthetic video", exc)
+
+        return SyntheticVideoTrack(self.width, self.height, self.fps)
+
+    def _apply_codec_preference(self, pc: RTCPeerConnection) -> None:
+        """Answer with the preferred video codec first.
+
+        Real Creality hardware sends H.264. aiortc's default order puts VP8
+        first, and a VP8 stream cannot be packaged into HLS by Home Assistant's
+        `stream` component, so the HLS playlist blocks forever and the camera
+        looks broken for reasons unrelated to the integration.
+
+        This reorders `transceiver._codecs` rather than calling the public
+        `setCodecPreferences()`: aiortc consumes preferences inside
+        `setRemoteDescription()`, but an answerer's transceivers are *created* by
+        that same call, so there is no point at which the public API can be used.
+        The list order drives both the answer SDP and the codec the sender picks
+        (`codecs[0]`).
+        """
+        want = (self.prefer_codec or "").lower()
+        if want in ("", "auto"):
+            return
+        target = f"video/{want}"
+
+        for transceiver in pc.getTransceivers():
+            if transceiver.kind != "video":
+                continue
+            codecs = list(getattr(transceiver, "_codecs", None) or [])
+            if not codecs:
+                continue
+
+            def is_rtx(codec) -> bool:
+                return codec.mimeType.lower() == "video/rtx"
+
+            wanted = [c for c in codecs if c.mimeType.lower() == target]
+            if not wanted:
+                LOGGER.warning(
+                    "Preferred codec %s not offered by the peer; keeping %s",
+                    want, codecs[0].mimeType,
+                )
+                continue
+
+            # Keep each codec's retransmission entry next to it.
+            wanted_pts = {c.payloadType for c in wanted}
+            wanted_rtx = [c for c in codecs if is_rtx(c)
+                          and c.parameters.get("apt") in wanted_pts]
+            keep = {id(c) for c in wanted + wanted_rtx}
+            rest = [c for c in codecs if id(c) not in keep]
+
+            transceiver._codecs = wanted + wanted_rtx + rest
+            LOGGER.debug(
+                "video codecs reordered -> %s",
+                ", ".join(f"{c.mimeType}/{c.payloadType}" for c in transceiver._codecs[:4]),
+            )
+
     async def _cleanup_pc(self, pc: RTCPeerConnection, sink: MediaBlackhole):
-        await asyncio.sleep(60)
+        """Tear the session down when it actually ends, not on a fixed timer.
+
+        The previous unconditional 60 s sleep-then-close killed healthy sessions,
+        which made every consumer (go2rtc included) reconnect in a loop.
+        """
+        closed = asyncio.Event()
+
+        @pc.on("connectionstatechange")
+        def _watch():
+            if pc.connectionState in ("closed", "failed", "disconnected"):
+                closed.set()
+
         try:
-            await sink.stop()
-        except Exception:
+            await closed.wait()
+        except asyncio.CancelledError:
             pass
-        try:
-            await pc.close()
-        except Exception:
-            pass
+        finally:
+            try:
+                await sink.stop()
+            except Exception:
+                pass
+            try:
+                await pc.close()
+            except Exception:
+                pass
+            LOGGER.info("PC(%s) session cleaned up", id(pc))
 
     async def handle_mjpeg(self, request: web.Request):
         if self.cam_mode != "mjpeg":
@@ -1070,6 +1520,8 @@ async def main_async(args: argparse.Namespace):
             "bed": args.target_bed or 0,
             "box": args.target_box or 0,
         },
+        deterministic=getattr(args, "deterministic", False),
+        cfs_variant=getattr(args, "cfs_variant", "default"),
     )
 
     # HTTP server (WebRTC + MJPEG endpoints)
@@ -1081,8 +1533,10 @@ async def main_async(args: argparse.Namespace):
         height=args.height,
         fps=args.fps,
         audio=not args.no_audio,
-        video_source=getattr(args, "video_source", "synthetic"),
+        video_source=getattr(args, "video_source", "auto"),
         ffmpeg_bin=getattr(args, "ffmpeg_bin", "ffmpeg"),
+        prefer_codec=getattr(args, "prefer_codec", "h264"),
+        state=state,
     )
 
     # WebSocket server for telemetry
@@ -1239,9 +1693,25 @@ def build_argparser() -> argparse.ArgumentParser:
     # logging
     p.add_argument("--debug", action="store_true")
     # video source selection / ffmpeg integration
-    p.add_argument("--video-source", choices=["synthetic", "ffmpeg"], default="synthetic",
-                   help="Video generator: Python synthetic or FFmpeg testsrc2")
+    p.add_argument("--video-source", choices=["auto", "h264", "synthetic", "ffmpeg"],
+                   default="auto",
+                   help="Video generator. 'auto' (default) sends pre-encoded H.264 "
+                        "with a 1s GOP when the peer offers H.264 -- required for "
+                        "Home Assistant's HLS/recording pipeline -- and falls back "
+                        "to synthetic frames otherwise.")
     p.add_argument("--ffmpeg-bin", default="ffmpeg", help="Path to ffmpeg binary (for --video-source=ffmpeg)")
+    p.add_argument("--deterministic", action="store_true",
+                   help="Remove all randomness (temp oscillation, fan jitter, XYZ "
+                        "drift) so telemetry is reproducible between runs. Use this "
+                        "when diffing entity states across integration versions.")
+    p.add_argument("--cfs-variant", choices=["default", "edge"], default="default",
+                   help="'edge' adds awkward CFS payloads: an already-correct 6-char "
+                        "colour, a slot with no vendor, a multi-colour spool, rfid "
+                        "values and an empty external slot.")
+    p.add_argument("--prefer-codec", choices=["h264", "vp8", "auto"], default="h264",
+                   help="Video codec to answer with first. H.264 matches real "
+                        "K-series printers and is required for Home Assistant HLS; "
+                        "'auto' keeps aiortc's default order (VP8 first).")
     return p
 
 
