@@ -142,6 +142,8 @@
     "toast_preset_saved": "Preset “{name}” saved",
     "toast_preset_deleted": "Preset “{name}” deleted",
     "toast_preset_name_required": "Give the preset a name first",
-    "hint_delete_preset": "Dashed swatches are your own presets — right-click one to delete it."
+    "hint_delete_preset": "Dashed swatches are your own presets — right-click one to delete it.",
+    "view_mode_box": "Box (visual)",
+    "alt_cfs_box": "Creality CFS unit"
   }
 }

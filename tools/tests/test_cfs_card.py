@@ -293,3 +293,60 @@ def test_dialog_field_bounds_match_the_service():
             assert float(found.group(1)) == float(expected), (
                 f"{field}.{bound}: card {found.group(1)} vs services.yaml {expected}"
             )
+
+
+# --------------------------------------------------------------------------- #
+# Static asset serving
+# --------------------------------------------------------------------------- #
+
+
+def test_card_assets_are_registered_explicitly():
+    """PR #75 served the whole www/ directory and commented out the per-card
+    registrations, changing how the cards themselves are served as a side effect
+    of adding an image -- and exposing the stray .code-workspace file with it."""
+    frontend = (
+        ROOT / "custom_components" / "ha_creality_ws" / "frontend.py"
+    ).read_text(encoding="utf-8")
+
+    assert "ASSETS = [" in frontend, "assets must be listed explicitly"
+    # The per-card registration must still happen.
+    assert "_register_static_path(self.hass, integration_url, serve_path)" in frontend
+
+    listed = set(re.findall(r'"([^"]+\.(?:webp|png|jpg|svg))"', frontend))
+    on_disk = {
+        p.name for p in WWW.iterdir()
+        if p.is_file() and p.suffix in {".webp", ".png", ".jpg", ".svg"}
+    }
+    assert on_disk <= listed, f"unregistered assets: {sorted(on_disk - listed)}"
+
+
+def test_the_www_directory_is_not_served_wholesale():
+    """Registering the directory would publish every file in it.
+
+    www/ contains ha_creality_ws.code-workspace, a dev artefact. Serving each
+    known file keeps that out and, more importantly, keeps the cards' own
+    serving mechanism independent of whatever assets get added later.
+    """
+    frontend = _strip_comments(
+        (ROOT / "custom_components" / "ha_creality_ws" / "frontend.py").read_text(
+            encoding="utf-8"
+        )
+    )
+    # The i18n subdirectory is registered as a directory on purpose; the www root
+    # must not be.
+    directory_registrations = re.findall(
+        r"_register_static_path\(\s*[^,]+,\s*([^,]+),\s*str\(([^)]+)\)", frontend
+    )
+    for _url, path_expr in directory_registrations:
+        assert path_expr.strip() not in {"www_dir_path", "www_path.parent"}, (
+            f"www/ is registered as a directory via {path_expr}"
+        )
+    assert 'INTEGRATION_URL_BASE.rstrip("/")' not in frontend, (
+        "registering the base URL as a directory serves all of www/"
+    )
+
+
+def test_asset_referenced_by_the_card_exists():
+    """A typo here is a broken image in every box-view dashboard."""
+    for name in re.findall(r'ASSET_URL_BASE\}([\w.\-]+)"', _card()):
+        assert (WWW / name).exists(), f"card references missing asset: {name}"

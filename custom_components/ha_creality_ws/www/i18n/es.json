@@ -142,6 +142,8 @@
     "toast_preset_saved": "Preajuste «{name}» guardado",
     "toast_preset_deleted": "Preajuste «{name}» eliminado",
     "toast_preset_name_required": "Primero ponle un nombre al preajuste",
-    "hint_delete_preset": "Los círculos discontinuos son tus preajustes: haz clic derecho en uno para eliminarlo."
+    "hint_delete_preset": "Los círculos discontinuos son tus preajustes: haz clic derecho en uno para eliminarlo.",
+    "view_mode_box": "Caja (visual)",
+    "alt_cfs_box": "Unidad CFS de Creality"
   }
 }

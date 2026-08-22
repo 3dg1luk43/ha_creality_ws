@@ -4,7 +4,8 @@ const EDITOR_TAG = "k-cfs-card-editor";
 
 const mdi = (name) => `mdi:${name}`;
 
-const I18N_URL_BASE = "/ha_creality_ws/i18n/";
+const ASSET_URL_BASE = "/ha_creality_ws/";
+const I18N_URL_BASE = `${ASSET_URL_BASE}i18n/`;
 const _i18nData = {};
 const _i18nPromises = {};
 function _loadI18n(lang) {
@@ -192,6 +193,8 @@ const CFS_TRANSLATIONS = {
     toast_multiple_devices: "This card mixes entities from more than one printer, so material editing is disabled.",
     toast_printer_busy: "Cannot edit material while the printer is busy",
     schema_view_mode: "Display Mode",
+    view_mode_box: "Box (visual)",
+    alt_cfs_box: "Creality CFS unit",
     view_mode_full: "Full",
     view_mode_compact: "Compact",
     schema_show_type_in_mini: "Show Filament Type in Mini Mode",
@@ -813,6 +816,65 @@ class KCFSCard extends HTMLElement {
         color: var(--secondary-text-color);
       }
 
+      /* === BOX VIEW === */
+      .box-view {
+        position: relative;
+        width: 100%;
+        margin: 4px 0;
+      }
+      .box-image {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      /* Four evenly spaced bays across the unit's glass section. The geometry is
+         tied to cfs_box.webp, which is why the mode is gated on a 4-slot box. */
+      .bays {
+        position: absolute;
+        top: 6%;
+        left: 6.5%;
+        width: 87%;
+        height: 52%;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+      }
+      .bay {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-end;
+      }
+      .bay + .bay {
+        /* Theme variable rather than a hardcoded white, which inverted badly in
+           light themes. */
+        border-left: 1px solid var(--divider-color);
+      }
+      .bay-spool {
+        width: 58%;
+        aspect-ratio: 1;
+        border-radius: 50%;
+        background: var(--spool-color);
+        box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.25) inset;
+        opacity: 0.85;
+      }
+      .bay-label {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin-top: 4px;
+        padding: 1px 4px;
+        border-radius: 4px;
+        /* Legible over a photo in either theme. */
+        background: var(--card-background-color);
+        color: var(--primary-text-color);
+        font-size: 10px;
+        line-height: 1.2;
+        opacity: 0.92;
+      }
+      .bay-type { font-weight: 500; }
+      .bay-pct { color: var(--secondary-text-color); }
+
       /* === EDIT AFFORDANCE === */
       .edit-btn, .edit-btn-mini {
         position: absolute;
@@ -844,6 +906,7 @@ class KCFSCard extends HTMLElement {
         .edit-btn, .edit-btn-mini { opacity: 0; }
         .spool-card:hover .edit-btn,
         .spool-mini-wrapper:hover .edit-btn-mini,
+        .bay:hover .edit-btn-mini,
         .external-normal:hover .edit-btn,
         .external-compact:hover .edit-btn { opacity: 1; }
       }
@@ -1213,11 +1276,77 @@ class KCFSCard extends HTMLElement {
     // Render based on mode
     if (this._cfg.view_mode === "compact") {
       contentContainer.innerHTML = this._renderCompactMode(boxValues, externalData);
+    } else if (this._cfg.view_mode === "box") {
+      contentContainer.innerHTML = this._renderBoxMode(boxValues, externalData);
     } else {
       contentContainer.innerHTML = this._renderNormalMode(boxValues, externalData);
     }
 
     this._attachEventHandlers();
+  }
+
+  /**
+   * Photo-realistic view: the CFS unit with a spool overlay per bay.
+   *
+   * Only offered for a four-bay unit, because the overlay geometry is tied to
+   * this particular image. Anything else falls back to the full view rather than
+   * drawing spools in the wrong places.
+   * @param {object[]} boxes
+   * @param {object|null} external
+   * @returns {string}
+   */
+  _renderBoxMode(boxes, external) {
+    const box = boxes[this._selectedCFS] || boxes[0];
+    const slots = box?.slots || [];
+    const filled = slots.filter(Boolean);
+
+    if (filled.length !== 4) {
+      return this._renderNormalMode(boxes, external);
+    }
+
+    const unitSelector = boxes.length > 1
+      ? `
+        <div class="unit-selector">
+          ${boxes.map((b, idx) => `
+            <button class="unit-btn ${idx === this._selectedCFS ? 'active' : ''}" data-cfs="${idx}">
+              ${this._t("cfs_number_label", { number: b.id + 1 })}
+            </button>
+          `).join('')}
+        </div>
+      `
+      : '';
+
+    const bays = slots.map((slot) => {
+      if (!slot) return '<div class="bay"></div>';
+      const safeType = slot.type && !["unknown", "unavailable", "—", "-"].includes(String(slot.type).toLowerCase()) ? slot.type : "—";
+      const hasFilament = safeType !== "—";
+      const pct = hasFilament && slot.percent !== null ? Math.round(slot.percent) : 0;
+      return `
+        <div class="bay" data-eid="${slot.entity_id}">
+          ${this._renderEditButton(slot, true)}
+          <div class="bay-spool" style="--spool-color: ${slot.color || '#cccccc'}"></div>
+          <div class="bay-label">
+            <span class="bay-type">${safeType}</span>
+            <span class="bay-pct">${pct}%</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const env = [];
+    if (box?.temp && box.temp !== "—") env.push(`<span class="env-temp">${box.temp}</span>`);
+    if (box?.humidity && box.humidity !== "—") {
+      env.push(`<span class="env-hum" style="color: ${box.humidityColor}">${box.humidity}</span>`);
+    }
+
+    return `
+      ${unitSelector}
+      <div class="box-view">
+        <img class="box-image" src="${ASSET_URL_BASE}cfs_box.webp" alt="${this._t("alt_cfs_box")}" />
+        <div class="bays">${bays}</div>
+      </div>
+      ${env.length ? `<div class="env-info">${env.join(' <span style="color: var(--divider-color)">•</span> ')}</div>` : ''}
+    `;
   }
 
   _renderNormalMode(boxes, external) {
@@ -2235,6 +2364,7 @@ class KCFSCardEditor extends HTMLElement {
             options: [
               { value: "full", label: this._t("view_mode_full") },
               { value: "compact", label: this._t("view_mode_compact") },
+              { value: "box", label: this._t("view_mode_box") },
             ],
           },
         },
