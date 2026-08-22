@@ -562,6 +562,12 @@ class PrinterState:
         self._pos_z = 0.0 if "Z" in axes or "z" in axes else self._pos_z
         self._device_state = 0
 
+    @property
+    def cfs_enabled(self) -> bool:
+        """True when a real CFS unit is attached (a type==0 box), not just an
+        external spool holder (type==1). This is what `cfsConnect` reports."""
+        return any(box.get("type") == 0 for box in self._cfs_boxes)
+
     def get_cfs_info(self) -> dict[str, Any]:
         """Generate a realistic CFS status payload."""
         # Update dynamic fields in CFS boxes
@@ -583,6 +589,56 @@ class PrinterState:
                 "materialBoxs": self._cfs_boxes,
             }
         }
+
+    # Keys the integration sends in a modifyMaterial payload, minus the two that
+    # address the slot. `rfid` is included because the integration can pass an
+    # existing tag id straight back through.
+    MATERIAL_WRITABLE_KEYS = (
+        "type",
+        "name",
+        "vendor",
+        "color",
+        "minTemp",
+        "maxTemp",
+        "pressure",
+        "rfid",
+    )
+
+    def modify_material(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Apply a ``modifyMaterial`` write to the stored CFS slot.
+
+        Merges rather than replaces, which is what makes the "absent key keeps the
+        printer's value" contract observable -- in particular that a write which
+        omits `rfid` leaves the tag association intact.
+
+        Raises ValueError for a box or slot that does not exist, so a wrong
+        `boxId` (for example an off-by-one from the card's card-position guess)
+        fails loudly in testing instead of silently doing nothing.
+        """
+        try:
+            box_id = int(payload.get("boxId"))
+            slot_id = int(payload.get("id"))
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"modifyMaterial needs integer boxId and id, got {payload!r}"
+            ) from None
+
+        box = next((b for b in self._cfs_boxes if b.get("id") == box_id), None)
+        if box is None:
+            known = [b.get("id") for b in self._cfs_boxes]
+            raise ValueError(f"no such box {box_id} (have {known})")
+
+        materials = box.get("materials", [])
+        slot = next((m for m in materials if m.get("id") == slot_id), None)
+        if slot is None:
+            known = [m.get("id") for m in materials]
+            raise ValueError(f"no such slot {slot_id} in box {box_id} (have {known})")
+
+        for key in self.MATERIAL_WRITABLE_KEYS:
+            if key in payload:
+                slot[key] = payload[key]
+
+        return slot
 
     # ----------------------- tick/update loops -----------------------
     def _build_cfs_boxes(self) -> list:
@@ -626,6 +682,9 @@ class PrinterState:
                         "type": "PLA",
                         "name": "Hyper PLA",
                         "color": "#0000000",
+                        "minTemp": 190,
+                        "maxTemp": 240,
+                        "pressure": 0.04,
                         "percent": 95,
                         "state": 1,
                         "selected": 1,
@@ -636,6 +695,9 @@ class PrinterState:
                         "type": "PLA",
                         "name": "Hyper PLA",
                         "color": "#0ffffff",
+                        "minTemp": 190,
+                        "maxTemp": 240,
+                        "pressure": 0.04,
                         "percent": 80,
                         "state": 1,
                         "selected": 0,
@@ -646,11 +708,16 @@ class PrinterState:
                         "type": "PLA",
                         "name": "Hyper PLA",
                         "color": "#0ffa800",
+                        "minTemp": 190,
+                        "maxTemp": 240,
+                        "pressure": 0.04,
                         "percent": 100,
                         "state": 1,
                         "selected": 0,
                     },
                     {
+                        # No temps or pressure: real slots often omit them, and the
+                        # edit dialog has to cope with a partial prefill.
                         "id": 3,
                         "vendor": "Creality",
                         "type": "PLA",
@@ -865,6 +932,11 @@ class PrinterState:
             
             # extra
             "materialStatus": self._material_status,
+            # The integration gates CFS discovery on this (__init__.py caches
+            # _cached_cfs_detected from it, ws_client only polls boxsInfo blindly
+            # while it is unknown). Real printers stream it, so stream it here too
+            # or that whole fast path never gets exercised.
+            "cfsConnect": 1 if self.cfs_enabled else 0,
         }
 
         if self._cfg.get("box_sensor"):
@@ -967,6 +1039,22 @@ async def ws_handle_conn(ws: Any, state: PrinterState):
                     handled = True
                 elif "materialStatus" in params:
                     state.set_material_status(int(params.get("materialStatus") or 0))
+                    handled = True
+                elif "modifyMaterial" in params:
+                    # The CFS write path. Mutating the stored slot is the point:
+                    # it makes the next boxsInfo request reflect the write, which
+                    # is what lets a test assert the whole round trip rather than
+                    # just "the service did not raise".
+                    payload = params.get("modifyMaterial") or {}
+                    LOGGER.info("modifyMaterial received: %s", payload)
+                    try:
+                        updated = state.modify_material(payload)
+                    except ValueError as exc:
+                        # A real printer would not invent a slot, so neither do we.
+                        LOGGER.warning("modifyMaterial rejected: %s", exc)
+                    else:
+                        LOGGER.info("modifyMaterial applied, slot is now: %s", updated)
+                        await ws_safe_send(ws, state.get_cfs_info())
                     handled = True
 
                 if handled:

@@ -25,6 +25,31 @@ Features
 - H.264 video with a 1s keyframe interval (what real K-series printers send, and what Home Assistant's HLS pipeline needs)
 - Model-based capabilities: box temp sensor/control, light, camera type
 - Deterministic mode and a test-control endpoint for reproducible/scripted testing
+- CFS: `cfsConnect` in the telemetry stream, `boxsInfo` on request, and **material writes** via `modifyMaterial`
+
+CFS material writes
+
+`{"method":"set","params":{"modifyMaterial":{...}}}` updates the stored slot, so the
+next `boxsInfo` request reflects the change — that round trip is what makes
+`ha_creality_ws.set_cfs_material` testable without CFS hardware.
+
+- Addressed by `boxId` (matching `materialBoxs[].id`) and `id` (matching `materials[].id`)
+- **Merges** rather than replaces: a key that is absent from the payload keeps the
+  value the slot already has. This matters most for `rfid` — writing an empty
+  string would erase a real tag association, so the integration omits the key
+  instead
+- Writable keys: `type`, `name`, `vendor`, `color`, `minTemp`, `maxTemp`, `pressure`, `rfid`
+- An unknown `boxId` or `id` is **rejected and logged**, not silently created, so
+  an off-by-one in the caller fails loudly during testing
+
+```bash
+# watch a write land (the server logs the payload and the resulting slot)
+python3 tools/creality_printer_test_server.py --model k2plus --deterministic
+```
+
+`tools/tests/test_cfs_simulator.py` drives this over a real socket. Those tests
+skip automatically unless `websockets` is importable and `.venv` has the
+simulator's dependencies, which is why they do not run in CI.
 
 Dependencies
 - Required: `aiohttp`, `aiortc`, `av`, `numpy`, `websockets`
