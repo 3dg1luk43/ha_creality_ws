@@ -93,6 +93,43 @@ class KCFSCard extends HTMLElement {
     return "#cccccc";
   }
 
+  /**
+   * True when the printer reports several colours for one spool, e.g.
+   * "#0ffa800,#0ff97e1". _sanitizeColor renders those as grey, and a single
+   * colour cannot represent them, so editing has to leave the value alone
+   * rather than flatten it.
+   * @param {*} value raw colour as reported
+   * @returns {boolean}
+   */
+  static _isMultiColour(value) {
+    return /[,;]/.test(String(value || ""));
+  }
+
+  /**
+   * Work out which box and slot the *printer* calls this one.
+   *
+   * The card's box0..box3 config keys are card positions, not printer ids -- the
+   * sensors key off the id in materialBoxs[]. Three tiers, most reliable first:
+   *   1. the box_id/slot_id attributes the sensors publish;
+   *   2. the default entity id, which encodes them as cfs_box_N_slot_M_*;
+   *   3. card position + 1, which is only right when the pickers were filled in
+   *      order from box 1 -- flagged as a guess so the UI can say so.
+   * @returns {{boxId: number, slotId: number, guessed: boolean}}
+   */
+  static _resolvePrinterTarget(filamentObj, entityId, cardBoxIndex, cardSlotIndex) {
+    const attrs = filamentObj?.attributes;
+    if (typeof attrs?.box_id === "number" && typeof attrs?.slot_id === "number") {
+      return { boxId: attrs.box_id, slotId: attrs.slot_id, guessed: false };
+    }
+
+    const match = /cfs_box_(\d+)_slot_(\d+)_/.exec(String(entityId || ""));
+    if (match) {
+      return { boxId: Number(match[1]), slotId: Number(match[2]), guessed: false };
+    }
+
+    return { boxId: cardBoxIndex + 1, slotId: cardSlotIndex, guessed: true };
+  }
+
   static _parsePercent(percentObj) {
     if (!percentObj) return null;
     const state = percentObj.state;
@@ -148,6 +185,9 @@ class KCFSCard extends HTMLElement {
     if (!this._root) {
       this._root = this.attachShadow({ mode: "open" });
     }
+    // _render() wipes #content, so the gate must not then decide nothing changed
+    // and skip repopulating it -- that would leave the card blank after an edit.
+    this._snapshot = null;
     this._render();
   }
 
@@ -162,8 +202,10 @@ class KCFSCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    _requestI18n(this, hass, () => { this._update(); });
-    this._update();
+    // Translated strings are not part of the snapshot, so when they arrive the
+    // gate has to be reset and the render forced.
+    _requestI18n(this, hass, () => { this._snapshot = null; this._update(); });
+    this._updateIfChanged();
   }
 
   _render() {
@@ -613,12 +655,15 @@ class KCFSCard extends HTMLElement {
     `;
   }
 
-  _update() {
-    if (!this._root || !this._hass) return;
-
-    const contentContainer = this._root.getElementById("content");
-    if (!contentContainer) return;
-
+  /**
+   * Read every configured entity into one render-ready snapshot.
+   *
+   * This is the ONLY place that reads hass.states for slots. The render gate and
+   * all three view modes consume what it returns, so there is exactly one copy of
+   * the collection logic to keep correct.
+   * @returns {{boxes: object[], external: object|null}}
+   */
+  _collectData() {
     const states = this._hass.states || {};
     const gObj = (eid) => (eid ? states?.[eid] : undefined);
     const fmtState = (st) => {
@@ -669,17 +714,32 @@ class KCFSCard extends HTMLElement {
         const color = KCFSCard._sanitizeColor(rawColor);
         const percent = KCFSCard._parsePercent(percentObj);
         const percentText = fmtState(percentObj);
+        const entityId = filamentEid || colorEid || percentEid;
+        const target = KCFSCard._resolvePrinterTarget(
+          filamentObj, entityId, boxId, slotId,
+        );
 
         slots[slotId] = {
           id: slotId,
           boxId,
-          entity_id: filamentEid || colorEid || percentEid,
+          entity_id: entityId,
           name,
           type,
           selected,
           color,
           percent,
           percentText,
+          // Editing needs the printer's own ids and the current values to
+          // prefill from; see KCFSCard._resolvePrinterTarget.
+          printerBoxId: target.boxId,
+          printerSlotId: target.slotId,
+          targetIsGuessed: target.guessed,
+          vendor: filamentObj?.attributes?.vendor,
+          rfid: filamentObj?.attributes?.rfid,
+          minTemp: filamentObj?.attributes?.min_temp,
+          maxTemp: filamentObj?.attributes?.max_temp,
+          pressure: filamentObj?.attributes?.pressure,
+          isMultiColour: KCFSCard._isMultiColour(rawColor),
         };
       }
 
@@ -725,11 +785,64 @@ class KCFSCard extends HTMLElement {
         color,
         percent,
         percentText,
+        // The external box's id comes from the printer via the sensor; there is
+        // no card position to fall back on, so leave it null when unknown rather
+        // than guessing 0.
+        printerBoxId: filamentObj?.attributes?.box_id ?? null,
+        printerSlotId: filamentObj?.attributes?.slot_id ?? 0,
+        targetIsGuessed: filamentObj?.attributes?.box_id === undefined,
+        vendor: filamentObj?.attributes?.vendor,
+        rfid: filamentObj?.attributes?.rfid,
+        minTemp: filamentObj?.attributes?.min_temp,
+        maxTemp: filamentObj?.attributes?.max_temp,
+        pressure: filamentObj?.attributes?.pressure,
+        isMultiColour: KCFSCard._isMultiColour(rawColor),
       };
     }
 
-    const boxValues = Object.values(boxes);
-    if (boxValues.length === 0 && !hasExternal) {
+    return { boxes: Object.values(boxes), external: externalData };
+  }
+
+  /**
+   * Cheap change detection over everything the renderers read.
+   *
+   * The snapshot is a fixed-shape tree of scalars built from object literals, so
+   * key order is deterministic and stringifying it is both correct and much
+   * cheaper than walking it recursively. Anything a renderer reads that is NOT
+   * in `data` has to be included here too, or the view goes stale.
+   * @param {object} data
+   * @returns {string}
+   */
+  _fingerprint(data) {
+    return JSON.stringify([
+      this._cfg.view_mode,
+      this._cfg.compact_view,
+      this._cfg.show_type_in_mini,
+      this._selectedCFS,
+      data,
+    ]);
+  }
+
+  /** Re-render only when something a renderer would show has actually changed. */
+  _updateIfChanged() {
+    if (!this._root || !this._hass) return;
+    const data = this._collectData();
+    const fingerprint = this._fingerprint(data);
+    if (fingerprint === this._snapshot) return;
+    this._snapshot = fingerprint;
+    this._update(data);
+  }
+
+  _update(data) {
+    if (!this._root || !this._hass) return;
+
+    const contentContainer = this._root.getElementById("content");
+    if (!contentContainer) return;
+
+    // Callers that bypass the gate (an i18n load, the unit selector) pass nothing.
+    const { boxes: boxValues, external: externalData } = data || this._collectData();
+
+    if (boxValues.length === 0 && !externalData) {
       contentContainer.innerHTML = `<div class="no-data">${this._t("no_data")}</div>`;
       return;
     }
@@ -978,7 +1091,9 @@ class KCFSCard extends HTMLElement {
         const cfsIdx = parseInt(btn.dataset.cfs, 10);
         if (!isNaN(cfsIdx)) {
           this._selectedCFS = cfsIdx;
-          this._update();
+          // _selectedCFS is in the fingerprint, so go through the gate and keep
+          // the snapshot consistent with what is on screen.
+          this._updateIfChanged();
         }
       };
     });
