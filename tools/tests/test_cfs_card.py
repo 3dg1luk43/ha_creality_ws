@@ -269,29 +269,43 @@ def test_edit_button_is_a_real_button_with_a_label():
     assert "aria-label=" in edit_button
 
 
+def _service_number_bounds(field: str) -> dict[str, float]:
+    """Pull one numeric field's min/max out of services.yaml.
+
+    Scanned rather than parsed with PyYAML: CI installs only pytest, and this
+    check is most valuable exactly there, so it must not need a dependency.
+    """
+    text = (ROOT / "custom_components" / "ha_creality_ws" / "services.yaml").read_text(
+        encoding="utf-8"
+    )
+    block = re.search(
+        rf"^    {field}:\n(.*?)(?=^    \w|^\w|\Z)", text, re.DOTALL | re.MULTILINE
+    )
+    assert block, f"{field} not found in services.yaml"
+    bounds = {
+        key: float(value)
+        for key, value in re.findall(r"^\s+(min|max):\s*([0-9.]+)", block.group(1), re.MULTILINE)
+    }
+    assert {"min", "max"} <= set(bounds), f"{field} has no min/max in services.yaml"
+    return bounds
+
+
 def test_dialog_field_bounds_match_the_service():
     """The card, services.yaml and the service schema must agree on limits.
 
     Otherwise the dialog happily accepts a value the service then rejects.
     """
-    import yaml
-
     card_form = _card().split("form.schema = [", 1)[1].split("];", 1)[0]
-    services = yaml.safe_load(
-        (ROOT / "custom_components" / "ha_creality_ws" / "services.yaml").read_text()
-    )["set_cfs_material"]["fields"]
 
     for field in ("min_temp", "max_temp", "pressure"):
-        selector = services[field]["selector"]["number"]
+        expected = _service_number_bounds(field)
         entry = re.search(rf'name: "{field}".*?\}}\s*\}},', card_form, re.DOTALL)
         assert entry, f"{field} missing from the dialog schema"
-        text = entry.group(0)
         for bound in ("min", "max"):
-            expected = selector[bound]
-            found = re.search(rf"\b{bound}:\s*([0-9.]+)", text)
+            found = re.search(rf"\b{bound}:\s*([0-9.]+)", entry.group(0))
             assert found, f"{field}.{bound} not set in the card"
-            assert float(found.group(1)) == float(expected), (
-                f"{field}.{bound}: card {found.group(1)} vs services.yaml {expected}"
+            assert float(found.group(1)) == expected[bound], (
+                f"{field}.{bound}: card {found.group(1)} vs services.yaml {expected[bound]}"
             )
 
 
