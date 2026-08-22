@@ -49,6 +49,27 @@ class FakeElement {
   // Event wiring is not under test here, so selectors return nothing.
   querySelectorAll() { return []; }
   querySelector() { return null; }
+  setAttribute(name, value) {
+    this._attrs = this._attrs || {};
+    this._attrs[name] = String(value);
+  }
+  getAttribute(name) { return this._attrs?.[name] ?? null; }
+  get classList() {
+    const self = this;
+    return {
+      add: (...names) => {
+        const have = new Set(String(self.className || "").split(/\s+/).filter(Boolean));
+        names.forEach((n) => have.add(n));
+        self.className = [...have].join(" ");
+      },
+      remove: (...names) => {
+        const have = new Set(String(self.className || "").split(/\s+/).filter(Boolean));
+        names.forEach((n) => have.delete(n));
+        self.className = [...have].join(" ");
+      },
+      contains: (name) => String(self.className || "").split(/\s+/).includes(name),
+    };
+  }
   attachShadow() { return this; }
   addEventListener(type, fn) {
     this._listeners = this._listeners || {};
@@ -75,6 +96,15 @@ export function loadCard() {
     // English fallback rather than depending on the JSON files.
     fetch: () => new Promise(() => {}),
     console,
+    localStorage: (() => {
+      const store = new Map();
+      return {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => store.set(k, String(v)),
+        removeItem: (k) => store.delete(k),
+        clear: () => store.clear(),
+      };
+    })(),
     setTimeout,
     clearTimeout,
     JSON,

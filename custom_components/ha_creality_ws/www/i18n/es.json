@@ -135,6 +135,13 @@
     "toast_colour_invalid": "El color debe tener seis dígitos hexadecimales, por ejemplo #06c84f",
     "toast_type_required": "El tipo de material es obligatorio",
     "toast_external_not_supported": "Esta impresora no informa un id de caja para la bobina externa, por lo que no se puede editar",
-    "warn_box_id_guessed": "La caja de destino se ha inferido del diseño de la tarjeta: comprueba que coincide con la impresora antes de guardar"
+    "warn_box_id_guessed": "La caja de destino se ha inferido del diseño de la tarjeta: comprueba que coincide con la impresora antes de guardar",
+    "label_color_presets": "Preajustes",
+    "label_preset_name": "Nombre del preajuste",
+    "btn_save_preset": "Guardar preajuste",
+    "toast_preset_saved": "Preajuste «{name}» guardado",
+    "toast_preset_deleted": "Preajuste «{name}» eliminado",
+    "toast_preset_name_required": "Primero ponle un nombre al preajuste",
+    "hint_delete_preset": "Los círculos discontinuos son tus preajustes: haz clic derecho en uno para eliminarlo."
   }
 }

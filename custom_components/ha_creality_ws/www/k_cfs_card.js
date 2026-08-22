@@ -45,6 +45,97 @@ function _requestI18n(instance, hass, onLoaded) {
   Promise.all([_loadI18n("en"), lang !== "en" ? _loadI18n(lang) : null]).then(onLoaded);
 }
 
+// Creality's standard filament colours. Deliberately untranslated: the names are
+// part of the product's identity, and twelve colour words per language is poor
+// value. They surface as tooltips only.
+const CREALITY_STANDARD_COLOURS = {
+  Black: "#000000",
+  White: "#ffffff",
+  Grey: "#9e9e9e",
+  Red: "#e53935",
+  Orange: "#fb8c00",
+  Yellow: "#fdd835",
+  Green: "#06c84f",
+  Cyan: "#00acc1",
+  Blue: "#1e88e5",
+  Purple: "#8e24aa",
+  Pink: "#ec407a",
+  Lime: "#9ccc65",
+};
+
+const PRESETS_STORAGE_KEY = "k-cfs-colour-presets";
+
+/**
+ * User-defined colour presets, persisted in localStorage.
+ *
+ * Deliberately browser-local rather than stored in the card config: presets are
+ * a personal palette, and writing them into the dashboard would make every
+ * change a config edit visible to every user of that dashboard.
+ */
+class ColourPresetsManager {
+  constructor() {
+    this.presets = ColourPresetsManager._load();
+  }
+
+  static _load() {
+    try {
+      const stored = localStorage.getItem(PRESETS_STORAGE_KEY);
+      const parsed = stored ? JSON.parse(stored) : {};
+      // Guard against a hand-edited or corrupted value.
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  _persist() {
+    try {
+      localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(this.presets));
+    } catch (_) {
+      // Private browsing or a full quota. The presets stay in memory for this
+      // session; losing them is not worth interrupting a save for.
+    }
+  }
+
+  /** @returns {boolean} whether the preset was stored */
+  save(name, colour) {
+    const key = String(name || "").trim();
+    const value = KCFSCard._sanitizeColor(colour);
+    if (!key || value === "#cccccc") return false;
+    this.presets[key] = value;
+    this._persist();
+    return true;
+  }
+
+  rename(from, to) {
+    const target = String(to || "").trim();
+    if (!target || !(from in this.presets) || target === from) return false;
+    this.presets[target] = this.presets[from];
+    delete this.presets[from];
+    this._persist();
+    return true;
+  }
+
+  remove(name) {
+    if (!(name in this.presets)) return false;
+    delete this.presets[name];
+    this._persist();
+    return true;
+  }
+
+  /** Standard colours first, then the user's own. @returns {Array<[string, string]>} */
+  entries() {
+    return [
+      ...Object.entries(CREALITY_STANDARD_COLOURS),
+      ...Object.entries(this.presets),
+    ];
+  }
+
+  isCustom(name) {
+    return name in this.presets;
+  }
+}
+
 const BUSY_PRINT_STATES = new Set([
   "printing",
   "paused",
@@ -68,6 +159,13 @@ const CFS_TRANSLATIONS = {
     label_slot_filament: "Box {box} Slot {slot} Filament",
     label_slot_color: "Box {box} Slot {slot} Color",
     label_slot_percent: "Box {box} Slot {slot} Remaining Percent",
+    label_color_presets: "Presets",
+    label_preset_name: "Preset name",
+    btn_save_preset: "Save preset",
+    toast_preset_saved: "Preset “{name}” saved",
+    toast_preset_deleted: "Preset “{name}” deleted",
+    toast_preset_name_required: "Give the preset a name first",
+    hint_delete_preset: "Dashed swatches are your own presets — right-click one to delete it.",
     btn_edit: "Edit material",
     tooltip_edit_locked: "Editing is disabled while the printer is busy",
     tooltip_multicolour_readonly: "Multi-colour spools cannot be edited",
@@ -821,6 +919,48 @@ class KCFSCard extends HTMLElement {
         font-family: monospace;
       }
       .colour-inputs input:disabled { opacity: 0.5; cursor: not-allowed; }
+      .presets { margin-top: 12px; }
+      .presets > label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 13px;
+        color: var(--secondary-text-color);
+      }
+      .swatches {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+      .swatch {
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        border: 1px solid var(--divider-color);
+        border-radius: 50%;
+        cursor: pointer;
+      }
+      .swatch.custom { border-style: dashed; }
+      .swatch:focus-visible {
+        outline: 2px solid var(--primary-color);
+        outline-offset: 1px;
+      }
+      .preset-save { display: flex; gap: 8px; }
+      .preset-save input {
+        flex: 1;
+        min-width: 0;
+        padding: 8px;
+        border: 1px solid var(--divider-color);
+        border-radius: 6px;
+        background: var(--secondary-background-color);
+        color: var(--primary-text-color);
+      }
+      .preset-hint {
+        margin-top: 6px;
+        font-size: 11px;
+        color: var(--secondary-text-color);
+      }
+
       .dialog-actions {
         display: flex;
         justify-content: flex-end;
@@ -1643,6 +1783,11 @@ class KCFSCard extends HTMLElement {
     colourInputs.appendChild(picker);
     colourInputs.appendChild(hex);
     colourRow.appendChild(colourInputs);
+
+    if (!slot.isMultiColour) {
+      colourRow.appendChild(this._renderPresets(picker, hex));
+    }
+
     container.appendChild(colourRow);
 
     // ---- actions ----------------------------------------------------------
@@ -1678,6 +1823,104 @@ class KCFSCard extends HTMLElement {
     container.appendChild(actions);
 
     return container;
+  }
+
+  /**
+   * Swatch row plus preset management, wired to the colour inputs.
+   *
+   * Rebuilt in place when presets change rather than by reopening the dialog:
+   * PR #75 tore the whole dialog down and reopened it on a timer, which threw
+   * away whatever the user had already typed into the other fields.
+   * @param {object} picker the <input type="color">
+   * @param {object} hex the hex text input
+   * @returns {object} the presets section element
+   */
+  _renderPresets(picker, hex) {
+    // Constructed on first use, so a dashboard full of cards does not all touch
+    // localStorage just to render.
+    this._presets = this._presets || new ColourPresetsManager();
+
+    const section = document.createElement("div");
+    section.className = "presets";
+
+    const label = document.createElement("label");
+    label.textContent = this._t("label_color_presets");
+    section.appendChild(label);
+
+    const swatches = document.createElement("div");
+    swatches.className = "swatches";
+    section.appendChild(swatches);
+
+    const apply = (colour) => {
+      picker.value = colour;
+      hex.value = colour;
+    };
+
+    const rebuild = () => {
+      // Scoped to this row, not the document: PR #75 used a document-wide query
+      // that also reset swatches in a second card's open dialog.
+      swatches.innerHTML = "";
+      swatches.children.length = 0;
+
+      for (const [name, colour] of this._presets.entries()) {
+        const swatch = document.createElement("button");
+        swatch.type = "button";
+        swatch.className = "swatch";
+        swatch.title = name;
+        swatch.setAttribute("aria-label", name);
+        swatch.style.background = colour;
+        swatch.addEventListener("click", () => apply(colour));
+
+        if (this._presets.isCustom(name)) {
+          swatch.classList?.add?.("custom");
+          // Long-press-free management: a modifier click removes a custom preset,
+          // which keeps the row compact without a second list.
+          swatch.addEventListener("contextmenu", (ev) => {
+            ev.preventDefault?.();
+            if (this._presets.remove(name)) {
+              this._showToast(this._t("toast_preset_deleted", { name }));
+              rebuild();
+            }
+          });
+        }
+        swatches.appendChild(swatch);
+      }
+    };
+    rebuild();
+
+    const saveRow = document.createElement("div");
+    saveRow.className = "preset-save";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.placeholder = this._t("label_preset_name");
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "dialog-btn secondary";
+    saveBtn.textContent = this._t("btn_save_preset");
+    saveBtn.addEventListener("click", () => {
+      const name = nameInput.value.trim();
+      if (!name) {
+        this._showToast(this._t("toast_preset_name_required"));
+        return;
+      }
+      if (this._presets.save(name, hex.value)) {
+        nameInput.value = "";
+        this._showToast(this._t("toast_preset_saved", { name }));
+        rebuild();
+      } else {
+        this._showToast(this._t("toast_colour_invalid"));
+      }
+    });
+    saveRow.appendChild(nameInput);
+    saveRow.appendChild(saveBtn);
+    section.appendChild(saveRow);
+
+    const hint = document.createElement("div");
+    hint.className = "preset-hint";
+    hint.textContent = this._t("hint_delete_preset");
+    section.appendChild(hint);
+
+    return section;
   }
 
   /**
