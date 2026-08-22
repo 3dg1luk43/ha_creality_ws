@@ -364,3 +364,30 @@ def test_asset_referenced_by_the_card_exists():
     """A typo here is a broken image in every box-view dashboard."""
     for name in re.findall(r'ASSET_URL_BASE\}([\w.\-]+)"', _card()):
         assert (WWW / name).exists(), f"card references missing asset: {name}"
+
+
+def test_bundled_images_are_attributed():
+    """Third-party artwork must be carved out of the licence, not shipped silently.
+
+    The repository is AGPL-3.0, which purports to cover the whole work. Any image
+    we do not own needs naming in NOTICE so redistributors know the grant does
+    not extend to it.
+    """
+    notice = (ROOT / "NOTICE").read_text(encoding="utf-8")
+    images = [
+        p.name for p in WWW.iterdir()
+        if p.is_file() and p.suffix in {".webp", ".png", ".jpg", ".svg"}
+    ]
+    assert images, "no bundled images found -- has www/ moved?"
+    for name in images:
+        assert name in notice, f"{name} is bundled but not mentioned in NOTICE"
+
+
+def test_readme_licence_matches_the_licence_file():
+    """The README claimed MIT while LICENSE was AGPL-3.0."""
+    licence = (ROOT / "LICENSE").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    section = readme.split("## License", 1)[1]
+    if "GNU AFFERO GENERAL PUBLIC LICENSE" in licence.upper():
+        assert "Affero" in section, "LICENSE is AGPL but the README says otherwise"
+        assert "MIT" not in section, "the README still claims MIT"
