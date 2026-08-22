@@ -8,7 +8,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator  # ty
 from homeassistant.helpers.aiohttp_client import async_get_clientsession  # type: ignore[import]
 from homeassistant.helpers.dispatcher import async_dispatcher_send  # type: ignore[import]
 from .ws_client import KClient
-from .utils import ModelDetection
+from .utils import ModelDetection, safe_float
 from .const import (
     DOMAIN,
     STALE_AFTER_SECS,
@@ -17,6 +17,8 @@ from .const import (
     CONF_NOTIFY_ERROR,
     CONF_NOTIFY_MINUTES_TO_END,
     CONF_MINUTES_TO_END_VALUE,
+    LATE_DISCOVERY_FIELDS,
+    NOTIFY_PRIME_GRACE_SECS,
     CONF_POLLING_RATE,
     DEFAULT_POLLING_RATE,
     MR_PORT,
@@ -60,6 +62,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._notified_minutes_to_end = False
         self._last_error_code = 0
         self._last_mr_poll = 0.0
+
+        # Notifications are suppressed until the printer's current state has been
+        # captured as a baseline, so a job that already finished before Home
+        # Assistant started does not fire a fresh "completed" notification on
+        # every restart (issue #112).
+        self._notify_primed = False
+        self._notify_prime_deadline: float | None = None
         
         # Extended status tracking
         self._notified_filament_runout = False
@@ -333,22 +342,22 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if (payload.get("targetBoxTemp") == 0) and self._is_k2_base:
             payload.pop("targetBoxTemp")
 
-        # Check if boxsInfo is present and we haven't discovered CFS entities yet
-        had_cfs = "boxsInfo" in self.data
-        self.data.update(payload)
-        has_cfs = "boxsInfo" in self.data
-        
-        if has_cfs and not had_cfs:
-            _LOGGER.info("CFS detected in telemetry (first time), triggering dynamic discovery")
-            _LOGGER.debug("CFS Raw Data: %s", json.dumps(payload.get("boxsInfo"), default=str))
-            async_dispatcher_send(self.hass, f"{DOMAIN}_new_entities_{self._config_entry_id}")
-        
-        # Log if CFS is connected but we are missing boxsInfo
-        if payload.get("cfsConnect") == 1 and not has_cfs:
-             # Only log this occasionally or if it's a change to avoid spam? 
-             # For now, let's log it if we expected it.
-             pass
+        # Entities gated on a capability field can only be created once the
+        # printer has actually reported it, which may be long after the platforms
+        # were set up. Fire one discovery signal the first time any such field
+        # shows up so every platform can re-check (see LATE_DISCOVERY_FIELDS).
+        newly_seen = [f for f in LATE_DISCOVERY_FIELDS if f not in self.data and f in payload]
 
+        self.data.update(payload)
+
+        if newly_seen:
+            _LOGGER.info(
+                "Telemetry reported %s for the first time; triggering dynamic discovery",
+                ", ".join(newly_seen),
+            )
+            if "boxsInfo" in newly_seen:
+                _LOGGER.debug("CFS Raw Data: %s", json.dumps(payload.get("boxsInfo"), default=str))
+            async_dispatcher_send(self.hass, f"{DOMAIN}_new_entities_{self._config_entry_id}")
 
         self._recompute_paused_from_telemetry()
         
@@ -378,15 +387,86 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_update_ts = now
         self.async_update_listeners()
 
+    @staticmethod
+    def _print_seconds_left(d: dict[str, Any]) -> float | None:
+        """Seconds remaining in the current print, or None.
+
+        The printer streams this as `printLeftTime`; `printTimeLeft` is only kept
+        as a fallback because the notification code used to look for that name
+        exclusively, which meant the minutes-to-end notification never fired.
+        """
+        for key in ("printLeftTime", "printTimeLeft"):
+            value = safe_float(d.get(key))
+            if value is not None:
+                return value
+        return None
+
+    def _prime_notification_state(self, d: dict[str, Any]) -> None:
+        """Record the printer's state at startup without notifying about it.
+
+        The printer keeps reporting the last job's file name and 100% progress
+        long after it finished, so a freshly started coordinator would treat that
+        stale state as a brand new completion (issue #112). Marking the
+        already-true conditions as "already notified" makes the first real
+        transition the first notification.
+        """
+        self._notify_primed = True
+        self._last_filename = d.get("printFileName")
+
+        progress = d.get("printProgress") or d.get("dProgress")
+        try:
+            prog_val = int(progress) if progress is not None else 0
+        except (ValueError, TypeError):
+            prog_val = 0
+        self._notified_completed = prog_val >= 100
+
+        try:
+            self._last_error_code = int((d.get("err") or {}).get("errcode", 0))
+        except (AttributeError, ValueError, TypeError):
+            self._last_error_code = 0
+
+        try:
+            self._notified_filament_runout = int(d.get("materialStatus") or 0) == 1
+        except (ValueError, TypeError):
+            self._notified_filament_runout = False
+
+        left_s = self._print_seconds_left(d)
+        self._notified_minutes_to_end = bool(
+            left_s is not None and 0 < (left_s / 60.0) <= self._minutes_to_end_value
+        )
+
+        _LOGGER.debug(
+            "Notification baseline captured: file=%s progress=%s completed=%s "
+            "err=%s runout=%s near_end=%s",
+            self._last_filename,
+            prog_val,
+            self._notified_completed,
+            self._last_error_code,
+            self._notified_filament_runout,
+            self._notified_minutes_to_end,
+        )
+
     async def _check_notifications(self, _payload: dict[str, Any]):
         """Check logic for sending notifications."""
-        if not self._notify_device:
-            return
-
         d = self.data or {}
         fname = d.get("printFileName")
         progress = d.get("printProgress") or d.get("dProgress")
-        
+
+        # Baseline the current state before anything can be notified. Telemetry
+        # arrives incrementally, so wait for a frame that carries both the file
+        # name and the progress, but never longer than the grace window (an idle
+        # printer may report neither).
+        if not self._notify_primed:
+            now = self.hass.loop.time()
+            if self._notify_prime_deadline is None:
+                self._notify_prime_deadline = now + NOTIFY_PRIME_GRACE_SECS
+            if (fname and progress is not None) or now >= self._notify_prime_deadline:
+                self._prime_notification_state(d)
+            return
+
+        if not self._notify_device:
+            return
+
         # Check if we started a new print (filename changed)
         # Store last filename in instance to compare
         if getattr(self, "_last_filename", None) != fname:
@@ -404,7 +484,15 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             prog_val = int(progress) if progress is not None else 0
         except (ValueError, TypeError):
             prog_val = 0
-            
+
+        # Progress falling back below 100% means a new job cycle started, even if
+        # it reprints the same file (in which case the file name never changes and
+        # the reset above never fires). Without this the completion notification
+        # only ever arrives once per file name.
+        if prog_val < 100 and self._notified_completed:
+            _LOGGER.debug("Progress back at %s%%; re-arming completion notification", prog_val)
+            self._notified_completed = False
+
         if self._notify_completed:
             # If progress is 100% OR state is specific for completion?
             # Using progress >= 100 is most reliable according to sensor logic
@@ -449,21 +537,18 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # 4) Minutes to end
         if self._notify_minutes_to_end:
-            left_s = d.get("printTimeLeft")
+            # Nothing to compare against until the printer reports a remaining time.
+            left_s = self._print_seconds_left(d)
             if left_s is not None:
-                try:
-                    left_min = float(left_s) / 60.0
-                    target_min = self._minutes_to_end_value
-                    
-                    if 0 < left_min <= target_min and not self._notified_minutes_to_end:
-                        await self._send_notification(f"Print '{fname}' finishing in {int(left_min)} minutes.")
-                        self._notified_minutes_to_end = True
-                    # If time jumps up significantly (e.g. > target + 2m), reset flag?
-                    elif left_min > (target_min + 2):
-                        self._notified_minutes_to_end = False
-                except (TypeError, ValueError):
-                    # Invalid printTimeLeft value; skip time-based notification
-                    _LOGGER.debug("Invalid printTimeLeft value %r; skipping minutes-to-end notification", left_s)
+                left_min = left_s / 60.0
+                target_min = self._minutes_to_end_value
+
+                if 0 < left_min <= target_min and not self._notified_minutes_to_end:
+                    await self._send_notification(f"Print '{fname}' finishing in {int(left_min)} minutes.")
+                    self._notified_minutes_to_end = True
+                # If time jumps up significantly (e.g. > target + 2m), reset flag?
+                elif left_min > (target_min + 2):
+                    self._notified_minutes_to_end = False
 
     async def _send_notification(self, message: str):
         """Send a notification to the configured device."""

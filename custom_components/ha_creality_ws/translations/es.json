@@ -41,6 +41,7 @@
           "camera_mode": "Modo de transmisión de la cámara",
           "go2rtc_url": "Servidor o dirección externa de go2rtc (si es necesario)",
           "go2rtc_port": "Puerto externo de go2rtc",
+          "go2rtc_rtsp_port": "Puerto RTSP de go2rtc (0 = auto: 18554 integrado, 8554 externo)",
           "custom_camera_url": "URL de cámara personalizada (MJPEG/snapshot http(s) o rtsp://)"
         }
       },

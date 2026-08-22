@@ -21,7 +21,10 @@ Features
 	- Defaults: nozzle 250°C, bed 70°C, box 50°C (override with --target-* flags)
 - Dynamic working layer and current object index
 - Randomized case/model/side fan values (bridge spikes)
+- Fan **control** via `M106 P<0|1|2> S<0-255>` over `gcodeCmd`; a manually driven fan holds its value
+- H.264 video with a 1s keyframe interval (what real K-series printers send, and what Home Assistant's HLS pipeline needs)
 - Model-based capabilities: box temp sensor/control, light, camera type
+- Deterministic mode and a test-control endpoint for reproducible/scripted testing
 
 Dependencies
 - Required: `aiohttp`, `aiortc`, `av`, `numpy`, `websockets`
@@ -53,9 +56,48 @@ Endpoints
 - WebRTC signaling: `POST http://<host>:8000/call/webrtc_local` (K2 family)
 - MJPEG stream: `GET http://<host>:8000/stream.mjpeg` (others)
 
+Test-control endpoints (not present on real printers)
+
+These pin telemetry on demand so a scenario can be reached instantly instead of
+waiting out a simulated print.
+
+- `POST /test/set` — force telemetry fields; `null` clears one field
+- `POST /test/reset` — drop all forced fields
+- `POST /test/cfs` — replace a CFS box's slot list: `{"box_id": 1, "materials": [...]}`
+- `GET /test/state` — the exact snapshot currently being streamed
+
+```bash
+# park the printer at 100% with an error and a filament runout
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"printProgress":100,"err":{"errcode":521,"key":3},"materialStatus":1}' \
+  http://127.0.0.1:8000/test/set
+
+curl -X POST http://127.0.0.1:8000/test/reset
+```
+
+Reproducible runs and edge cases
+
+```bash
+# identical telemetry every run -- use this when diffing entity states
+# between two versions of the integration to check for regressions
+python3 tools/creality_printer_test_server.py --model k2plus --simulate-print --deterministic
+
+# awkward CFS payloads: already-correct 6-char colour, missing vendor,
+# multi-colour spool, shared rfid across colours, empty external slot
+python3 tools/creality_printer_test_server.py --model k2plus --simulate-print --cfs-variant edge
+```
+
 Notes
 - Camera mode is selected automatically based on model.
 - Temperature and fans are simulated realistically for UI testing.
+- Video answers H.264 first by default (`--prefer-codec`). Home Assistant's
+  `stream` component cannot package VP8 into HLS, so `--prefer-codec vp8` will
+  make HLS/`camera.record` hang while WebRTC playback still works.
+- `--video-source auto` (default) pre-encodes a short clip with a 1s GOP and
+  sends the packets through untouched; aiortc's own H.264 encoder inherits
+  libx264's 250-frame keyframe interval, which is far too long for HA's stream
+  worker. Needs `ffmpeg` on PATH; without it the server falls back to synthetic
+  frames and HLS will not work.
 - If MJPEG fails, install Pillow.
 
 ## deploy_to_ha.sh

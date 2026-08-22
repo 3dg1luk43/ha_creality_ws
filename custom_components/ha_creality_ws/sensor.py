@@ -3,7 +3,13 @@ from __future__ import annotations
 import logging
 import json
 from typing import Any, Callable
-from .utils import parse_position as _parse_position, safe_float as _safe_float
+from .utils import (
+    build_spool_key as _build_spool_key,
+    format_filament_label as _format_filament_label,
+    normalize_color_hex as _normalize_color_hex,
+    parse_position as _parse_position,
+    safe_float as _safe_float,
+)
 
 from homeassistant.components.sensor import (  # type: ignore[import]
     SensorEntity,
@@ -626,6 +632,31 @@ class KCFSBoxSensor(KEntity, SensorEntity):
         return None
 
 
+def _cfs_slot_attributes(data: dict[str, Any]) -> dict[str, Any]:
+    """Build the shared attribute set for a CFS slot (box slot or external)."""
+    raw_color = data.get("color")
+    return {
+        "vendor": data.get("vendor"),
+        "type": data.get("type"),
+        "name": data.get("name"),
+        "color_hex": _normalize_color_hex(raw_color),
+        # Kept so the printer's original value stays visible after the
+        # leading-pad-character fix (issue #113).
+        "color_hex_raw": raw_color,
+        "rfid": data.get("rfid"),
+        # Derived, stable per material+colour; see utils.build_spool_key (#117).
+        "spool_key": _build_spool_key(
+            rfid=data.get("rfid"),
+            vendor=data.get("vendor"),
+            material_type=data.get("type"),
+            name=data.get("name"),
+            color=raw_color,
+        ),
+        "state": data.get("state"),
+        "selected": data.get("selected"),
+    }
+
+
 class KCFSSlotSensor(KEntity, SensorEntity):
     """Sensor for a CFS Slot (Filament type/color/percent)."""
 
@@ -666,12 +697,11 @@ class KCFSSlotSensor(KEntity, SensorEntity):
             return None
             
         if self._type == "filament":
-            # Combine vendor and name/type
-            vendor = data.get("vendor", "Generic")
-            name = data.get("name") or data.get("type", "Unknown")
-            return f"{vendor} {name}"
+            return _format_filament_label(
+                data.get("vendor"), data.get("name"), data.get("type")
+            )
         if self._type == "color":
-            return data.get("color")
+            return _normalize_color_hex(data.get("color"))
         if self._type == "percent":
             return data.get("percent")
         return None
@@ -681,15 +711,7 @@ class KCFSSlotSensor(KEntity, SensorEntity):
         data = self._get_slot_data()
         if not data:
             return {}
-        return {
-            "vendor": data.get("vendor"),
-            "type": data.get("type"),
-            "name": data.get("name"),
-            "color_hex": data.get("color"),
-            "rfid": data.get("rfid"),
-            "state": data.get("state"),
-            "selected": data.get("selected"),
-        }
+        return _cfs_slot_attributes(data)
 
 
 class KCFSExtSlotSensor(KEntity, SensorEntity):
@@ -737,11 +759,11 @@ class KCFSExtSlotSensor(KEntity, SensorEntity):
             return None
 
         if self._type == "filament":
-            vendor = data.get("vendor", "Generic")
-            name = data.get("name") or data.get("type", "Unknown")
-            return f"{vendor} {name}"
+            return _format_filament_label(
+                data.get("vendor"), data.get("name"), data.get("type")
+            )
         if self._type == "color":
-            return data.get("color")
+            return _normalize_color_hex(data.get("color"))
         if self._type == "percent":
             return data.get("percent")
         return None
@@ -751,15 +773,7 @@ class KCFSExtSlotSensor(KEntity, SensorEntity):
         data = self._get_slot_data()
         if not data:
             return {}
-        return {
-            "vendor": data.get("vendor"),
-            "type": data.get("type"),
-            "name": data.get("name"),
-            "color_hex": data.get("color"),
-            "rfid": data.get("rfid"),
-            "state": data.get("state"),
-            "selected": data.get("selected"),
-        }
+        return _cfs_slot_attributes(data)
 
 
 class KActiveFilamentSensor(KEntity, SensorEntity):
@@ -795,11 +809,11 @@ class KActiveFilamentSensor(KEntity, SensorEntity):
         for box in boxes:
             for slot in box.get("materials", []):
                 if slot.get("selected"):
-                    vendor = slot.get("vendor", "Generic")
-                    name = slot.get("name") or slot.get("type", "Unknown")
                     return {
-                        "filament": f"{vendor} {name}",
-                        "color": slot.get("color"),
+                        "filament": _format_filament_label(
+                            slot.get("vendor"), slot.get("name"), slot.get("type")
+                        ),
+                        "color": _normalize_color_hex(slot.get("color")),
                         "percent": slot.get("percent"),
                     }
         return {}
@@ -900,11 +914,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
         new_ents = add_cfs_entities()
         if new_ents:
             _LOGGER.info("Adding %d dynamic CFS entities", len(new_ents))
-            # Ensure we run on the main loop if we are in a thread
-            from asyncio import run_coroutine_threadsafe
-            async def _schedule_add():
-                await async_add_entities(new_ents)
-            run_coroutine_threadsafe(_schedule_add(), hass.loop)
+            # Must not be called inline from the dispatcher: async_add_entities
+            # eager-starts a task on the config entry, and doing that from inside
+            # the dispatch chain leaves it unreferenced ("Task was destroyed but
+            # it is pending"), so no entities get added. Deferring to the next
+            # loop iteration schedules it in a normal context.
+            hass.loop.call_soon(async_add_entities, new_ents)
     
     # Listen for the signal fired by coordinator
     entry.async_on_unload(

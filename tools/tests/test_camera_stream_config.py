@@ -159,3 +159,98 @@ def test_existing_stream_with_wrong_source_is_recreated():
     mock_go2rtc_client.streams.add.assert_called_once()
     added = mock_go2rtc_client.streams.add.call_args.kwargs["sources"]
     assert added == "webrtc:http://1.2.3.4:8000/call/webrtc_local#format=creality"
+
+
+def _camera(**kwargs):
+    """Build a go2rtc camera without touching the HA entity base class."""
+    mock_coordinator = MagicMock()
+    with patch("custom_components.ha_creality_ws.camera._BaseCamera.__init__"):
+        cam = CrealityWebRTCCamera(
+            mock_coordinator,
+            "http://1.2.3.4:8000/call/webrtc_local",
+            **kwargs,
+        )
+    cam.hass = MagicMock()
+    return cam
+
+
+def test_stream_source_is_an_awaitable_method_not_a_property():
+    """Regression test for issue #116.
+
+    HA core defines `Camera.stream_source` as an async method and the stream
+    pipeline does `source = await self.stream_source()`. Declaring it as a
+    property shadowed that method, so the attribute evaluated to a plain string
+    and calling it raised `TypeError: 'str' object is not callable`.
+    """
+    import inspect
+
+    assert not isinstance(
+        inspect.getattr_static(CrealityWebRTCCamera, "stream_source"), property
+    )
+    assert inspect.iscoroutinefunction(CrealityWebRTCCamera.stream_source)
+
+
+def test_stream_source_returns_rtsp_url_for_ha_managed_go2rtc():
+    """HA's bundled go2rtc serves RTSP on 127.0.0.1:18554, API on 11984."""
+    import asyncio
+
+    cam = _camera()
+    cam._go2rtc_server_url = "http://localhost:11984/"
+
+    async def run():
+        with patch.object(cam, "_ensure_stream_configured", new_callable=AsyncMock):
+            cam._stream_name = "creality_k2_1_2_3_4"
+            return await cam.stream_source()
+
+    assert asyncio.run(run()) == "rtsp://127.0.0.1:18554/creality_k2_1_2_3_4"
+
+
+def test_stream_source_uses_go2rtc_default_port_for_external_server():
+    """A stand-alone go2rtc listens for RTSP on its own host, port 8554."""
+    import asyncio
+
+    cam = _camera()
+    cam._go2rtc_server_url = "http://10.0.0.5:1984/"
+
+    async def run():
+        with patch.object(cam, "_ensure_stream_configured", new_callable=AsyncMock):
+            cam._stream_name = "creality_k2_1_2_3_4"
+            return await cam.stream_source()
+
+    assert asyncio.run(run()) == "rtsp://10.0.0.5:8554/creality_k2_1_2_3_4"
+
+
+def test_stream_source_honours_an_explicit_rtsp_port_override():
+    import asyncio
+
+    cam = _camera(go2rtc_rtsp_port=9554)
+    cam._go2rtc_server_url = "http://10.0.0.5:1984/"
+
+    async def run():
+        with patch.object(cam, "_ensure_stream_configured", new_callable=AsyncMock):
+            cam._stream_name = "creality_k2_1_2_3_4"
+            return await cam.stream_source()
+
+    assert asyncio.run(run()) == "rtsp://10.0.0.5:9554/creality_k2_1_2_3_4"
+
+
+def test_stream_source_is_none_for_direct_signaling():
+    """Direct-signaling cameras never register a go2rtc stream, so no HLS."""
+    import asyncio
+
+    cam = _camera(direct_signaling=True)
+    assert asyncio.run(cam.stream_source()) is None
+
+
+def test_stream_source_is_none_before_a_stream_exists():
+    import asyncio
+
+    cam = _camera()
+    cam._go2rtc_server_url = "http://localhost:11984/"
+
+    async def run():
+        with patch.object(cam, "_ensure_stream_configured", new_callable=AsyncMock):
+            cam._stream_name = None
+            return await cam.stream_source()
+
+    assert asyncio.run(run()) is None

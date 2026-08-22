@@ -15,6 +15,7 @@ import base64
 import json
 import logging
 from typing import Optional
+from urllib.parse import urlparse
 
 from aiohttp import ClientError, web  # type: ignore[assignment]
 from homeassistant.core import HomeAssistant, callback  # type: ignore[assignment]
@@ -59,6 +60,10 @@ from .const import (
     WEBRTC_CALL_ROOT_URL_TEMPLATE,
     CONF_GO2RTC_URL,
     CONF_GO2RTC_PORT,
+    CONF_GO2RTC_RTSP_PORT,
+    DEFAULT_GO2RTC_PORT,
+    DEFAULT_GO2RTC_RTSP_PORT,
+    HA_MANAGED_GO2RTC_RTSP_PORT,
     CONF_CUSTOM_CAMERA_URL,
     CAM_MODE_WEBRTC,
     CAM_MODE_WEBRTC_DIRECT,
@@ -347,6 +352,7 @@ class CrealityWebRTCCamera(_BaseCamera):
         go2rtc_port: int | None = None,
         direct_signaling: bool = False,
         go2rtc_source: str | None = None,
+        go2rtc_rtsp_port: int | None = None,
     ) -> None:
         """Initialize the WebRTC camera.
 
@@ -361,12 +367,15 @@ class CrealityWebRTCCamera(_BaseCamera):
             go2rtc_source: Explicit go2rtc source string (e.g. an rtsp:// URL). When
                 set it overrides the printer's Creality WebRTC source. Only used when
                 direct_signaling is False.
+            go2rtc_rtsp_port: RTSP port of the go2rtc instance, used to build the
+                `stream_source()` URL for HA's HLS pipeline. Auto-detected when unset.
         """
         super().__init__(coordinator, "camera")
         self._upstream_signaling_url = signaling_url
         self._use_proxy = use_proxy  # Deprecated, kept for compatibility
         self._custom_go2rtc_url = go2rtc_url
         self._custom_go2rtc_port = go2rtc_port
+        self._custom_go2rtc_rtsp_port = go2rtc_rtsp_port
         self._direct_signaling = direct_signaling
         self._go2rtc_source = go2rtc_source
         self._stream_name: str | None = None
@@ -439,33 +448,71 @@ class CrealityWebRTCCamera(_BaseCamera):
         """
         return not self._direct_signaling
 
-    @property
-    def stream_source(self) -> Optional[str]:
-        """Return the stream name for go2rtc.
+    def _go2rtc_host_and_api_port(self) -> tuple[str | None, int | None]:
+        """Split the resolved go2rtc server URL, tolerating a bare host:port."""
+        url = self._go2rtc_server_url
+        if not url:
+            return (None, None)
+        if "://" not in url:
+            url = f"http://{url}"
+        try:
+            parsed = urlparse(url)
+            return (parsed.hostname, parsed.port)
+        except ValueError:
+            return (None, None)
 
-        Returns the stream name that go2rtc uses to identify this camera's stream.
-        HA's go2rtc component will handle the actual WebRTC connection.
+    def _go2rtc_rtsp_endpoint(self) -> tuple[str, int]:
+        """Return the (host, port) of the go2rtc RTSP listener.
 
-        Returns:
-            str: Stream name, or None if not configured
+        go2rtc serves the same stream over RTSP as well as WebRTC, and RTSP is
+        what HA's `stream` component can ingest. The REST API port we talk to is
+        not the RTSP port, so it has to be derived:
+
+        * an explicit user override always wins;
+        * HA's own managed go2rtc binary listens on 127.0.0.1:18554, while its
+          REST API is on 11984 or a unix socket the client addresses as localhost;
+        * anything else is a stand-alone go2rtc, which defaults to 8554.
         """
-        if not self._uses_go2rtc_webrtc_bridge():
+        host, api_port = self._go2rtc_host_and_api_port()
+
+        override = self._custom_go2rtc_rtsp_port
+        if override:
+            try:
+                port = int(override)
+            except (TypeError, ValueError):
+                port = 0
+            if port > 0:
+                return (host or "127.0.0.1", port)
+
+        if host in (None, "localhost", "127.0.0.1", "::1") and api_port in (None, DEFAULT_GO2RTC_PORT):
+            return ("127.0.0.1", HA_MANAGED_GO2RTC_RTSP_PORT)
+
+        return (host or "127.0.0.1", DEFAULT_GO2RTC_RTSP_PORT)
+
+    def _rtsp_stream_url(self) -> Optional[str]:
+        """Build the go2rtc RTSP URL for the already-configured stream."""
+        if not self._uses_go2rtc_webrtc_bridge() or not self._stream_name:
             return None
-        return self._stream_name
+        host, port = self._go2rtc_rtsp_endpoint()
+        return f"rtsp://{host}:{port}/{self._stream_name}"
 
-    async def async_get_stream_source(self) -> Optional[str]:
-        """Return the stream name for go2rtc.
+    async def stream_source(self) -> Optional[str]:
+        """Return an RTSP URL that HA's `stream` component can ingest.
 
-        Async version of stream_source property for compatibility with
-        Home Assistant's camera entity interface.
+        `Camera.stream_source` is an async method in HA core and is awaited by the
+        classic stream pipeline (the `camera/stream` WS command, HLS playback,
+        `camera.record`/`camera.play_stream`, casting). Defining it as a plain
+        property used to shadow that method, so `await self.stream_source()`
+        raised `TypeError: 'str' object is not callable` (issue #116).
 
-        Returns:
-            str: Stream name, or None if not configured
+        The go2rtc stream name is not a usable source on its own; the RTSP
+        endpoint of the same go2rtc instance is. Direct-signaling cameras never
+        register a go2rtc stream, so they have no HLS source at all.
         """
         if not self._uses_go2rtc_webrtc_bridge():
             return None
         await self._ensure_stream_configured()
-        return self._stream_name
+        return self._rtsp_stream_url()
 
     async def async_added_to_hass(self) -> None:
         """Configure go2rtc stream when camera is added to Home Assistant.
@@ -1263,7 +1310,8 @@ class CrealityWebRTCCamera(_BaseCamera):
             "go2rtc_stream_name": self._stream_name,
             "go2rtc_version": self._go2rtc_version,
             "upstream_signaling_url": self._upstream_signaling_url,
-            "stream_source": self.stream_source,
+            # Resolved lazily by stream_source(); None until a stream exists.
+            "stream_source": self._rtsp_stream_url(),
         }
         if self._last_error:
             attrs["error"] = self._last_error
@@ -1348,6 +1396,7 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities):
             go2rtc_url=entry.options.get(CONF_GO2RTC_URL),
             go2rtc_port=entry.options.get(CONF_GO2RTC_PORT),
             go2rtc_source=go2rtc_source,
+            go2rtc_rtsp_port=entry.options.get(CONF_GO2RTC_RTSP_PORT),
         )
 
     # Respect user-forced camera mode first

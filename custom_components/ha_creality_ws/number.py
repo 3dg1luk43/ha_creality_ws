@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 
 from homeassistant.components.number import NumberEntity, NumberMode, NumberDeviceClass
 
@@ -11,8 +12,12 @@ except Exception:  # older cores
     from homeassistant.const import TEMP_CELSIUS as UNIT_CELSIUS, PERCENTAGE as UNIT_PERCENT
 
 from homeassistant.helpers import entity_registry as er  # type: ignore[import]
+from homeassistant.helpers.dispatcher import async_dispatcher_connect  # type: ignore[import]
 from .const import DOMAIN
 from .entity import KEntity
+
+_LOGGER = logging.getLogger(__name__)
+
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up the number entities."""
@@ -23,12 +28,48 @@ async def async_setup_entry(hass, entry, async_add_entities):
     ents.append(PrintTuningPercent(coord))
     ents.append(NozzleTargetNumber(coord))
     ents.append(BedTargetNumber(coord, bed_index=0))
-    
-    # Chamber temperature control (K2 Pro/Plus only)
+
+    # Chamber temperature control (K2 Pro/Plus only).
+    #
+    # This used to be gated purely on live `maxBoxTemp`, which the printer only
+    # reports once it is reachable. Platform setup deliberately does not wait for
+    # the printer, so a Home Assistant restart while the printer was off left the
+    # entity uncreated -- and nothing recreated it when the printer came back, so
+    # it stayed `unavailable` until the next restart that happened to win the
+    # race. It is now satisfied by the capability cached during onboarding, and
+    # created late via the discovery signal if neither is available yet.
     has_box_control = entry.data.get("_cached_has_chamber_control", entry.data.get("_cached_has_box_control", False))
-    if coord.data.get("maxBoxTemp") and has_box_control:
-        ents.append(BoxTargetNumber(coord))
-    
+    added: set[str] = set()
+
+    def _chamber_entities() -> list[NumberEntity]:
+        if not has_box_control or "box_target" in added:
+            return []
+        cached_max = entry.data.get(
+            "_cached_max_chamber_temp", entry.data.get("_cached_max_box_temp")
+        )
+        if not coord.data.get("maxBoxTemp") and not cached_max:
+            return []
+        added.add("box_target")
+        return [BoxTargetNumber(coord)]
+
+    ents.extend(_chamber_entities())
+
+    def _on_new_entities() -> None:
+        """Late discovery: the printer has just reported a gating field."""
+        new_ents = _chamber_entities()
+        if new_ents:
+            _LOGGER.info("Adding %d late-discovered number entities", len(new_ents))
+            # Deferred, not inline: see the matching note in sensor.py.
+            hass.loop.call_soon(async_add_entities, new_ents)
+
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass,
+            f"{DOMAIN}_new_entities_{entry.entry_id}",
+            _on_new_entities,
+        )
+    )
+
     # Fan controls (legacy). Only create if entity already exists to avoid duplicates with native fan platform.
     reg = er.async_get(hass)
     host = coord.client._host

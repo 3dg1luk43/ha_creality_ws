@@ -6,6 +6,58 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.9.8] - 2026-08-22
+> [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)
+
+### Added
+- **`spool_key` attribute on every CFS slot** (closes #117 part 2):
+  - The printer's `rfid` field is a material/filament id, not a tag serial, so two spools of the same vendor and material share it even when their colours differ — external trackers such as spoolman-sync could not tell them apart. Each slot (and the external filament) now also exposes `spool_key`, which combines that id with the normalised colour, so four slots of `Creality Hyper PLA` in different colours get four distinct keys.
+  - `spool_key` is a **derived** identifier, not new telemetry: the printer streams no per-tag serial, so two genuinely identical spools still produce the same key. The raw `rfid` value is passed through unchanged.
+  - Multi-colour spools collapse to a single flat token (`generic-pla-silk_ffa800-ff97e1`), and colours the printer reports as sentinels (`N/A`, empty) are left out of the key entirely.
+- **`color_hex_raw` attribute on every CFS slot**: the printer's original colour string, kept alongside the corrected `color_hex` for reference and debugging.
+- **Optional go2rtc RTSP port** under *Configure → Camera*: only needed if your go2rtc listens on a non-default RTSP port. `0` (the default) keeps auto-detection.
+- **Fan documentation**: the `fan.*_model_fan` / `*_case_fan` / `*_side_fan` entities have always supported on/off and speed control, but were undocumented (#114). The README now covers them, including a chamber-too-hot automation example.
+
+### Fixed
+- **Camera stream API (HLS, recording, casting) failed with `TypeError: 'str' object is not callable`** (closes #116, thanks @Raymondvb1985):
+  - `stream_source` was defined as a synchronous property returning the go2rtc *stream name*, which shadowed HA core's `async def stream_source()`. Every consumer of the classic stream pipeline — the `camera/stream` WebSocket command, HLS playback, `camera.record`, `camera.play_stream`, casting — does `source = await self.stream_source()`, so it tried to call a string.
+  - It is now an async method returning an RTSP URL on the same go2rtc instance, which HA's `stream` component can actually ingest. The port is detected automatically (`18554` for HA's built-in go2rtc, `8554` for a stand-alone one) and can be overridden in the options flow. WebRTC playback in the frontend is unchanged; "WebRTC direct" cameras still have no HLS source, as they never register a go2rtc stream.
+- **Wrong CFS spool colour: leading pad character was kept** (closes #113 and #117 part 1, thanks @raf802):
+  - Creality RFID tags store the colour as *seven* hex characters — one padding character followed by the real `RRGGBB` — and the printer streams that verbatim. Reading the first six digits produced the wrong colour, e.g. `#0ffffff` reported as `#0ffffff` instead of `#ffffff`.
+  - The colour sensors and the `color_hex` attribute now keep the **last** six digits and normalise to lowercase `#rrggbb`. Values that are not recognisable hex (`N/A`, named colours, empty) are left untouched, and multi-colour values are normalised element-wise. The CFS card already compensated for this, so its rendering is unchanged.
+- **`Generic Generic PLA` in the filament label** (closes #115):
+  - The filament sensors joined the vendor and the material name unconditionally, but the printer frequently repeats the vendor inside the name (vendor `Generic`, name `Generic PLA`). The vendor is now only prepended when the name does not already start with it.
+  - **⚠️ A vendor the printer never reported is no longer invented.** When the telemetry carries no `vendor` at all, the old code substituted the literal string `Generic`, so a slot reporting only `PETG` was labelled `Generic PETG`. The label now falls back to the material name, then the material type. If you match on the old value in a template or automation, update it.
+  - A completely empty slot no longer produces the malformed state `'Generic '` (with a trailing space); it reports `Unknown`, which both the CFS card and Home Assistant render as `—`.
+- **"Print completed" notification on every Home Assistant restart** (closes #112, thanks @chairstacker):
+  - The printer keeps reporting the finished job's file name and 100% progress indefinitely, so a freshly started coordinator read that stale state as a brand new completion and notified about it — on every restart and every config-entry reload.
+  - Notifications are now baselined on startup: the first telemetry frame that carries the print state is recorded silently (with a 10 s grace window for printers that report neither field), so only a genuine transition after that notifies. The same guard applies to the error, filament-runout and minutes-to-end notifications.
+- **Minutes-to-end notification never fired**: it read `printTimeLeft`, but the printer streams the remaining time as `printLeftTime`, so the value was always absent. Found while fixing #112.
+- **Chamber-target control missing after a restart while the printer was off**:
+  - `number.<printer>_chamber_target` was only created if the printer had already reported `maxBoxTemp` at the moment the `number` platform was set up. Platform setup deliberately does not wait for the printer (an offline printer must not block the config entry), so restarting Home Assistant while the printer was off left the entity uncreated — and nothing recreated it when the printer came back, so it sat `unavailable` until a restart that happened to win the race.
+  - The control is now satisfied by the chamber capability cached during onboarding, and the coordinator additionally fires a discovery signal the first time any gating telemetry field appears, so late-arriving capabilities create their entities without a restart. Found while verifying #112/#114 against a live printer.
+- **Dynamic CFS discovery relied on a swallowed error**: the late-discovery handler wrapped `async_add_entities` in a coroutine and awaited it. `async_add_entities` is a synchronous callback returning `None`, so the await raised `TypeError` every time — after the entities had been added, with the exception discarded because nothing held the resulting future. Both platforms now schedule the callback on the event loop instead, which is also what stops the entity-add task being destroyed mid-flight.
+- **Completion notification only ever arrived once per file name**: the "already notified" flag was only cleared when the print file name changed, so reprinting the same file never notified again. It is now also re-armed whenever progress falls back below 100%. Found while verifying #112 against a live printer.
+
+### Internal
+- `LATE_DISCOVERY_FIELDS` in `const.py` lists the telemetry fields that gate entity creation (`boxsInfo`, `maxBoxTemp`); the coordinator fires a single discovery signal the first time each appears, replacing the CFS-only trigger. Platforms subscribe and re-check idempotently.
+- New shared CFS helpers in `utils.py` — `normalize_color_hex`, `format_filament_label`, `build_spool_key` — replacing the duplicated inline logic in `KCFSSlotSensor`, `KCFSExtSlotSensor` and `KActiveFilamentSensor`, whose attribute dicts now come from one `_cfs_slot_attributes` builder.
+- Regression tests added for all of the above (`test_cfs_filament.py`, `test_cfs_sensors.py`, `test_notifications.py`, `test_fan.py`, plus new `stream_source` cases in `test_camera_stream_config.py`).
+
+### Test server (`tools/creality_printer_test_server.py`)
+
+Several fidelity gaps made the simulator disagree with real hardware, which hid working behaviour and invented broken behaviour. All of these are dev-tooling only.
+
+- **Fan telemetry used names the integration never reads**: it emitted `caseFan` / `modelFan` / `sideFan` where the printer sends `modelFanPct` / `caseFanPct` / `auxiliaryFanPct`, so fan entities always looked stuck at 0. It now emits the real names, honours `M106 P<ch> S<0-255>` arriving over `gcodeCmd`, and leaves a manually driven fan alone instead of overwriting it with jitter.
+- **Video was answered as VP8**: aiortc's default capability order puts VP8 first, and Home Assistant's `stream` component cannot package VP8 into HLS, so the playlist blocked forever. Real K-series printers send H.264, so the simulator now answers H.264 first (`--prefer-codec`, default `h264`).
+- **Keyframes were up to 25 s apart**: aiortc's H.264 encoder inherits libx264's 250-frame keyframe interval, and HA's stream worker gives up long before that. Video is now pre-encoded with a 1 s GOP and sent through as packets, bypassing aiortc's encoder (`--video-source auto`).
+- **Healthy WebRTC sessions were killed after 60 s** by an unconditional sleep-then-close, which made every consumer reconnect in a loop. Teardown now follows the connection state.
+- **`--deterministic`** removes all randomness (temperature oscillation, fan jitter, XYZ drift) so telemetry is reproducible — that is what makes an entity-state diff between two integration versions usable as a regression check.
+- **`--cfs-variant edge`** adds the awkward CFS payloads: an already-correct six-character colour, a slot with no vendor, a multi-colour spool, shared `rfid` values across colours, and an empty external slot.
+- **Test-control endpoints** (`POST /test/set`, `/test/reset`, `/test/cfs`, `GET /test/state`) pin any telemetry field on demand, so notification scenarios (completion, error, runout, minutes-to-end) can be driven in seconds instead of waiting out a simulated print. Real printers have no such endpoints.
+- Log lines now carry timestamps, and the offer/answer SDP is dumped under `--debug`.
+
+
 ## [0.9.7] - 2026-07-28
 > [List of issues (0.9.7)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.7)
 

@@ -18,7 +18,7 @@ This custom [Home Assistant](https://www.home-assistant.io/) integration provide
 * **Optional power switch binding** to a `switch` entity for accurate "Off" handling.
 * **Entities:** status, progress, time left, temperatures (nozzle/bed/chamber), current layer/total layers, etc.
 * **Image (print preview):** shows the current model image for all supported printers when available; falls back to a tiny placeholder when not applicable.
-* **Controls:** pause, resume, stop, light toggle.
+* **Controls:** pause, resume, stop, light toggle, fan speeds (model / case / side), temperature targets.
 * **Camera:** auto-detects stream type by model (MJPEG or WebRTC).
 * **Lovelace card**: dependency-free, uses HA fonts, progress ring, contextual chips, telemetry pills.
 * **Style Editor**: Built-in theme customization with color picker for all card elements.
@@ -242,6 +242,42 @@ stop_btn: button.k1c_stop_print
 
 ---
 
+## Fans
+
+The three fans the printer exposes are available as full `fan` entities, so they can
+be turned on/off and set to any speed, not just monitored:
+
+- `fan.<host>_model_fan` (part-cooling fan)
+- `fan.<host>_case_fan` (case / chamber exhaust fan)
+- `fan.<host>_side_fan` (auxiliary / side fan)
+
+Speed is set as a percentage and sent to the printer as `M106 P<channel> S<0-255>`
+over the same WebSocket, so no extra configuration is needed. The printer's own
+temperature-driven fan control keeps running; a manual command overrides it until
+the printer decides otherwise.
+
+Equivalent `number.*_fan` entities also exist, but they are legacy and disabled by
+default; prefer the `fan` entities.
+
+Example: force the case fan to full when the chamber gets too hot.
+
+```yaml
+automation:
+  - alias: Chamber too hot -> case fan to max
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.k2_chamber_temperature
+        above: 55
+    actions:
+      - action: fan.set_percentage
+        target:
+          entity_id: fan.k2_case_fan
+        data:
+          percentage: 100
+```
+
+---
+
 ## CFS (Creality Filament System)
 
 If your printer reports CFS data, the integration creates sensors for each CFS box and slot. It also exposes a dedicated set of sensors for the **external filament** (single slot).
@@ -264,6 +300,27 @@ If your printer reports CFS data, the integration creates sensors for each CFS b
 - `sensor.<host>_cfs_external_filament`
 - `sensor.<host>_cfs_external_color`
 - `sensor.<host>_cfs_external_percent`
+
+**Slot attributes** (on both the box-slot and external filament sensors):
+
+| Attribute | Meaning |
+| --- | --- |
+| `vendor`, `type`, `name` | As reported by the printer / RFID tag |
+| `color_hex` | Colour normalised to `#rrggbb` |
+| `color_hex_raw` | The printer's original value, before normalisation |
+| `rfid` | The printer's material id, exactly as reported |
+| `spool_key` | Derived id, stable per material **and** colour |
+| `state`, `selected` | Slot state and whether the printer is using it |
+
+Creality RFID tags store the colour as *seven* hex characters: a padding character
+followed by the real `RRGGBB`. `color_hex` therefore keeps the **last** six digits,
+so `#0ffffff` becomes `#ffffff`. `color_hex_raw` is kept for reference.
+
+`rfid` is a material/filament id rather than a tag serial, so two spools of the same
+material and vendor share it even when their colours differ. `spool_key` combines it
+with the normalised colour to tell those apart, which is what external trackers such
+as spoolman-sync need. It is a *derived* key: the telemetry carries no per-tag serial,
+so two genuinely identical spools still produce the same key.
 
 ### CFS Card
 
@@ -382,6 +439,18 @@ The integration auto-detects the printer model and creates the appropriate camer
   - Forwards WebRTC offers/answers between Home Assistant frontend and go2rtc
   - Provides native WebRTC streaming without additional HACS integrations
   - Works with all standard Home Assistant camera cards that support WebRTC
+
+### HLS / recording for go2rtc cameras
+
+The frontend plays go2rtc cameras over WebRTC. Home Assistant's classic stream
+pipeline (the `camera/stream` WebSocket command, HLS playback, `camera.record`,
+`camera.play_stream` and casting) needs an ingestible URL instead, so the
+integration points it at the RTSP endpoint of the same go2rtc instance.
+
+That port is detected automatically: `18554` for Home Assistant's built-in
+go2rtc, `8554` for a stand-alone one. If your go2rtc listens elsewhere, set
+**go2rtc RTSP Port** under *Configure -> Camera* (0 keeps auto-detection).
+"WebRTC direct" cameras bypass go2rtc entirely and therefore have no HLS source.
 
 ---
 
