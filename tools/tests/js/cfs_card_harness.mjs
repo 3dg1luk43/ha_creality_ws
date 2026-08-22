@@ -28,15 +28,14 @@ class FakeElement {
   set innerHTML(value) { this._html = String(value); }
   get innerHTML() { return this._html; }
   appendChild(child) { this.children.push(child); return child; }
-  // The card only ever looks up #content and a handful of classes; returning an
-  // empty list for selectors is fine because event wiring is not under test here.
+  // Hand back a stable stub per id (#content, #theme-form, ...) so code that
+  // assigns to the looked-up element works and the test can inspect it after.
   getElementById(id) {
-    if (id === "content") {
-      this._content = this._content || new FakeElement("div");
-      return this._content;
-    }
-    return null;
+    this._byId = this._byId || new Map();
+    if (!this._byId.has(id)) this._byId.set(id, new FakeElement("div"));
+    return this._byId.get(id);
   }
+  // Event wiring is not under test here, so selectors return nothing.
   querySelectorAll() { return []; }
   querySelector() { return null; }
   attachShadow() { return this; }

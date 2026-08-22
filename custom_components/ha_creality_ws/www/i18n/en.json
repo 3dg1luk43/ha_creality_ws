@@ -107,6 +107,9 @@
     "schema_compact_view": "Compact View (Mini Mode)",
     "schema_show_type_in_mini": "Show Filament Type in Mini Mode",
     "tab_entities": "Entities",
-    "tab_theme": "Theme"
+    "tab_theme": "Theme",
+    "schema_view_mode": "Display Mode",
+    "view_mode_full": "Full",
+    "view_mode_compact": "Compact"
   }
 }

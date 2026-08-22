@@ -61,7 +61,9 @@ const CFS_TRANSLATIONS = {
     label_slot_filament: "Box {box} Slot {slot} Filament",
     label_slot_color: "Box {box} Slot {slot} Color",
     label_slot_percent: "Box {box} Slot {slot} Remaining Percent",
-    schema_compact_view: "Compact View (Mini Mode)",
+    schema_view_mode: "Display Mode",
+    view_mode_full: "Full",
+    view_mode_compact: "Compact",
     schema_show_type_in_mini: "Show Filament Type in Mini Mode",
     // Editor tab/header
     tab_entities: "Entities",
@@ -91,6 +93,31 @@ class KCFSCard extends HTMLElement {
       return `#${hex.slice(1).toLowerCase()}`;
     }
     return "#cccccc";
+  }
+
+  /**
+   * Bring a stored config up to date.
+   *
+   * compact_view was a boolean; view_mode is "full" | "compact" | "box". The
+   * legacy key is translated once and then dropped, so the first visual edit
+   * writes clean YAML back.
+   * @param {object} config
+   * @returns {object}
+   */
+  static _migrateConfig(config) {
+    const cfg = { ...(config || {}) };
+    if (cfg.compact_view !== undefined && cfg.view_mode === undefined) {
+      cfg.view_mode = cfg.compact_view ? "compact" : "full";
+    }
+    delete cfg.compact_view;
+    return cfg;
+  }
+
+  /** Map a view mode to its ha-card class. "full" is historically "normal-mode". */
+  static _modeClass(viewMode) {
+    if (viewMode === "compact") return "compact-mode";
+    if (viewMode === "box") return "box-mode";
+    return "normal-mode";
   }
 
   /**
@@ -156,7 +183,7 @@ class KCFSCard extends HTMLElement {
   static getStubConfig() {
     const cfg = {
       name: "CFS",
-      compact_view: false,
+      view_mode: "full",
       show_type_in_mini: false,
       external_filament: "",
       external_color: "",
@@ -181,7 +208,7 @@ class KCFSCard extends HTMLElement {
   }
 
   setConfig(config) {
-    this._cfg = { ...KCFSCard.getStubConfig(), ...config };
+    this._cfg = { ...KCFSCard.getStubConfig(), ...KCFSCard._migrateConfig(config) };
     if (!this._root) {
       this._root = this.attachShadow({ mode: "open" });
     }
@@ -211,7 +238,7 @@ class KCFSCard extends HTMLElement {
   _render() {
     if (!this._root) return;
 
-    const isCompact = this._cfg.compact_view;
+    const modeClass = KCFSCard._modeClass(this._cfg.view_mode);
 
     const style = `
       /* inherit HA fonts & typography */
@@ -648,7 +675,7 @@ class KCFSCard extends HTMLElement {
     `;
 
     this._root.innerHTML = `
-      <ha-card class="${isCompact ? 'compact-mode' : 'normal-mode'}">
+      <ha-card class="${modeClass}">
         <style>${style}</style>
         <div id="content"></div>
       </ha-card>
@@ -816,7 +843,6 @@ class KCFSCard extends HTMLElement {
   _fingerprint(data) {
     return JSON.stringify([
       this._cfg.view_mode,
-      this._cfg.compact_view,
       this._cfg.show_type_in_mini,
       this._selectedCFS,
       data,
@@ -848,7 +874,7 @@ class KCFSCard extends HTMLElement {
     }
 
     // Render based on mode
-    if (this._cfg.compact_view) {
+    if (this._cfg.view_mode === "compact") {
       contentContainer.innerHTML = this._renderCompactMode(boxValues, externalData);
     } else {
       contentContainer.innerHTML = this._renderNormalMode(boxValues, externalData);
@@ -1115,7 +1141,7 @@ class KCFSCard extends HTMLElement {
 
   getCardSize() {
     // Return a dynamic size based on compact mode and number of boxes
-    if (this._cfg?.compact_view) {
+    if (this._cfg?.view_mode === "compact") {
       // Count configured boxes
       let boxCount = 0;
       for (let box = 0; box < 4; box++) {
@@ -1154,7 +1180,7 @@ class KCFSCard extends HTMLElement {
     const totalRows = boxCount + externalRows;
     const extraPadding = totalRows > 2 ? 1 : 0;
 
-    const minRows = this._cfg?.compact_view ? Math.max(1, totalRows + extraPadding) : 5;
+    const minRows = this._cfg?.view_mode === "compact" ? Math.max(1, totalRows + extraPadding) : 5;
 
     return {
       grid_rows: minRows,
@@ -1182,7 +1208,7 @@ class KCFSCardEditor extends HTMLElement {
   }
 
   setConfig(config) {
-    this._cfg = { ...KCFSCard.getStubConfig(), ...config };
+    this._cfg = { ...KCFSCard.getStubConfig(), ...KCFSCard._migrateConfig(config) };
     this._render();
   }
 
@@ -1302,11 +1328,22 @@ class KCFSCardEditor extends HTMLElement {
     themeForm.hass = this._hass;
     themeForm.data = this._cfg;
     themeForm.schema = [
-      { name: "compact_view", selector: { boolean: {} } },
+      {
+        name: "view_mode",
+        selector: {
+          select: {
+            mode: "dropdown",
+            options: [
+              { value: "full", label: this._t("view_mode_full") },
+              { value: "compact", label: this._t("view_mode_compact") },
+            ],
+          },
+        },
+      },
       { name: "show_type_in_mini", selector: { boolean: {} } },
     ];
     themeForm.computeLabel = (s) => ({
-      compact_view: this._t("schema_compact_view"),
+      view_mode: this._t("schema_view_mode"),
       show_type_in_mini: this._t("schema_show_type_in_mini"),
     }[s.name] || s.name);
 

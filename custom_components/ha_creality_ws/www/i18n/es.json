@@ -107,6 +107,9 @@
     "schema_compact_view": "Vista compacta (modo mini)",
     "schema_show_type_in_mini": "Mostrar el tipo de filamento en modo mini",
     "tab_entities": "Entidades",
-    "tab_theme": "Tema"
+    "tab_theme": "Tema",
+    "schema_view_mode": "Modo de visualización",
+    "view_mode_full": "Completo",
+    "view_mode_compact": "Compacto"
   }
 }
