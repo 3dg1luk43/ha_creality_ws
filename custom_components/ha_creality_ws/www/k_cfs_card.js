@@ -45,6 +45,13 @@ function _requestI18n(instance, hass, onLoaded) {
   Promise.all([_loadI18n("en"), lang !== "en" ? _loadI18n(lang) : null]).then(onLoaded);
 }
 
+const BUSY_PRINT_STATES = new Set([
+  "printing",
+  "paused",
+  "processing",
+  "self-testing",
+]);
+
 const CFS_TRANSLATIONS = {
   en: {
     no_data: "No CFS data available",
@@ -61,6 +68,9 @@ const CFS_TRANSLATIONS = {
     label_slot_filament: "Box {box} Slot {slot} Filament",
     label_slot_color: "Box {box} Slot {slot} Color",
     label_slot_percent: "Box {box} Slot {slot} Remaining Percent",
+    toast_no_device: "Could not identify the printer for this card. Check the entities in the card configuration.",
+    toast_multiple_devices: "This card mixes entities from more than one printer, so material editing is disabled.",
+    toast_printer_busy: "Cannot edit material while the printer is busy",
     schema_view_mode: "Display Mode",
     view_mode_full: "Full",
     view_mode_compact: "Compact",
@@ -215,6 +225,10 @@ class KCFSCard extends HTMLElement {
     // _render() wipes #content, so the gate must not then decide nothing changed
     // and skip repopulating it -- that would leave the card blank after an edit.
     this._snapshot = null;
+    // Different entities may mean a different printer.
+    this._deviceId = undefined;
+    this._deviceIdError = null;
+    this._statusEid = null;
     this._render();
   }
 
@@ -232,6 +246,15 @@ class KCFSCard extends HTMLElement {
     // Translated strings are not part of the snapshot, so when they arrive the
     // gate has to be reset and the render forced.
     _requestI18n(this, hass, () => { this._snapshot = null; this._update(); });
+    // _isPrinterBusy() is a sync cache read, so the device id has to be resolved
+    // out of band once; re-render when it lands so the lock icon settles.
+    if (this._deviceId === undefined && !this._deviceIdPending) {
+      this._deviceIdPending = true;
+      this._resolveDeviceId().then(() => {
+        this._deviceIdPending = false;
+        this._updateIfChanged();
+      });
+    }
     this._updateIfChanged();
   }
 
@@ -667,6 +690,25 @@ class KCFSCard extends HTMLElement {
         color: var(--secondary-text-color);
       }
 
+      /* === TOAST === */
+      .cfs-toast {
+        position: absolute;
+        left: 50%;
+        bottom: 12px;
+        transform: translateX(-50%);
+        z-index: 10;
+        max-width: calc(100% - 24px);
+        padding: 8px 14px;
+        border-radius: 6px;
+        background: var(--primary-color);
+        color: var(--text-primary-color, #fff);
+        font-size: 13px;
+        line-height: 1.3;
+        text-align: center;
+        box-shadow: var(--ha-card-box-shadow, 0 2px 6px rgba(0, 0, 0, 0.3));
+        pointer-events: none;
+      }
+
       .no-data {
         text-align: center;
         color: var(--secondary-text-color);
@@ -844,6 +886,7 @@ class KCFSCard extends HTMLElement {
     return JSON.stringify([
       this._cfg.view_mode,
       this._cfg.show_type_in_mini,
+      this._isPrinterBusy(),
       this._selectedCFS,
       data,
     ]);
@@ -1108,6 +1151,141 @@ class KCFSCard extends HTMLElement {
         <span>${pctDisplay}</span>
       </div>
     `;
+  }
+
+  /**
+   * The device id this card's entities belong to, or null.
+   *
+   * Fails closed on purpose. PR #75 fell back to "the first ha_creality_ws
+   * device in the registry", which in a two-printer setup wrote filament data to
+   * the wrong printer. A card whose entities span two printers is also refused
+   * rather than silently resolved to one of them.
+   *
+   * Reads hass.entities (EntityRegistryDisplayEntry carries device_id, platform
+   * and translation_key), so no WebSocket round trip and no admin permission is
+   * needed -- unlike config/entity_registry/list.
+   * @returns {Promise<string|null>}
+   */
+  async _resolveDeviceId() {
+    if (this._deviceId !== undefined) return this._deviceId;
+
+    const entityIds = this._configuredEntityIds();
+    const registry = this._hass?.entities || {};
+    const devices = new Set();
+
+    for (const eid of entityIds) {
+      const deviceId = registry[eid]?.device_id;
+      if (deviceId) devices.add(deviceId);
+    }
+
+    // hass.entities predates HA 2023.4; fall back to asking per entity.
+    if (devices.size === 0) {
+      for (const eid of entityIds) {
+        try {
+          const entry = await this._hass.callWS({
+            type: "config/entity_registry/get",
+            entity_id: eid,
+          });
+          if (entry?.device_id) {
+            devices.add(entry.device_id);
+            break;
+          }
+        } catch (_) {
+          // Entity gone, or the user is not an admin. Try the next one.
+        }
+      }
+    }
+
+    if (devices.size !== 1) {
+      this._deviceIdError = devices.size > 1 ? "toast_multiple_devices" : "toast_no_device";
+      this._deviceId = null;
+      return null;
+    }
+
+    this._deviceIdError = null;
+    [this._deviceId] = [...devices];
+    return this._deviceId;
+  }
+
+  /** Every non-empty entity picker value in the card's config. */
+  _configuredEntityIds() {
+    const ids = [];
+    const push = (value) => { if (value) ids.push(value); };
+
+    for (let box = 0; box < 4; box += 1) {
+      push(this._cfg[`box${box}_temp`]);
+      push(this._cfg[`box${box}_humidity`]);
+      for (let slot = 0; slot < 4; slot += 1) {
+        push(this._cfg[`box${box}_slot${slot}_filament`]);
+        push(this._cfg[`box${box}_slot${slot}_color`]);
+        push(this._cfg[`box${box}_slot${slot}_percent`]);
+      }
+    }
+    push(this._cfg.external_filament);
+    push(this._cfg.external_color);
+    push(this._cfg.external_percent);
+    return ids;
+  }
+
+  /**
+   * The print-status entity for *this* card's printer.
+   *
+   * PR #75 scanned all of hass.states for any id containing "_print_status", so
+   * printer B printing locked printer A's card. PrintStatusSensor sets
+   * translation_key="print_status", which the registry exposes, making this both
+   * device-scoped and rename-proof. Memoised per device.
+   * @returns {string|null}
+   */
+  _statusEntityId() {
+    const deviceId = this._deviceId;
+    if (!deviceId) return null;
+    if (this._statusEid?.deviceId === deviceId) return this._statusEid.entityId;
+
+    const registry = this._hass?.entities || {};
+    let found = null;
+    for (const eid in registry) {
+      const entry = registry[eid];
+      if (
+        entry.device_id === deviceId
+        && entry.platform === "ha_creality_ws"
+        && entry.translation_key === "print_status"
+      ) {
+        found = eid;
+        break;
+      }
+    }
+    this._statusEid = { deviceId, entityId: found };
+    return found;
+  }
+
+  /**
+   * Whether this card's printer is mid-job.
+   *
+   * An unresolvable state counts as not busy: the bug being fixed was false
+   * positives, and blocking edits whenever the registry is thin would make the
+   * feature unusable. The service re-checks server-side, so this is an
+   * affordance rather than the guarantee.
+   * @returns {boolean}
+   */
+  _isPrinterBusy() {
+    const entityId = this._statusEntityId();
+    if (!entityId) return false;
+    const state = this._hass?.states?.[entityId]?.state;
+    return state ? BUSY_PRINT_STATES.has(state) : false;
+  }
+
+  /** Brief, non-blocking feedback. Replaces PR #75's alert() calls. */
+  _showToast(message) {
+    if (!this._root) return;
+    const existing = this._root.getElementById("cfs-toast");
+    if (existing?.remove) existing.remove();
+
+    const toast = document.createElement("div");
+    toast.id = "cfs-toast";
+    toast.className = "cfs-toast";
+    toast.textContent = message;
+    this._root.appendChild(toast);
+    setTimeout(() => { if (toast.remove) toast.remove(); }, 4000);
   }
 
   _attachEventHandlers() {

@@ -110,6 +110,9 @@
     "tab_theme": "Tema",
     "schema_view_mode": "Modo de visualización",
     "view_mode_full": "Completo",
-    "view_mode_compact": "Compacto"
+    "view_mode_compact": "Compacto",
+    "toast_no_device": "No se pudo identificar la impresora de esta tarjeta. Revisa las entidades en la configuración de la tarjeta.",
+    "toast_multiple_devices": "Esta tarjeta mezcla entidades de más de una impresora, por lo que la edición de material está desactivada.",
+    "toast_printer_busy": "No se puede editar el material mientras la impresora está ocupada"
   }
 }

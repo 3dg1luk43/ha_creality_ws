@@ -36,6 +36,16 @@ def _card() -> str:
     return CARD.read_text(encoding="utf-8")
 
 
+def _strip_comments(text: str) -> str:
+    """Drop // and /* */ comments so "does the code do X" guards mean it.
+
+    Crude but adequate here: it can also blank a // inside a string literal,
+    which only ever makes these checks more permissive, never less.
+    """
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+    return re.sub(r"(?m)//.*$", "", text)
+
+
 # --------------------------------------------------------------------------- #
 # Behaviour, executed under node
 # --------------------------------------------------------------------------- #
@@ -98,15 +108,15 @@ def test_setconfig_resets_the_snapshot():
 def test_cards_have_no_console_logging():
     """PR #75 shipped 18 console.log calls; both cards currently have none."""
     for path in (CARD, PRINTER_CARD):
-        text = path.read_text(encoding="utf-8")
-        assert "console.log(" not in text, f"{path.name} logs to the console"
+        code = _strip_comments(path.read_text(encoding="utf-8"))
+        assert "console.log(" not in code, f"{path.name} logs to the console"
 
 
 def test_cards_do_not_use_alert():
     """alert() blocks the whole UI; confirm() is an accepted pattern here."""
     for path in (CARD, PRINTER_CARD):
-        text = path.read_text(encoding="utf-8")
-        assert not re.search(r"(?<![.\w])alert\s*\(", text), f"{path.name} uses alert()"
+        code = _strip_comments(path.read_text(encoding="utf-8"))
+        assert not re.search(r"(?<![.\w])alert\s*\(", code), f"{path.name} uses alert()"
 
 
 def test_www_payload_budget():
@@ -159,3 +169,61 @@ def test_english_and_spanish_have_the_same_keys(section):
         f"{section}: only in en {sorted(set(en[section]) - set(es[section]))}; "
         f"only in es {sorted(set(es[section]) - set(en[section]))}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Cross-language contracts
+# --------------------------------------------------------------------------- #
+
+
+def test_card_busy_states_match_the_integration():
+    """The card and the service must agree on what "busy" means.
+
+    The card greys out the edit button; the service refuses the write. If they
+    disagree, a user either sees an editable slot the service then rejects, or a
+    locked one they are actually allowed to change.
+    """
+    from custom_components.ha_creality_ws.utils import BUSY_PRINT_STATES
+
+    block = _card().split("const BUSY_PRINT_STATES = new Set([", 1)[1].split("]);", 1)[0]
+    in_card = set(re.findall(r'"([a-z-]+)"', block))
+    assert in_card == set(BUSY_PRINT_STATES), (
+        f"card has {sorted(in_card)}, integration has {sorted(BUSY_PRINT_STATES)}"
+    )
+
+
+def test_card_busy_states_are_real_sensor_states():
+    """Guards against using display strings instead of raw states."""
+    sensor = (
+        ROOT / "custom_components" / "ha_creality_ws" / "sensor.py"
+    ).read_text(encoding="utf-8")
+    from custom_components.ha_creality_ws.utils import BUSY_PRINT_STATES
+
+    # derive_print_state is the only producer of these values.
+    utils_src = (
+        ROOT / "custom_components" / "ha_creality_ws" / "utils.py"
+    ).read_text(encoding="utf-8")
+    produced = set(re.findall(r'return "([a-z-]+)"', utils_src))
+    assert BUSY_PRINT_STATES <= produced, (
+        f"never produced by derive_print_state: {sorted(BUSY_PRINT_STATES - produced)}"
+    )
+    assert "print_status" in sensor
+
+
+def test_device_lookup_is_scoped_and_fails_closed():
+    """PR #75's fallback wrote to whichever Creality device came first."""
+    source = _strip_comments(_card())
+    assert "config/entity_registry/list" not in source, (
+        "listing the whole registry is both slower and admin-only"
+    )
+    assert "this._hass?.entities" in source or "this._hass.entities" in source
+    # The mixed-printer branch must exist.
+    assert "toast_multiple_devices" in source
+    assert "devices.size !== 1" in source
+
+
+def test_busy_lookup_is_device_scoped():
+    """PR #75 scanned every entity for '_print_status'."""
+    source = _card()
+    assert 'translation_key === "print_status"' in source
+    assert "entry.device_id === deviceId" in source
