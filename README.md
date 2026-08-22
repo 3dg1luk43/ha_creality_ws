@@ -311,6 +311,9 @@ If your printer reports CFS data, the integration creates sensors for each CFS b
 | `rfid` | The printer's material id, exactly as reported |
 | `spool_key` | Derived id, stable per material **and** colour |
 | `state`, `selected` | Slot state and whether the printer is using it |
+| `box_id`, `slot_id` | The ids the **printer** uses for this slot |
+| `min_temp`, `max_temp` | Printing temperature range, °C (`null` if the printer omits them) |
+| `pressure` | Pressure advance (`null` if the printer omits it) |
 
 Creality RFID tags store the colour as *seven* hex characters: a padding character
 followed by the real `RRGGBB`. `color_hex` therefore keeps the **last** six digits,
@@ -321,6 +324,11 @@ material and vendor share it even when their colours differ. `spool_key` combine
 with the normalised colour to tell those apart, which is what external trackers such
 as spoolman-sync need. It is a *derived* key: the telemetry carries no per-tag serial,
 so two genuinely identical spools still produce the same key.
+
+`box_id` and `slot_id` are the printer's own ids, which is what `set_cfs_material`
+needs to address a slot. Not every printer reports `min_temp`/`max_temp`/`pressure` on
+every slot — CFS box slots often omit them where the external slot has them — so treat
+`null` as "unknown", not as zero.
 
 ### CFS Card
 

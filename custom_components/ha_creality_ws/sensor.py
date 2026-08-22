@@ -632,8 +632,18 @@ class KCFSBoxSensor(KEntity, SensorEntity):
         return None
 
 
-def _cfs_slot_attributes(data: dict[str, Any]) -> dict[str, Any]:
-    """Build the shared attribute set for a CFS slot (box slot or external)."""
+def _cfs_slot_attributes(
+    data: dict[str, Any],
+    box_id: int | None = None,
+    slot_id: int | None = None,
+) -> dict[str, Any]:
+    """Build the shared attribute set for a CFS slot (box slot or external).
+
+    ``box_id``/``slot_id`` are the ids the *printer* uses, which the card needs to
+    address the right slot when writing material back via ``set_cfs_material``.
+    They are passed in because the raw slot dict only carries its own ``id``, not
+    the id of the box it belongs to.
+    """
     raw_color = data.get("color")
     return {
         "vendor": data.get("vendor"),
@@ -654,6 +664,13 @@ def _cfs_slot_attributes(data: dict[str, Any]) -> dict[str, Any]:
         ),
         "state": data.get("state"),
         "selected": data.get("selected"),
+        # Addressing + editable material settings, so the CFS card can target the
+        # right slot and prefill its edit dialog with the printer's current values.
+        "box_id": box_id,
+        "slot_id": slot_id,
+        "min_temp": _safe_float(data.get("minTemp")),
+        "max_temp": _safe_float(data.get("maxTemp")),
+        "pressure": _safe_float(data.get("pressure")),
     }
 
 
@@ -711,7 +728,7 @@ class KCFSSlotSensor(KEntity, SensorEntity):
         data = self._get_slot_data()
         if not data:
             return {}
-        return _cfs_slot_attributes(data)
+        return _cfs_slot_attributes(data, self._box_id, self._slot_id)
 
 
 class KCFSExtSlotSensor(KEntity, SensorEntity):
@@ -773,7 +790,10 @@ class KCFSExtSlotSensor(KEntity, SensorEntity):
         data = self._get_slot_data()
         if not data:
             return {}
-        return _cfs_slot_attributes(data)
+        # The external box's id is whatever the printer reports for the type==1
+        # box, so read it back rather than assuming 0.
+        box = self._get_external_box() or {}
+        return _cfs_slot_attributes(data, box.get("id"), data.get("id", self._slot_id))
 
 
 class KActiveFilamentSensor(KEntity, SensorEntity):

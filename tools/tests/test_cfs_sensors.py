@@ -29,6 +29,7 @@ if "homeassistant.const" not in sys.modules:
     sys.modules["homeassistant.const"] = const_mod
 
 from custom_components.ha_creality_ws.sensor import (  # noqa: E402
+    KCFSExtSlotSensor,
     KCFSSlotSensor,
     _cfs_slot_attributes,
 )
@@ -105,4 +106,58 @@ def test_slot_attributes_keep_the_documented_key_set():
         "spool_key",
         "state",
         "selected",
+        "box_id",
+        "slot_id",
+        "min_temp",
+        "max_temp",
+        "pressure",
     }
+
+
+def test_slot_attributes_expose_the_printer_ids():
+    """The card writes material by printer box/slot id, so they must be published."""
+    attrs = _cfs_slot_attributes(GENERIC_SLOT, 1, 2)
+    assert attrs["box_id"] == 1
+    assert attrs["slot_id"] == 2
+
+
+def test_slot_attributes_expose_editable_material_settings():
+    """The edit dialog prefills from these, so camelCase must be mapped through."""
+    slot = {**GENERIC_SLOT, "minTemp": 190, "maxTemp": 240, "pressure": 0.04}
+    attrs = _cfs_slot_attributes(slot)
+    assert attrs["min_temp"] == 190.0
+    assert attrs["max_temp"] == 240.0
+    assert attrs["pressure"] == 0.04
+
+
+def test_slot_attributes_tolerate_missing_material_settings():
+    """Real CFS box slots often omit temps entirely; that must not raise."""
+    attrs = _cfs_slot_attributes(GENERIC_SLOT)
+    assert attrs["min_temp"] is None
+    assert attrs["max_temp"] is None
+    assert attrs["pressure"] is None
+
+
+def test_box_slot_sensor_reports_its_own_ids():
+    attrs = _sensor("filament").extra_state_attributes
+    assert attrs["box_id"] == 1
+    assert attrs["slot_id"] == 0
+
+
+def test_external_slot_sensor_reports_the_printers_box_id_not_zero():
+    """The external box's id is whatever the printer says; don't assume 0."""
+    coord = SimpleNamespace(
+        client=SimpleNamespace(_host="1.2.3.4"),
+        data={
+            "boxsInfo": {
+                "materialBoxs": [
+                    {"id": 7, "type": 1, "materials": [{**GENERIC_SLOT, "id": 0}]},
+                ]
+            }
+        },
+        available=True,
+        power_is_off=lambda: False,
+    )
+    attrs = KCFSExtSlotSensor(coord, slot_id=0, sensor_type="filament").extra_state_attributes
+    assert attrs["box_id"] == 7
+    assert attrs["slot_id"] == 0
