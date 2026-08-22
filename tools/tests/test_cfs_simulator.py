@@ -98,16 +98,33 @@ def _missing_dependency() -> str | None:
     return None
 
 
+# Evaluated once: each call runs a subprocess probe against the venv interpreter.
+_MISSING_DEPENDENCY = _missing_dependency()
+
 requires_simulator = pytest.mark.skipif(
-    _missing_dependency() is not None,
-    reason=f"cannot run the simulator here: {_missing_dependency()}",
+    _MISSING_DEPENDENCY is not None,
+    reason=f"cannot run the simulator here: {_MISSING_DEPENDENCY}",
 )
 
 
-def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+def _free_ports(count: int) -> list[int]:
+    """Reserve `count` distinct ephemeral ports.
+
+    Every socket is held open until all of them are chosen; closing one before
+    picking the next lets the kernel hand out the same port twice, and the
+    simulator then fails to bind its second listener -- surfacing as "simulator
+    did not start" rather than the real cause.
+    """
+    socks = []
+    try:
+        for _ in range(count):
+            sock = socket.socket()
+            sock.bind(("127.0.0.1", 0))
+            socks.append(sock)
+        return [s.getsockname()[1] for s in socks]
+    finally:
+        for s in socks:
+            s.close()
 
 
 def _wait_for_port(port: int, timeout: float = 20.0) -> bool:
@@ -124,7 +141,7 @@ def _wait_for_port(port: int, timeout: float = 20.0) -> bool:
 @pytest.fixture
 def simulator():
     """Run the simulator on free ports and yield its WebSocket URL."""
-    ws_port, http_port = _free_port(), _free_port()
+    ws_port, http_port = _free_ports(2)
     proc = subprocess.Popen(
         [
             str(VENV_PYTHON), str(SERVER),

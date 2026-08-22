@@ -137,6 +137,14 @@ def test_test_server_prefers_h264_for_video():
 
 
 def test_test_server_does_not_close_healthy_webrtc_sessions_on_a_timer():
-    """A fixed sleep-then-close made every consumer reconnect in a loop."""
+    """A fixed sleep-then-close made every consumer reconnect in a loop.
+
+    Asserted positively: "no `asyncio.sleep(60)`" also passes for any
+    differently-spelled timer teardown, so check that the cleanup actually waits
+    on the connection state instead.
+    """
     source = _test_server_source()
-    assert "await asyncio.sleep(60)" not in source
+    cleanup = source.split("async def _cleanup_pc", 1)[1].split("\n    async def ", 1)[0]
+    assert 'pc.on("connectionstatechange")' in cleanup
+    assert "await closed.wait()" in cleanup
+    assert "asyncio.sleep" not in cleanup

@@ -241,7 +241,7 @@
         },
         "rfid": {
           "name": "RFID",
-          "description": "El id de material de la impresora. Déjalo vacío para conservar la asociación de etiqueta existente; enviar un valor vacío la borraría."
+          "description": "El id de material de la impresora. Si lo dejas vacío, el campo se omite y se conserva la asociación de etiqueta existente."
         }
       }
     }

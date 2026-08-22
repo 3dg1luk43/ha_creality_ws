@@ -67,6 +67,34 @@ const CREALITY_STANDARD_COLOURS = {
 const PRESETS_STORAGE_KEY = "k-cfs-colour-presets";
 
 /**
+ * Escape a value for interpolation into markup.
+ *
+ * Filament names, colours and entity ids reach the renderers straight from
+ * printer telemetry, and the renderers build strings that are assigned to
+ * innerHTML. A `"` or `<` in any of them would otherwise close the attribute or
+ * element it sits in and inject markup into the dashboard.
+ * @param {*} value
+ * @returns {string}
+ */
+function esc(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
+ * Whether a value is a writable hex colour: 3 or 6 digits, `#` optional.
+ * @param {*} value
+ * @returns {boolean}
+ */
+function isHexColour(value) {
+  return /^#?(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(String(value ?? "").trim());
+}
+
+/**
  * User-defined colour presets, persisted in localStorage.
  *
  * Deliberately browser-local rather than stored in the card config: presets are
@@ -101,9 +129,11 @@ class ColourPresetsManager {
   /** @returns {boolean} whether the preset was stored */
   save(name, colour) {
     const key = String(name || "").trim();
-    const value = KCFSCard._sanitizeColor(colour);
-    if (!key || value === "#cccccc") return false;
-    this.presets[key] = value;
+    // Validate the input, not the output: _sanitizeColor returns #cccccc both
+    // for "unparseable" and for the real grey #cccccc, so comparing against it
+    // would refuse to store that colour.
+    if (!key || !isHexColour(colour)) return false;
+    this.presets[key] = KCFSCard._sanitizeColor(colour);
     this._persist();
     return true;
   }
@@ -348,9 +378,14 @@ class KCFSCard extends HTMLElement {
     // _render() wipes #content, so the gate must not then decide nothing changed
     // and skip repopulating it -- that would leave the card blank after an edit.
     this._snapshot = null;
-    // Different entities may mean a different printer.
+    // Different entities may mean a different printer. Bumping the generation
+    // invalidates a _resolveDeviceId() that is already awaiting callWS: it
+    // captured the previous config's entity ids before the await, and writing
+    // its answer back would target the old printer for the rest of the session.
     this._deviceId = undefined;
     this._deviceIdError = null;
+    this._deviceIdGeneration = (this._deviceIdGeneration || 0) + 1;
+    this._deviceIdPending = false;
     this._statusEid = null;
     this._render();
   }
@@ -1278,7 +1313,7 @@ class KCFSCard extends HTMLElement {
     const { boxes: boxValues, external: externalData } = data || this._collectData();
 
     if (boxValues.length === 0 && !externalData) {
-      contentContainer.innerHTML = `<div class="no-data">${this._t("no_data")}</div>`;
+      contentContainer.innerHTML = `<div class="no-data">${esc(this._t("no_data"))}</div>`;
       return;
     }
 
@@ -1318,7 +1353,7 @@ class KCFSCard extends HTMLElement {
         <div class="unit-selector">
           ${boxes.map((b, idx) => `
             <button class="unit-btn ${idx === this._selectedCFS ? 'active' : ''}" data-cfs="${idx}">
-              ${this._t("cfs_number_label", { number: b.id + 1 })}
+              ${esc(this._t("cfs_number_label", { number: b.id + 1 }))}
             </button>
           `).join('')}
         </div>
@@ -1331,11 +1366,11 @@ class KCFSCard extends HTMLElement {
       const hasFilament = safeType !== "—";
       const pct = hasFilament && slot.percent !== null ? Math.round(slot.percent) : 0;
       return `
-        <div class="bay" data-eid="${slot.entity_id}">
+        <div class="bay" data-eid="${esc(slot.entity_id)}">
           ${this._renderEditButton(slot, true)}
-          <div class="bay-spool" style="--spool-color: ${slot.color || '#cccccc'}"></div>
+          <div class="bay-spool" style="--spool-color: ${esc(slot.color || '#cccccc')}"></div>
           <div class="bay-label">
-            <span class="bay-type">${safeType}</span>
+            <span class="bay-type">${esc(safeType)}</span>
             <span class="bay-pct">${pct}%</span>
           </div>
         </div>
@@ -1343,15 +1378,15 @@ class KCFSCard extends HTMLElement {
     }).join('');
 
     const env = [];
-    if (box?.temp && box.temp !== "—") env.push(`<span class="env-temp">${box.temp}</span>`);
+    if (box?.temp && box.temp !== "—") env.push(`<span class="env-temp">${esc(box.temp)}</span>`);
     if (box?.humidity && box.humidity !== "—") {
-      env.push(`<span class="env-hum" style="color: ${box.humidityColor}">${box.humidity}</span>`);
+      env.push(`<span class="env-hum" style="color: ${esc(box.humidityColor)}">${esc(box.humidity)}</span>`);
     }
 
     return `
       ${unitSelector}
       <div class="box-view">
-        <img class="box-image" src="${ASSET_URL_BASE}cfs_box.webp" alt="${this._t("alt_cfs_box")}" />
+        <img class="box-image" src="${ASSET_URL_BASE}cfs_box.webp" alt="${esc(this._t("alt_cfs_box"))}" />
         <div class="bays">${bays}</div>
       </div>
       ${env.length ? `<div class="env-info">${env.join(' <span style="color: var(--divider-color)">•</span> ')}</div>` : ''}
@@ -1361,7 +1396,7 @@ class KCFSCard extends HTMLElement {
   _renderNormalMode(boxes, external) {
     // Ensure we have at least one box
     if (boxes.length === 0 && !external) {
-      return `<div class="no-data">${this._t("no_data")}</div>`;
+      return `<div class="no-data">${esc(this._t("no_data"))}</div>`;
     }
 
     // Unit selector (only if we have multiple boxes)
@@ -1371,7 +1406,7 @@ class KCFSCard extends HTMLElement {
         <div class="unit-selector">
           ${boxes.map((box, idx) => `
             <button class="unit-btn ${idx === this._selectedCFS ? 'active' : ''}" data-cfs="${idx}">
-              ${this._t("cfs_number_label", { number: box.id + 1 })}
+              ${esc(this._t("cfs_number_label", { number: box.id + 1 }))}
             </button>
           `).join('')}
         </div>
@@ -1381,7 +1416,7 @@ class KCFSCard extends HTMLElement {
     // Get the selected box
     const selectedBox = boxes[this._selectedCFS] || boxes[0];
     if (!selectedBox && !external) {
-      return `<div class="no-data">${this._t("no_data")}</div>`;
+      return `<div class="no-data">${esc(this._t("no_data"))}</div>`;
     }
 
     // Header with environment info
@@ -1391,8 +1426,8 @@ class KCFSCard extends HTMLElement {
       const humStr = selectedBox.humidity !== "—" ? selectedBox.humidity : '';
 
       if (tempStr || humStr) {
-        const tempHtml = tempStr ? `<span class="env-temp">${tempStr}</span>` : '';
-        const humHtml = humStr ? `<span class="env-hum" style="color: ${selectedBox.humidityColor}">${humStr}</span>` : '';
+        const tempHtml = tempStr ? `<span class="env-temp">${esc(tempStr)}</span>` : '';
+        const humHtml = humStr ? `<span class="env-hum" style="color: ${esc(selectedBox.humidityColor)}">${esc(humStr)}</span>` : '';
         const separator = tempStr && humStr ? ' <span style="color: var(--divider-color)">•</span> ' : '';
         envInfo = `<div class="env-info">${tempHtml}${separator}${humHtml}</div>`;
       }
@@ -1401,7 +1436,7 @@ class KCFSCard extends HTMLElement {
     const header = `
       <div class="header">
         <div class="title-section">
-          <div class="title">${this._cfg.name || 'Creality CFS'}</div>
+          <div class="title">${esc(this._cfg.name || 'Creality CFS')}</div>
         </div>
         ${envInfo}
       </div>
@@ -1428,16 +1463,16 @@ class KCFSCard extends HTMLElement {
       const displayName = hasFilament ? `${safeName} ${safeType}` : '—';
       externalSection = `
         <div class="external-section">
-          <div class="external-normal" data-eid="${external.entity_id}">
+          <div class="external-normal" data-eid="${esc(external.entity_id)}">
             ${this._renderEditButton(external)}
-            <div class="ext-icon">${this._t("ext_label")}</div>
+            <div class="ext-icon">${esc(this._t("ext_label"))}</div>
             <div class="ext-info">
-              <div class="ext-name">${displayName}</div>
+              <div class="ext-name">${esc(displayName)}</div>
               <div class="ext-bar">
-                <div class="ext-fill" style="width: ${pct}%"></div>
+                <div class="ext-fill" style="width: ${Number(pct) || 0}%"></div>
               </div>
             </div>
-            <div class="ext-percent">${percentTextDisplay}</div>
+            <div class="ext-percent">${esc(percentTextDisplay)}</div>
           </div>
         </div>
       `;
@@ -1448,7 +1483,7 @@ class KCFSCard extends HTMLElement {
 
   _renderCompactMode(boxes, external) {
     if (boxes.length === 0 && !external) {
-      return `<div class="no-data">${this._t("no_data")}</div>`;
+      return `<div class="no-data">${esc(this._t("no_data"))}</div>`;
     }
 
     // CFS rows
@@ -1471,12 +1506,12 @@ class KCFSCard extends HTMLElement {
       const displayName = hasFilament ? `${safeName} ${safeType}` : '—';
       externalSection = `
         <div class="external-section">
-          <div class="external-compact" data-eid="${external.entity_id}">
+          <div class="external-compact" data-eid="${esc(external.entity_id)}">
             ${this._renderEditButton(external)}
-            <div class="ext-dot">${this._t("ext_label")}</div>
+            <div class="ext-dot">${esc(this._t("ext_label"))}</div>
             <div class="ext-compact-info">
-              <div>${displayName}</div>
-              <div>${percentTextDisplay}</div>
+              <div>${esc(displayName)}</div>
+              <div>${esc(percentTextDisplay)}</div>
             </div>
           </div>
         </div>
@@ -1494,15 +1529,15 @@ class KCFSCard extends HTMLElement {
     if (tempStr || humStr) {
       envHtml = `
         <div class="env-mini">
-          ${tempStr ? `<div class="temp">${tempStr}</div>` : ''}
-          ${humStr ? `<div class="hum" style="color: ${box.humidityColor}">${humStr}</div>` : ''}
+          ${tempStr ? `<div class="temp">${esc(tempStr)}</div>` : ''}
+          ${humStr ? `<div class="hum" style="color: ${esc(box.humidityColor)}">${esc(humStr)}</div>` : ''}
         </div>
       `;
     }
 
     return `
       <div class="cfs-row">
-        <div class="cfs-label">${this._t("cfs_number_label", { number: box.id + 1 })}</div>
+        <div class="cfs-label">${esc(this._t("cfs_number_label", { number: box.id + 1 }))}</div>
         <div class="spools-inline">
           ${box.slots.map((slot) => this._renderSpoolMini(slot)).join('')}
         </div>
@@ -1537,9 +1572,9 @@ class KCFSCard extends HTMLElement {
     return `
       <button type="button"
               class="${mini ? "edit-btn-mini" : "edit-btn"}"
-              data-edit="${slot.entity_id}"
-              title="${title}"
-              aria-label="${title}"
+              data-edit="${esc(slot.entity_id)}"
+              title="${esc(title)}"
+              aria-label="${esc(title)}"
               ${disabled ? "disabled" : ""}>
         <ha-icon icon="${disabled ? mdi("lock") : mdi("pencil")}"></ha-icon>
       </button>
@@ -1565,18 +1600,18 @@ class KCFSCard extends HTMLElement {
     const badge = isActive ? '<div class="status-badge"></div>' : '';
 
     return `
-      <div class="spool-card ${isActive ? 'active' : ''}" data-eid="${slot.entity_id}">
+      <div class="spool-card ${isActive ? 'active' : ''}" data-eid="${esc(slot.entity_id)}">
         ${badge}
         ${this._renderEditButton(slot)}
         <div class="ring-container">
-          <div class="ring-outer" style="--spool-color: ${color}; --spool-pct: ${pct}%"></div>
+          <div class="ring-outer" style="--spool-color: ${esc(color)}; --spool-pct: ${Number(pct) || 0}%"></div>
           <div class="ring-inner">
             <span class="spool-pct">${pctDisplay}%</span>
-            <span class="spool-label">${safeType}</span>
+            <span class="spool-label">${esc(safeType)}</span>
           </div>
         </div>
-        <div class="material-name">${safeName}</div>
-        <div class="color-name">${percentTextDisplay}</div>
+        <div class="material-name">${esc(safeName)}</div>
+        <div class="color-name">${esc(percentTextDisplay)}</div>
       </div>
     `;
   }
@@ -1605,11 +1640,11 @@ class KCFSCard extends HTMLElement {
       return `
         <div class="spool-mini-wrapper">
           <div class="spool-mini ${isActive ? 'active' : ''}" 
-               style="--spool-color: ${color}; --spool-pct: ${pct}%" 
-               data-eid="${slot.entity_id}">
+               style="--spool-color: ${esc(color)}; --spool-pct: ${Number(pct) || 0}%" 
+               data-eid="${esc(slot.entity_id)}">
             <span>${pctDisplay}</span>
           </div>
-          <div class="spool-mini-type">${safeType}</div>
+          <div class="spool-mini-type">${esc(safeType)}</div>
           ${this._renderEditButton(slot, true)}
         </div>
       `;
@@ -1618,8 +1653,8 @@ class KCFSCard extends HTMLElement {
     return `
       <div class="spool-mini-wrapper">
         <div class="spool-mini ${isActive ? 'active' : ''}" 
-             style="--spool-color: ${color}; --spool-pct: ${pct}%" 
-             data-eid="${slot.entity_id}">
+             style="--spool-color: ${esc(color)}; --spool-pct: ${Number(pct) || 0}%" 
+             data-eid="${esc(slot.entity_id)}">
           <span>${pctDisplay}</span>
         </div>
         ${this._renderEditButton(slot, true)}
@@ -1643,6 +1678,8 @@ class KCFSCard extends HTMLElement {
   async _resolveDeviceId() {
     if (this._deviceId !== undefined) return this._deviceId;
 
+    const generation = this._deviceIdGeneration || 0;
+    const isStale = () => (this._deviceIdGeneration || 0) !== generation;
     const entityIds = this._configuredEntityIds();
     const registry = this._hass?.entities || {};
     const devices = new Set();
@@ -1669,6 +1706,10 @@ class KCFSCard extends HTMLElement {
         }
       }
     }
+
+    // setConfig ran while we were awaiting callWS: this answer is for the
+    // previous config, so drop it rather than caching it.
+    if (isStale()) return this._deviceId ?? null;
 
     if (devices.size !== 1) {
       this._deviceIdError = devices.size > 1 ? "toast_multiple_devices" : "toast_no_device";
@@ -1816,13 +1857,33 @@ class KCFSCard extends HTMLElement {
     overlay.className = "edit-overlay";
     const dialog = document.createElement("div");
     dialog.className = "edit-dialog";
+    // Modal semantics: without these the overlay is an anonymous <div> that a
+    // screen reader cannot announce and a keyboard user cannot leave, since
+    // click-outside was the only dismissal besides the Cancel button.
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-label", this._t("dialog_edit_title"));
+    dialog.tabIndex = -1;
     overlay.appendChild(dialog);
 
-    const close = () => { if (overlay.remove) overlay.remove(); };
+    const close = () => {
+      overlay.removeEventListener("keydown", onKeyDown);
+      if (overlay.remove) overlay.remove();
+    };
+    const onKeyDown = (ev) => {
+      if (ev.key === "Escape" || ev.key === "Esc") {
+        ev.stopPropagation();
+        close();
+      }
+    };
+    overlay.addEventListener("keydown", onKeyDown);
     overlay.addEventListener("click", (ev) => { if (ev.target === overlay) close(); });
 
     dialog.appendChild(this._renderEditForm(slot, close));
     this._root.appendChild(overlay);
+    // Focus the dialog itself rather than the first field: ha-form upgrades
+    // asynchronously, so its inputs may not exist yet.
+    if (dialog.focus) dialog.focus();
   }
 
   /**

@@ -117,6 +117,42 @@ def test_number_platform_subscribes_to_the_discovery_signal():
     assert "async_dispatcher_connect" in source
 
 
+def test_the_capability_flag_is_read_inside_the_gate_not_captured():
+    """Capturing it at setup froze the late pass out.
+
+    `_chamber_entities` is the late-discovery path too, so a `False` captured
+    before the printer reported anything would have permanently prevented the
+    chamber number from being created.
+    """
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "custom_components" / "ha_creality_ws" / "number.py"
+    ).read_text()
+    gate = source.split("def _chamber_entities()", 1)[1].split("\n    ents.extend", 1)[0]
+    assert "_cached_has_chamber_control" in gate, (
+        "the capability must be read inside the gate, not captured at setup"
+    )
+    # Live telemetry promotes the capability the same way __init__ does when it
+    # caches it, so a printer that was off at setup still gets the entity.
+    assert "targetBoxTemp" in gate and "maxBoxTemp" in gate
+
+
+def test_deferred_entity_adds_are_dropped_after_unload():
+    """`call_soon` cannot be cancelled, and unloading does not unschedule it."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2] / "custom_components" / "ha_creality_ws"
+    for name in ("number.py", "sensor.py"):
+        source = (root / name).read_text()
+        assert "hass.loop.call_soon(_add_if_live" in source, (
+            f"{name} defers the raw add callback, so it can run against a "
+            "removed entry"
+        )
+        assert "entry.async_on_unload(_mark_unloaded)" in source, name
+
+
 def test_chamber_target_accepts_the_cached_capability():
     """The common case must not depend on live telemetry at all."""
     from pathlib import Path

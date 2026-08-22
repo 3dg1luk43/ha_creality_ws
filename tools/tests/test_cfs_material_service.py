@@ -391,6 +391,26 @@ def test_a_printer_failure_notifies_and_does_not_raise(integration):
 
 
 @requires_voluptuous
+def test_each_printer_gets_its_own_notification_id(integration):
+    """device_id accepts a list; a shared id left only the last result visible."""
+    _module, notifications, _ = integration
+    notifications.clear()
+    good = FakeCoordinator("reachable", IDLE)
+    bad = FakeCoordinator("unreachable", IDLE, fail=True)
+    hass, services, _ = _make_hass(
+        integration, {"e1": bad, "e2": good}, {"d1": _device("e1"), "d2": _device("e2")}
+    )
+    _register(integration, hass)
+    _call_service(integration, hass, services, {
+        "device_id": ["d1", "d2"], "box_id": 1, "slot_id": 0, "type": "PLA",
+    })
+    ids = [n.get("notification_id") for n in notifications]
+    assert len(ids) == len(set(ids)), f"notification ids collide: {ids}"
+    assert "cfs_material_error_unreachable" in ids, ids
+    assert "cfs_material_update_reachable" in ids, ids
+
+
+@requires_voluptuous
 def test_a_successful_write_schedules_the_echo_readback(integration):
     """The echo log is how the colour-format question gets settled from a user's
     debug log, so it must actually be scheduled."""

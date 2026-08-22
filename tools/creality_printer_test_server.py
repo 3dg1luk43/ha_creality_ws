@@ -847,10 +847,14 @@ class PrinterState:
             self._real_time_flow = 0.5 + (self._progress / 100.0) * 0.5
 
             if self.deterministic:
-                for channel, value in ((0, 70), (1, 60), (2, 50)):
-                    if channel not in self._manual_fans:
-                        self.set_fan_pct(channel, value)
-                        self._manual_fans.discard(channel)
+                # Assigned directly rather than via set_fan_pct, which would mark
+                # the channel manual and then need un-marking again.
+                if 0 not in self._manual_fans:
+                    self._model_fan = 70
+                if 1 not in self._manual_fans:
+                    self._case_fan = 60
+                if 2 not in self._manual_fans:
+                    self._side_fan = 50
                 self._pos_x, self._pos_y, self._pos_z = 100.0, 100.0, 10.0
                 return
 
@@ -1100,6 +1104,11 @@ async def ws_safe_send(ws: Any, obj: Any):
 CALL_PATH = "/call/webrtc_local"
 
 
+# An offer that never reaches `connected` would otherwise pin its peer
+# connection forever, so the cleanup task gives up after this long.
+PC_CONNECT_TIMEOUT = 60.0
+
+
 class HttpServer:
     def __init__(self, host: str, port: int, cam_mode: str, width: int, height: int, fps: int, audio: bool,
                  video_source: str = "synthetic", ffmpeg_bin: str = "ffmpeg",
@@ -1132,6 +1141,7 @@ class HttpServer:
             web.get("/test/state", self.handle_test_state),
         ])
         self._sessions: set[MediaBlackhole | RTCPeerConnection] = set()
+        self._cleanup_tasks: set[asyncio.Task] = set()
         self._runner: Optional[web.AppRunner] = None
         self._site: Optional[web.BaseSite] = None
 
@@ -1328,7 +1338,11 @@ class HttpServer:
                 if line.startswith(("m=", "a=rtpmap", "a=fmtp", "a=sendrecv", "a=recvonly", "a=sendonly")):
                     LOGGER.debug("answer  %s", line.strip())
         payload = {"type": "answer", "sdp": answer_sdp}
-        asyncio.create_task(self._cleanup_pc(pc, sink))
+        # Keep a strong reference: the loop only holds a weak one, so an
+        # unreferenced task can be collected mid-flight.
+        cleanup = asyncio.create_task(self._cleanup_pc(pc, sink))
+        self._cleanup_tasks.add(cleanup)
+        cleanup.add_done_callback(self._cleanup_tasks.discard)
         # Always respond as base64(JSON) for Creality/go2rtc compatibility
         out = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
         return web.Response(status=200, text=out, headers={"Content-Type": "text/plain"})
@@ -1422,14 +1436,35 @@ class HttpServer:
         which made every consumer (go2rtc included) reconnect in a loop.
         """
         closed = asyncio.Event()
+        dead_states = ("closed", "failed", "disconnected")
 
         @pc.on("connectionstatechange")
         def _watch():
-            if pc.connectionState in ("closed", "failed", "disconnected"):
+            if pc.connectionState in dead_states:
                 closed.set()
 
+        # The handler is registered after the connection was created, so a
+        # connection that already died never fires it -- check the state once
+        # here or this task waits forever and leaks pc and sink.
+        if pc.connectionState in dead_states:
+            closed.set()
+
         try:
-            await closed.wait()
+            if pc.connectionState in ("new", "connecting"):
+                # An offer that never completes would otherwise pin the peer
+                # connection for the lifetime of the process.
+                try:
+                    await asyncio.wait_for(closed.wait(), timeout=PC_CONNECT_TIMEOUT)
+                except asyncio.TimeoutError:
+                    if pc.connectionState in ("new", "connecting"):
+                        LOGGER.info(
+                            "PC(%s) never established within %.0fs; tearing it down",
+                            id(pc), PC_CONNECT_TIMEOUT,
+                        )
+                    else:
+                        await closed.wait()
+            else:
+                await closed.wait()
         except asyncio.CancelledError:
             pass
         finally:
@@ -1791,7 +1826,9 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--deterministic", action="store_true",
                    help="Remove all randomness (temp oscillation, fan jitter, XYZ "
                         "drift) so telemetry is reproducible between runs. Use this "
-                        "when diffing entity states across integration versions.")
+                        "when diffing entity states across integration versions. "
+                        "Print-progress fields stay derived from elapsed wall-clock "
+                        "time and so still depend on when you sample them.")
     p.add_argument("--cfs-variant", choices=["default", "edge"], default="default",
                    help="'edge' adds awkward CFS payloads: an already-correct 6-char "
                         "colour, a slot with no vendor, a multi-colour spool, rfid "

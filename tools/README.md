@@ -104,7 +104,10 @@ Reproducible runs and edge cases
 
 ```bash
 # identical telemetry every run -- use this when diffing entity states
-# between two versions of the integration to check for regressions
+# between two versions of the integration to check for regressions.
+# Exception: printProgress, printJobTime, printLeftTime, layer and
+# usedMaterialLength are derived from elapsed wall-clock time, so they still
+# depend on when you sample them. Everything else is fixed.
 python3 tools/creality_printer_test_server.py --model k2plus --simulate-print --deterministic
 
 # awkward CFS payloads: already-correct 6-char colour, missing vendor,

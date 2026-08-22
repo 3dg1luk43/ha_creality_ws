@@ -60,6 +60,7 @@ def test_javascript_suite(suite):
         capture_output=True,
         text=True,
         cwd=str(ROOT),
+        check=False,  # the return code is asserted on below
     )
     assert result.returncode == 0, (
         f"{suite} failed:\n{result.stdout}\n{result.stderr}"
@@ -71,7 +72,10 @@ def test_card_parses():
     """A syntax error would break every dashboard using the card."""
     for path in (CARD, PRINTER_CARD):
         result = subprocess.run(
-            [NODE, "--check", str(path)], capture_output=True, text=True
+            [NODE, "--check", str(path)],
+            capture_output=True,
+            text=True,
+            check=False,  # the return code is asserted on below
         )
         assert result.returncode == 0, f"{path.name}: {result.stderr}"
 
@@ -204,7 +208,7 @@ def test_card_busy_states_are_real_sensor_states():
         ROOT / "custom_components" / "ha_creality_ws" / "utils.py"
     ).read_text(encoding="utf-8")
     produced = set(re.findall(r'return "([a-z-]+)"', utils_src))
-    assert BUSY_PRINT_STATES <= produced, (
+    assert produced.issuperset(BUSY_PRINT_STATES), (
         f"never produced by derive_print_state: {sorted(BUSY_PRINT_STATES - produced)}"
     )
     assert "print_status" in sensor
@@ -238,7 +242,9 @@ def test_edit_dialog_is_styled_by_classes_not_inline_styles():
     back if that regressed.
     """
     source = _strip_comments(_card())
-    form = source.split("_renderEditForm(slot, close) {", 1)[1].split("\n  async _saveMaterial", 1)[0]
+    # _renderEditForm is followed by _renderPresets, not _saveMaterial: ending
+    # the slice at _saveMaterial would count both methods.
+    form = source.split("_renderEditForm(slot, close) {", 1)[1].split("\n  _renderPresets(", 1)[0]
     inline = len(re.findall(r"\.style\.[a-zA-Z]+\s*=", form))
     assert inline < 10, f"{inline} inline style assignments in _renderEditForm"
 

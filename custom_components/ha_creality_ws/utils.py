@@ -15,6 +15,7 @@ __all__ = [
     "derive_print_state",
     "BUSY_PRINT_STATES",
     "build_modify_material_payload",
+    "normalize_material_color",
 ]
 
 

@@ -393,6 +393,10 @@ class CrealityWebRTCCamera(_BaseCamera):
         self._go2rtc_client: Go2RtcRestClient | None = None
         self._go2rtc_server_url: str | None = None
         self._go2rtc_version: str | None = None
+        # Whether initialization ended up on HA's own go2rtc. A custom instance
+        # can sit on localhost:11984 too, and only HA's build moves RTSP to
+        # 18554 -- so the RTSP port cannot be guessed from the URL alone.
+        self._go2rtc_is_ha_managed: bool = False
         
         _LOGGER.info(
             "ha_creality_ws: WebRTC camera initialized for printer: %s",
@@ -470,7 +474,10 @@ class CrealityWebRTCCamera(_BaseCamera):
 
         * an explicit user override always wins;
         * HA's own managed go2rtc binary listens on 127.0.0.1:18554, while its
-          REST API is on 11984 or a unix socket the client addresses as localhost;
+          REST API is on 11984 or a unix socket the client addresses as
+          localhost. Which instance we are talking to is recorded during
+          initialization, because a stand-alone go2rtc can occupy the same
+          host and port and still serve RTSP on the default;
         * anything else is a stand-alone go2rtc, which defaults to 8554.
         """
         host, api_port = self._go2rtc_host_and_api_port()
@@ -484,7 +491,11 @@ class CrealityWebRTCCamera(_BaseCamera):
             if port > 0:
                 return (host or "127.0.0.1", port)
 
-        if host in (None, "localhost", "127.0.0.1", "::1") and api_port in (None, DEFAULT_GO2RTC_PORT):
+        if (
+            self._go2rtc_is_ha_managed
+            and host in (None, "localhost", "127.0.0.1", "::1")
+            and api_port in (None, DEFAULT_GO2RTC_PORT)
+        ):
             return ("127.0.0.1", HA_MANAGED_GO2RTC_RTSP_PORT)
 
         return (host or "127.0.0.1", DEFAULT_GO2RTC_RTSP_PORT)
@@ -574,6 +585,7 @@ class CrealityWebRTCCamera(_BaseCamera):
                     
                 self._go2rtc_client = Go2RtcRestClient(session, url)
                 self._go2rtc_server_url = url
+                self._go2rtc_is_ha_managed = False
                 
                 # Validate server version
                 version = await self._go2rtc_client.validate_server_version()
@@ -594,6 +606,7 @@ class CrealityWebRTCCamera(_BaseCamera):
                 # Fall through to standard discovery logic
                 self._go2rtc_client = None
                 self._go2rtc_server_url = None
+                self._go2rtc_is_ha_managed = False
 
 
         # Get HA's go2rtc configuration
@@ -614,7 +627,8 @@ class CrealityWebRTCCamera(_BaseCamera):
                 go2rtc_data.url
             )
             self._go2rtc_server_url = go2rtc_data.url
-            
+            self._go2rtc_is_ha_managed = True
+
             # Validate server version
             version = await self._go2rtc_client.validate_server_version()
             self._go2rtc_version = str(version)

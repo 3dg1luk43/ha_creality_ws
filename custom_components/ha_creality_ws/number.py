@@ -38,11 +38,22 @@ async def async_setup_entry(hass, entry, async_add_entities):
     # it stayed `unavailable` until the next restart that happened to win the
     # race. It is now satisfied by the capability cached during onboarding, and
     # created late via the discovery signal if neither is available yet.
-    has_box_control = entry.data.get("_cached_has_chamber_control", entry.data.get("_cached_has_box_control", False))
     added: set[str] = set()
 
     def _chamber_entities() -> list[NumberEntity]:
-        if not has_box_control or "box_target" in added:
+        if "box_target" in added:
+            return []
+        # Read the capability on every call rather than capturing it at setup:
+        # the late pass has to see the current entry data, and live telemetry
+        # promotes the capability the same way __init__ does when caching it.
+        has_box_control = entry.data.get(
+            "_cached_has_chamber_control", entry.data.get("_cached_has_box_control", False)
+        )
+        if not has_box_control and (
+            "targetBoxTemp" in coord.data or "maxBoxTemp" in coord.data
+        ):
+            has_box_control = True
+        if not has_box_control:
             return []
         cached_max = entry.data.get(
             "_cached_max_chamber_temp", entry.data.get("_cached_max_box_temp")
@@ -54,13 +65,28 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     ents.extend(_chamber_entities())
 
+    # `call_soon` cannot be cancelled, and disconnecting the dispatcher does not
+    # unschedule a callback that is already queued. Without this flag the
+    # deferred `async_add_entities` could run against an unloaded entry.
+    platform_live = True
+
+    def _mark_unloaded() -> None:
+        nonlocal platform_live
+        platform_live = False
+
+    entry.async_on_unload(_mark_unloaded)
+
+    def _add_if_live(new_ents: list[NumberEntity]) -> None:
+        if platform_live:
+            async_add_entities(new_ents)
+
     def _on_new_entities() -> None:
         """Late discovery: the printer has just reported a gating field."""
         new_ents = _chamber_entities()
         if new_ents:
             _LOGGER.info("Adding %d late-discovered number entities", len(new_ents))
             # Deferred, not inline: see the matching note in sensor.py.
-            hass.loop.call_soon(async_add_entities, new_ents)
+            hass.loop.call_soon(_add_if_live, new_ents)
 
     entry.async_on_unload(
         async_dispatcher_connect(

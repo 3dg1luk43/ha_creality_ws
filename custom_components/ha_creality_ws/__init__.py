@@ -545,7 +545,7 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
         for coord in targets:
             host = coord.client.host
             try:
-                _LOGGER.info("Sending modifyMaterial to %s: %s", host, payload)
+                _LOGGER.debug("Sending modifyMaterial to %s: %s", host, payload)
                 await coord.client.send_set_retry(modifyMaterial=payload)
             except Exception as exc:
                 _LOGGER.error("Failed to set CFS material for %s: %s", host, exc)
@@ -553,7 +553,9 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
                     hass,
                     title="CFS Material Update Failed",
                     message=f"Failed to update material on {host}: {exc}",
-                    notification_id="cfs_material_error",
+                    # Per-host: device_id accepts a list, and a shared id would
+                    # leave only the last printer's result visible.
+                    notification_id=f"cfs_material_error_{host}",
                 )
                 continue
 
@@ -563,11 +565,11 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
                 message=(
                     f"Box {box_id} slot {slot_id} on {host} updated."
                 ),
-                notification_id="cfs_material_update",
+                notification_id=f"cfs_material_update_{host}",
             )
             hass.async_create_task(_log_material_echo(coord, payload))
 
-    async def _log_material_echo(coord, payload: dict[str, Any]) -> None:
+    async def _log_material_echo(coord: KCoordinator, payload: dict[str, Any]) -> None:
         """Log what the printer actually stored after a material write.
 
         Creality streams colours as seven hex characters (a pad character plus
@@ -588,7 +590,7 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
                 for slot in box.get("materials", []):
                     if slot.get("id") != payload["id"]:
                         continue
-                    _LOGGER.info(
+                    _LOGGER.debug(
                         "modifyMaterial echo for %s box %s slot %s: sent %s, printer "
                         "now reports %s",
                         coord.client.host,
@@ -599,7 +601,7 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
                     )
                     return
 
-            _LOGGER.info(
+            _LOGGER.debug(
                 "modifyMaterial echo for %s: box %s slot %s not present in boxsInfo "
                 "after the write",
                 coord.client.host,

@@ -225,7 +225,7 @@
         },
         "color": {
           "name": "Color",
-          "description": "Colour as six hex digits, for example #06c84f. Multi-colour spools cannot be written and must be left empty."
+          "description": "Color as six hex digits, for example #06c84f. Multi-color spools cannot be written and must be left empty."
         },
         "min_temp": {
           "name": "Minimum Temperature",
@@ -241,7 +241,7 @@
         },
         "rfid": {
           "name": "RFID",
-          "description": "The printer's material id. Leave empty to keep the existing tag association; sending a blank value would erase it."
+          "description": "The printer's material id. Leaving it empty omits the field, so the existing tag association is preserved."
         }
       }
     }

@@ -80,6 +80,17 @@ class FakeElement {
     this._listeners = this._listeners || {};
     (this._listeners[type] = this._listeners[type] || []).push(fn);
   }
+  removeEventListener(type, fn) {
+    const listeners = this._listeners?.[type];
+    if (!listeners) return;
+    const at = listeners.indexOf(fn);
+    if (at >= 0) listeners.splice(at, 1);
+  }
+  /** Invoke the registered handlers for `type`, the way a real event would. */
+  fire(type, event = {}) {
+    (this._listeners?.[type] || []).forEach((fn) => fn(event));
+  }
+  focus() { this._focused = true; }
   dispatchEvent() { return true; }
 }
 

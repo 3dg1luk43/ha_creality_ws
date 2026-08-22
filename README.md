@@ -419,8 +419,8 @@ data:
 
 **Only the fields you supply are changed.** The printer merges the payload into
 the slot it already holds, so anything you leave out keeps its current value.
-That matters most for `rfid`: leave it empty and the existing tag association is
-preserved. Sending a blank value would erase it.
+That matters most for `rfid`: leaving it empty omits the field entirely, so the
+existing tag association is preserved.
 
 Other things worth knowing:
 

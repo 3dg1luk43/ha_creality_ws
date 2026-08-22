@@ -165,6 +165,23 @@ test("presets are not offered for a multi-colour spool", async () => {
   assert.ok(!colourRow.children.some((c) => c.className === "presets"));
 });
 
+test("the real grey #cccccc can be saved as a preset", async () => {
+  // _sanitizeColor returns #cccccc both for "unparseable" and for that actual
+  // colour, so validating its output rejected a legitimate grey.
+  const { card } = await setup();
+  presetsSection(card); // opening the dialog is what creates the manager
+  const storable = (colour) => {
+    assert.equal(card._presets.save("Grey", colour), true, `${colour} must be storable`);
+    assert.equal(card._presets.presets.Grey, "#cccccc");
+    card._presets.remove("Grey");
+  };
+  storable("#cccccc");
+  storable("CCCCCC");
+  assert.equal(card._presets.save("Nope", "not-a-colour"), false);
+  assert.equal(card._presets.save("Nope", ""), false);
+  assert.equal(card._presets.save("", "#ff0000"), false);
+});
+
 test("localStorage is not touched until a dialog opens", async () => {
   // A dashboard with several cards should not all hit storage just to render.
   const { card } = await setup();

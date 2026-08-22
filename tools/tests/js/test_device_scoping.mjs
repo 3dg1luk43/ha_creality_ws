@@ -156,6 +156,42 @@ test("busy state is part of the fingerprint", async () => {
   assert.ok(renders > baseline, "a busy transition must re-render");
 });
 
+test("a resolve in flight during setConfig cannot write the old device id", async () => {
+  // The pre-2023.4 fallback awaits callWS, and entityIds was captured before the
+  // await. Reconfiguring the card mid-flight would otherwise cache printer A's
+  // device id against printer B's entities -- and _saveMaterial would write
+  // filament data to the wrong machine for the rest of the session.
+  const { KCFSCard } = loadCard();
+  const card = new KCFSCard();
+
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const perEntity = { [A_SLOT]: "dev_a", [B_SLOT]: "dev_b" };
+
+  card.setConfig({ box0_slot0_filament: A_SLOT });
+  // No hass.entities, so _resolveDeviceId falls back to callWS per entity.
+  card.hass = makeHass(statesForBoth(), {
+    entities: {},
+    callWS: async ({ entity_id }) => {
+      await gate;
+      return { device_id: perEntity[entity_id] ?? null };
+    },
+  });
+
+  const inFlight = card._resolveDeviceId();
+  card.setConfig({ box0_slot0_filament: B_SLOT }); // different printer
+  release();
+  await inFlight;
+
+  assert.notEqual(card._deviceId, "dev_a", "the stale answer must be discarded");
+
+  card.hass = makeHass(statesForBoth(), {
+    entities: {},
+    callWS: async ({ entity_id }) => ({ device_id: perEntity[entity_id] ?? null }),
+  });
+  assert.equal(await card._resolveDeviceId(), "dev_b", "and B must still resolve");
+});
+
 let failed = 0;
 for (const [name, fn] of tests) {
   try { await fn(); console.log(`ok   ${name}`); }

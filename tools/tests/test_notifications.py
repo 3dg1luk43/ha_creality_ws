@@ -191,6 +191,42 @@ def test_reprinting_the_same_file_notifies_again(monkeypatch):
     assert len(sent) == 2
 
 
+def test_a_genuine_zero_percent_frame_re_arms_completion(monkeypatch):
+    """`printProgress or dProgress` treated a real 0 as missing.
+
+    The printer keeps reporting the finished job's `dProgress`, so falling back
+    to it on the first frame of a reprint held prog_val at 100, the completion
+    flag never re-armed, and the next finish went unnotified.
+    """
+    coord, sent = _coordinator(monkeypatch)
+
+    coord.data = {"printFileName": "job.gcode", "printProgress": 100, "dProgress": 100}
+    _run(coord._check_notifications({}))  # baseline: already complete
+    assert coord._notified_completed is True
+
+    # Reprint starts: printProgress resets, dProgress still holds the old 100.
+    coord.data = {"printFileName": "job.gcode", "printProgress": 0, "dProgress": 100}
+    _run(coord._check_notifications({}))
+    assert coord._notified_completed is False, "a real 0% must re-arm completion"
+
+    coord.data = {"printFileName": "job.gcode", "printProgress": 100, "dProgress": 100}
+    _run(coord._check_notifications({}))
+    assert sent == ["Print 'job.gcode' completed successfully!"]
+
+
+def test_dprogress_is_still_used_when_printprogress_is_absent(monkeypatch):
+    """The fallback itself must survive: only a missing value triggers it."""
+    coord, sent = _coordinator(monkeypatch)
+
+    coord.data = {"printFileName": "job.gcode", "dProgress": 40}
+    _run(coord._check_notifications({}))  # baseline
+    assert coord._notified_completed is False
+
+    coord.data = {"printFileName": "job.gcode", "dProgress": 100}
+    _run(coord._check_notifications({}))
+    assert sent == ["Print 'job.gcode' completed successfully!"]
+
+
 def test_reprint_after_a_stale_startup_completion_notifies(monkeypatch):
     """The exact live scenario: baseline at 100%, then reprint the same file."""
     coord, sent = _coordinator(monkeypatch)

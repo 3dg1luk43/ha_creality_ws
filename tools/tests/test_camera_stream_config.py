@@ -196,6 +196,7 @@ def test_stream_source_returns_rtsp_url_for_ha_managed_go2rtc():
 
     cam = _camera()
     cam._go2rtc_server_url = "http://localhost:11984/"
+    cam._go2rtc_is_ha_managed = True
 
     async def run():
         with patch.object(cam, "_ensure_stream_configured", new_callable=AsyncMock):
@@ -203,6 +204,27 @@ def test_stream_source_returns_rtsp_url_for_ha_managed_go2rtc():
             return await cam.stream_source()
 
     assert asyncio.run(run()) == "rtsp://127.0.0.1:18554/creality_k2_1_2_3_4"
+
+
+def test_stream_source_uses_default_rtsp_port_for_custom_loopback_go2rtc():
+    """A stand-alone go2rtc on localhost:11984 is not HA's, so RTSP is 8554.
+
+    The URL alone cannot tell the two apart, so the endpoint has to key off what
+    initialization actually connected to; guessing 18554 here pointed HLS at a
+    port nothing was listening on.
+    """
+    import asyncio
+
+    cam = _camera(go2rtc_url="http://127.0.0.1:11984")
+    cam._go2rtc_server_url = "http://127.0.0.1:11984/"
+    cam._go2rtc_is_ha_managed = False
+
+    async def run():
+        with patch.object(cam, "_ensure_stream_configured", new_callable=AsyncMock):
+            cam._stream_name = "creality_k2_1_2_3_4"
+            return await cam.stream_source()
+
+    assert asyncio.run(run()) == "rtsp://127.0.0.1:8554/creality_k2_1_2_3_4"
 
 
 def test_stream_source_uses_go2rtc_default_port_for_external_server():
@@ -247,6 +269,7 @@ def test_stream_source_is_none_before_a_stream_exists():
 
     cam = _camera()
     cam._go2rtc_server_url = "http://localhost:11984/"
+    cam._go2rtc_is_ha_managed = True
 
     async def run():
         with patch.object(cam, "_ensure_stream_configured", new_callable=AsyncMock):

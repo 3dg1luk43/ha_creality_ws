@@ -446,11 +446,17 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._notified_minutes_to_end,
         )
 
-    async def _check_notifications(self, _payload: dict[str, Any]):
+    async def _check_notifications(self, _payload: dict[str, Any]) -> None:
         """Check logic for sending notifications."""
         d = self.data or {}
         fname = d.get("printFileName")
-        progress = d.get("printProgress") or d.get("dProgress")
+        # Explicit None check, matching derive_print_state: `or` would treat a
+        # genuine 0% as missing and fall back to dProgress, which still holds the
+        # finished job's 100 on the first frame of a reprint. The completion flag
+        # would then never re-arm and the next finish would go unnotified.
+        progress = d.get("printProgress")
+        if progress is None:
+            progress = d.get("dProgress")
 
         # Baseline the current state before anything can be notified. Telemetry
         # arrives incrementally, so wait for a frame that carries both the file

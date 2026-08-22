@@ -170,14 +170,16 @@ test("a busy printer refuses to open the dialog", async () => {
 test("the edit button is disabled and shows a lock while printing", async () => {
   const { card, slot } = await setup({ status: "printing" });
   const html = card._renderEditButton(slot);
-  assert.match(html, /disabled/);
+  // The tooltip reads "Editing is disabled while the printer is busy", so a bare
+  // /disabled/ would pass even with the attribute removed from the <button>.
+  assert.match(html, /\sdisabled>/);
   assert.match(html, /mdi:lock/);
 });
 
 test("the edit button is enabled and shows a pencil when idle", async () => {
   const { card, slot } = await setup();
   const html = card._renderEditButton(slot);
-  assert.ok(!/disabled/.test(html));
+  assert.ok(!/\sdisabled>/.test(html));
   assert.match(html, /mdi:pencil/);
 });
 
@@ -259,6 +261,66 @@ test("a save round-trip does not accumulate the vendor in the name", async () =>
   const haForm = form.children.find((c) => c.tagName === "HA-FORM");
   await card._saveMaterial(slot, { ...haForm.data, color: "#00ff00" });
   assert.equal(saved(calls).name, "Hyper PLA");
+});
+
+// --------------------------------------------------------------------------- //
+// Markup safety and dialog semantics
+// --------------------------------------------------------------------------- //
+
+test("device-supplied values are escaped before reaching innerHTML", async () => {
+  // Filament names and colours come from printer telemetry. A quote or angle
+  // bracket would otherwise close the attribute or element it sits in.
+  const hostile = '"><img src=x onerror=alert(1)>';
+  const { card } = await setup({
+    attributes: { ...ATTRS, type: hostile, name: hostile },
+    color: hostile,
+  });
+  const slot = card._findSlot(SLOT);
+  const boxes = [{
+    id: 1,
+    slots: [slot, slot, slot, slot],
+    temp: hostile,
+    humidity: hostile,
+    humidityColor: hostile,
+  }];
+  const external = { ...slot, entity_id: hostile, percentText: hostile };
+  const rendered = {
+    spoolCard: card._renderSpoolCard(slot),
+    spoolMini: card._renderSpoolMini(slot),
+    editButton: card._renderEditButton(slot),
+    boxMode: card._renderBoxMode(boxes, external),
+    normalMode: card._renderNormalMode(boxes, external),
+    compactMode: card._renderCompactMode(boxes, external),
+  };
+  for (const [where, html] of Object.entries(rendered)) {
+    // The payload must survive only as escaped text, never as markup. Checking
+    // for the verbatim string is enough: any unescaped interpolation reproduces
+    // it exactly, and escaping turns every character of it into an entity.
+    assert.ok(!html.includes(hostile), `${where}: the raw payload was interpolated`);
+    assert.ok(!html.includes("<img src=x"), `${where}: an injected <img survived`);
+  }
+  assert.ok(
+    rendered.spoolCard.includes("&lt;img"),
+    "the payload should still be visible, escaped",
+  );
+});
+
+test("the edit dialog announces itself and closes on Escape", async () => {
+  const { card } = await setup();
+  card._showEditDialog(SLOT);
+  const overlay = card._root.children.find((c) => c.className === "edit-overlay");
+  assert.ok(overlay, "the overlay is in the shadow root");
+  const dialog = overlay.children.find((c) => c.className === "edit-dialog");
+  assert.equal(dialog.getAttribute("role"), "dialog");
+  assert.equal(dialog.getAttribute("aria-modal"), "true");
+  assert.ok(dialog.getAttribute("aria-label"), "the dialog is labelled");
+  assert.equal(dialog._focused, true, "focus moves into the dialog");
+
+  overlay.fire("keydown", { key: "Escape", stopPropagation() {} });
+  assert.ok(
+    !card._root.children.includes(overlay),
+    "Escape must dismiss the dialog",
+  );
 });
 
 let failed = 0;

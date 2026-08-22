@@ -894,6 +894,21 @@ async def async_setup_entry(hass, entry, async_add_entities):
         return new_ents
 
 
+    # `call_soon` cannot be cancelled, and disconnecting the dispatcher does not
+    # unschedule a callback that is already queued. Without this flag the
+    # deferred `async_add_entities` could run against an unloaded entry.
+    platform_live = True
+
+    def _mark_unloaded() -> None:
+        nonlocal platform_live
+        platform_live = False
+
+    entry.async_on_unload(_mark_unloaded)
+
+    def _add_if_live(new_ents):
+        if platform_live:
+            async_add_entities(new_ents)
+
     # Dynamic CFS entity handler
     def _on_new_entities():
         """Handle signal for new entities (e.g. late CFS discovery)."""
@@ -906,7 +921,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             # the dispatch chain leaves it unreferenced ("Task was destroyed but
             # it is pending"), so no entities get added. Deferring to the next
             # loop iteration schedules it in a normal context.
-            hass.loop.call_soon(async_add_entities, new_ents)
+            hass.loop.call_soon(_add_if_live, new_ents)
     
     # Listen for the signal fired by coordinator
     entry.async_on_unload(
