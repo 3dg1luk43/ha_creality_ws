@@ -9,6 +9,11 @@ LOCAL_SUBDIR = "ha_creality_ws"
 PRINTER_CARD_NAME = "k_printer_card.js"
 CFS_CARD_NAME = "k_cfs_card.js"
 CARDS = [PRINTER_CARD_NAME, CFS_CARD_NAME]
+# Static files the cards fetch at runtime. Listed explicitly, one registration
+# each, rather than exposing the whole www/ directory -- that would also serve
+# ha_creality_ws.code-workspace and change how the cards themselves are served
+# as a side effect of adding an image.
+ASSETS = ["cfs_box.webp"]
 INTEGRATION_URL_BASE = f"/{LOCAL_SUBDIR}/"
 I18N_URL_BASE = f"{INTEGRATION_URL_BASE}i18n"
 # Use timestamp to bust cache on every load
@@ -226,6 +231,17 @@ class CrealityCardRegistration:
                     _LOGGER.info("Migrated %d Lovelace /local/ resources to integration-hosted URL", migrated)
             except Exception:
                 _LOGGER.debug("Local-to-integration resource migration failed for %s", integration_url)
+
+        for asset_name in ASSETS:
+            asset_path = Path(__file__).parent / "www" / asset_name
+            if asset_path.exists():
+                _register_static_path(
+                    self.hass,
+                    f"{INTEGRATION_URL_BASE}{asset_name}",
+                    str(asset_path),
+                )
+            else:
+                _LOGGER.warning("Card asset missing, not registered: %s", asset_path)
 
         i18n_path = Path(__file__).parent / "www" / "i18n"
         if i18n_path.exists():

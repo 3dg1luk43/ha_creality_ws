@@ -12,6 +12,9 @@ __all__ = [
     "normalize_color_hex",
     "format_filament_label",
     "build_spool_key",
+    "derive_print_state",
+    "BUSY_PRINT_STATES",
+    "build_modify_material_payload",
 ]
 
 
@@ -448,3 +451,155 @@ def build_spool_key(
             color_part = "-".join(tokens)
 
     return "_".join(part for part in (ident, color_part) if part) or None
+
+
+# --------------------------------------------------------------------------- #
+# Print state
+# --------------------------------------------------------------------------- #
+
+# States in which the printer is doing something that must not be interrupted.
+# The CFS card mirrors this set, and a test cross-checks the two so they cannot
+# drift apart.
+BUSY_PRINT_STATES = frozenset({"printing", "paused", "processing", "self-testing"})
+
+
+def derive_print_state(
+    data: dict[str, Any],
+    *,
+    power_off: bool = False,
+    available: bool = True,
+    paused_flag: bool = False,
+) -> str:
+    """Derive the printer's operational state from a telemetry snapshot.
+
+    Extracted from ``PrintStatusSensor`` so that services can gate on the same
+    notion of "busy" the user sees on the dashboard, instead of re-deriving it
+    slightly differently. Keep this the only place the mapping lives.
+    """
+    # Highest priority: the power switch, then a lost WebSocket.
+    if power_off:
+        return "off"
+    if not available:
+        return "unknown"
+
+    if (data.get("err") or {}).get("errcode", 0) != 0:
+        return "error"
+
+    if 1 <= (data.get("withSelfTest") or 0) <= 99:
+        return "self-testing"
+
+    state = data.get("state")
+    filename = data.get("printFileName") or ""
+    progress = safe_float(
+        data.get("printProgress") if data.get("printProgress") is not None
+        else data.get("dProgress")
+    )
+    progress = -1 if progress is None else int(progress)
+
+    if filename:
+        if progress >= 100:
+            return "completed"
+        if state == 5 or paused_flag:
+            return "paused"
+        if state == 4:
+            return "stopped"
+        if state == 1:
+            return "printing"
+        if state == 0:
+            return "processing"
+
+    return "idle"
+
+
+# --------------------------------------------------------------------------- #
+# CFS material writes
+# --------------------------------------------------------------------------- #
+
+_MATERIAL_COLOR_RE = re.compile(r"^#?[0-9a-fA-F]{6}$")
+
+
+def build_modify_material_payload(
+    *,
+    box_id: int,
+    slot_id: int,
+    material_type: str,
+    name: str | None = None,
+    vendor: str | None = None,
+    color: Any = None,
+    min_temp: Any = None,
+    max_temp: Any = None,
+    pressure: Any = None,
+    rfid: Any = None,
+) -> dict[str, Any]:
+    """Build the ``modifyMaterial`` payload the printer expects.
+
+    Kept free of Home Assistant so it can be unit tested directly. Raises
+    ``ValueError`` on input the printer would not accept, rather than coercing it
+    into something that silently writes the wrong thing.
+
+    Only keys the caller actually supplied are included: the printer merges the
+    payload into the slot it already has, so emitting a default would overwrite a
+    real value with a guess. ``rfid`` matters most here -- sending ``""`` wipes
+    the tag association on an RFID spool.
+    """
+    payload: dict[str, Any] = {
+        "boxId": int(box_id),
+        "id": int(slot_id),
+        "type": str(material_type).strip(),
+    }
+    if not payload["type"]:
+        raise ValueError("material type must not be empty")
+
+    for key, value in (("name", name), ("vendor", vendor)):
+        if value is not None and str(value).strip():
+            payload[key] = str(value).strip()
+
+    if color is not None:
+        payload["color"] = normalize_material_color(color)
+
+    low = safe_float(min_temp)
+    high = safe_float(max_temp)
+    if low is not None and high is not None and high < low:
+        raise ValueError(
+            f"max_temp ({high}) must not be below min_temp ({low})"
+        )
+    if low is not None:
+        payload["minTemp"] = low
+    if high is not None:
+        payload["maxTemp"] = high
+
+    advance = safe_float(pressure)
+    if advance is not None:
+        if not 0.0 <= advance <= 1.0:
+            raise ValueError(f"pressure must be between 0 and 1, got {advance}")
+        payload["pressure"] = advance
+
+    # Pass an existing tag id straight through; never substitute a placeholder.
+    if rfid is not None and str(rfid).strip():
+        payload["rfid"] = str(rfid).strip()
+
+    return payload
+
+
+def normalize_material_color(value: Any) -> str:
+    """Validate a colour for *writing* and return it as lowercase ``#rrggbb``.
+
+    Deliberately stricter than :func:`normalize_color_hex`, which normalises
+    whatever the printer happens to stream. A write has to be exact, so anything
+    that is not a single six-digit hex colour is rejected -- including the
+    comma-separated multi-colour form, which cannot be expressed as one value and
+    would otherwise be silently flattened.
+    """
+    if isinstance(value, (list, tuple)):
+        raise ValueError(
+            "colour must be a '#rrggbb' string, not an RGB list; "
+            "the color_rgb selector is not used for this field"
+        )
+    text = str(value).strip()
+    if re.search(r"[,;]", text):
+        raise ValueError(
+            f"cannot write a multi-colour value ({text!r}) as a single colour"
+        )
+    if not _MATERIAL_COLOR_RE.match(text):
+        raise ValueError(f"colour must be six hex digits, got {text!r}")
+    return f"#{text.lstrip('#').lower()}"

@@ -5,6 +5,7 @@ import json
 from typing import Any, Callable
 from .utils import (
     build_spool_key as _build_spool_key,
+    derive_print_state as _derive_print_state,
     format_filament_label as _format_filament_label,
     normalize_color_hex as _normalize_color_hex,
     parse_position as _parse_position,
@@ -338,48 +339,14 @@ class PrintStatusSensor(KEntity, SensorEntity):
 
     @property
     def native_value(self) -> str | None:
-        # HIGHEST PRIORITY: Check the power switch first.
-        if self.coordinator.power_is_off():
-            return "off"
-
-        # SECOND PRIORITY: Check for a lost WebSocket connection.
-        if not self.coordinator.available:
-            return "unknown"
-
-        # If we get here, the printer is ON and CONNECTED.
-        # Now, determine the operational state.
-        d = self.coordinator.data or {}
-
-        if d.get("err", {}).get("errcode", 0) != 0:
-            return "error"
-
-        if 1 <= d.get("withSelfTest", 0) <= 99:
-            return "self-testing"
-
-        st = d.get("state")
-        fname = d.get("printFileName") or ""
-        progress = d.get("printProgress") or d.get("dProgress")
-
-        # Ensure progress is a number before comparing
-        try:
-            progress = int(progress) if progress is not None else -1
-        except (ValueError, TypeError):
-            progress = -1
-
-        if fname:
-            if progress >= 100:
-                return "completed"
-            # THIS IS THE LINE THAT WAS BROKEN
-            if st == 5 or self.coordinator.paused_flag():
-                return "paused"
-            if st == 4:
-                return "stopped"
-            if st == 1:
-                return "printing"
-            if st == 0:
-                return "processing"
-
-        return "idle"
+        # The mapping lives in utils.derive_print_state so that services gating on
+        # "is the printer busy" use the same definition the dashboard shows.
+        return _derive_print_state(
+            self.coordinator.data or {},
+            power_off=self.coordinator.power_is_off(),
+            available=self.coordinator.available,
+            paused_flag=self.coordinator.paused_flag(),
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -632,8 +599,18 @@ class KCFSBoxSensor(KEntity, SensorEntity):
         return None
 
 
-def _cfs_slot_attributes(data: dict[str, Any]) -> dict[str, Any]:
-    """Build the shared attribute set for a CFS slot (box slot or external)."""
+def _cfs_slot_attributes(
+    data: dict[str, Any],
+    box_id: int | None = None,
+    slot_id: int | None = None,
+) -> dict[str, Any]:
+    """Build the shared attribute set for a CFS slot (box slot or external).
+
+    ``box_id``/``slot_id`` are the ids the *printer* uses, which the card needs to
+    address the right slot when writing material back via ``set_cfs_material``.
+    They are passed in because the raw slot dict only carries its own ``id``, not
+    the id of the box it belongs to.
+    """
     raw_color = data.get("color")
     return {
         "vendor": data.get("vendor"),
@@ -654,6 +631,13 @@ def _cfs_slot_attributes(data: dict[str, Any]) -> dict[str, Any]:
         ),
         "state": data.get("state"),
         "selected": data.get("selected"),
+        # Addressing + editable material settings, so the CFS card can target the
+        # right slot and prefill its edit dialog with the printer's current values.
+        "box_id": box_id,
+        "slot_id": slot_id,
+        "min_temp": _safe_float(data.get("minTemp")),
+        "max_temp": _safe_float(data.get("maxTemp")),
+        "pressure": _safe_float(data.get("pressure")),
     }
 
 
@@ -711,7 +695,7 @@ class KCFSSlotSensor(KEntity, SensorEntity):
         data = self._get_slot_data()
         if not data:
             return {}
-        return _cfs_slot_attributes(data)
+        return _cfs_slot_attributes(data, self._box_id, self._slot_id)
 
 
 class KCFSExtSlotSensor(KEntity, SensorEntity):
@@ -773,7 +757,10 @@ class KCFSExtSlotSensor(KEntity, SensorEntity):
         data = self._get_slot_data()
         if not data:
             return {}
-        return _cfs_slot_attributes(data)
+        # The external box's id is whatever the printer reports for the type==1
+        # box, so read it back rather than assuming 0.
+        box = self._get_external_box() or {}
+        return _cfs_slot_attributes(data, box.get("id"), data.get("id", self._slot_id))
 
 
 class KActiveFilamentSensor(KEntity, SensorEntity):

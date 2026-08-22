@@ -194,6 +194,56 @@
           "description": "The printer(s) to request info from. If omitted, all connected printers will be queried."
         }
       }
+    },
+    "set_cfs_material": {
+      "name": "Set CFS Material",
+      "description": "Write filament settings to one CFS slot. Only the fields you supply are changed; anything left empty keeps the value the printer already has.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The printer to write to."
+        },
+        "box_id": {
+          "name": "Box ID",
+          "description": "The box id as the printer reports it. See the box_id attribute on the slot's sensor; it is usually 1 for the first CFS unit."
+        },
+        "slot_id": {
+          "name": "Slot ID",
+          "description": "Slot number within the box, starting at 0."
+        },
+        "type": {
+          "name": "Material Type",
+          "description": "Filament type, for example PLA, PETG, ABS or TPU."
+        },
+        "name": {
+          "name": "Material Name",
+          "description": "Product name of the filament, for example Hyper PLA."
+        },
+        "vendor": {
+          "name": "Vendor",
+          "description": "Manufacturer or brand name."
+        },
+        "color": {
+          "name": "Color",
+          "description": "Colour as six hex digits, for example #06c84f. Multi-colour spools cannot be written and must be left empty."
+        },
+        "min_temp": {
+          "name": "Minimum Temperature",
+          "description": "Lowest printing temperature, in °C."
+        },
+        "max_temp": {
+          "name": "Maximum Temperature",
+          "description": "Highest printing temperature, in °C. Must not be below the minimum."
+        },
+        "pressure": {
+          "name": "Pressure Advance",
+          "description": "Pressure advance value, between 0 and 1."
+        },
+        "rfid": {
+          "name": "RFID",
+          "description": "The printer's material id. Leave empty to keep the existing tag association; sending a blank value would erase it."
+        }
+      }
     }
   }
 }

@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.9.9] - 2026-08-22
+> [List of issues (0.9.9)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.9)
+
+Salvages the CFS material-editing work from [#75](https://github.com/3dg1luk43/ha_creality_ws/pull/75) (thanks **@buzato**), brought up to current code and reworked. The branch descends from his commits, so his authorship is intact.
+
+### Added
+- **Edit filament from the CFS card.** Each slot tile gains an edit button opening a dialog for material type, name, vendor, colour, temperature range and pressure advance. Saving writes to the printer and then asks it to re-report, so the tile only changes once the write has actually landed.
+  - The dialog states which **box and slot** it will write to, and says so explicitly when it had to infer the target from the card layout rather than read it from the printer.
+  - Editing is disabled while the printer is **busy**, and for cards whose entities span **more than one printer** (there would be no way to tell which machine to write to).
+  - **Multi-colour spools** show their colour read-only. The printer reports two values for them and a single colour cannot represent them, so the rest of the fields save and the colour is left alone.
+  - **Colour presets**: Creality's standard palette plus your own, kept in your browser rather than in the dashboard config.
+- **`ha_creality_ws.set_cfs_material` service** for writing filament metadata to a slot, usable from automations as well as the card. Only the fields you supply are changed — the printer merges into the slot it already has, so leaving `rfid` empty preserves the existing tag association.
+- **New CFS slot attributes**: `box_id`, `slot_id`, `min_temp`, `max_temp` and `pressure`. The first two are how the service addresses a slot; the rest are what the edit dialog prefills from. Not every printer reports the temperatures on every slot, so treat `null` as "unknown" rather than zero.
+- **Third card display mode, `box`**: a photo of the CFS unit with a spool overlay per bay. Requires a mapped four-slot box and falls back to the full view otherwise, since the overlay geometry is tied to that image.
+
+### Changed
+- **The card's `compact_view` option became `view_mode`** (`full` | `compact` | `box`). Existing dashboards migrate automatically on load, and the old key is dropped the next time you edit the card. No action needed.
+- **The card only re-renders when something it displays has actually changed**, instead of on every state update.
+- **Printer status is derived in one place** now, shared by the status sensor and the service's "is it safe to write" check, so the card and the service cannot disagree about whether the printer is busy.
+- **The bundled CFS unit image is 32 kB instead of 509 kB** (WebP). The whole `www/` directory had been 143 kB, so as a PNG this one decorative asset would have made every install over four times larger.
+
+### Notes for anyone with CFS hardware
+Creality does not document the `modifyMaterial` command. The payload shape comes from @buzato's testing against a real CFS, and is verified here against the bundled printer simulator — but two details are still unconfirmed: the printer *streams* colours as seven hex characters yet appears to accept six on write, and the `rfid` field name is inferred from telemetry rather than from a confirmed dump. Every write logs both the outgoing payload and what the printer reports back afterwards. **If a material edit does something unexpected, please open an issue with that part of your debug log** — that is what will settle these.
+
 ## [0.9.8] - 2026-08-22
 > [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)
 
