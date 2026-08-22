@@ -419,6 +419,14 @@ class KCFSCard extends HTMLElement {
     // Translated strings are not part of the snapshot, so when they arrive the
     // gate has to be reset and the render forced.
     _requestI18n(this, hass, () => { this._snapshot = null; this._update(); });
+    // HA does not guarantee hass.entities is populated on the first assignment.
+    // A resolution that failed against an empty registry caches null, and null
+    // is not undefined, so nothing would ever retry it. Reopen the question once
+    // the registry actually knows about one of our entities.
+    if (this._deviceId === null && !this._deviceIdPending && this._registryHasEntities()) {
+      this._deviceId = undefined;
+      this._deviceIdError = null;
+    }
     // _isPrinterBusy() is a sync cache read, so the device id has to be resolved
     // out of band once; re-render when it lands so the lock icon settles.
     if (this._deviceId === undefined && !this._deviceIdPending) {
@@ -1303,6 +1311,11 @@ class KCFSCard extends HTMLElement {
       this._cfg.view_mode,
       this._cfg.show_type_in_mini,
       this._isPrinterBusy(),
+      // _renderEditButton reads this to pick the lock icon, the tooltip and the
+      // disabled attribute. Device resolution finishes asynchronously, so
+      // without it here the .then() below found an unchanged fingerprint and the
+      // buttons stayed enabled against a card that cannot resolve its printer.
+      this._deviceIdError,
       this._selectedCFS,
       data,
     ]);
@@ -1405,6 +1418,7 @@ class KCFSCard extends HTMLElement {
         <div class="bays">${bays}</div>
       </div>
       ${env.length ? `<div class="env-info">${env.join(' <span style="color: var(--divider-color)">•</span> ')}</div>` : ''}
+      ${this._renderExternalCompact(external)}
     `;
   }
 
@@ -1511,29 +1525,37 @@ class KCFSCard extends HTMLElement {
       `;
     }
 
-    // External section
-    let externalSection = '';
-    if (external) {
-      const safeType = external.type && !["unknown", "unavailable", "—", "-"].includes(String(external.type).toLowerCase()) ? external.type : "—";
-      const safeName = external.name && !["unknown", "unavailable", "—", "-"].includes(String(external.name).toLowerCase()) ? external.name : "—";
-      const hasFilament = safeType !== "—" && safeName !== "—";
-      const percentTextDisplay = hasFilament ? (external.percentText || '—') : '—';
-      const displayName = hasFilament ? `${safeName} ${safeType}` : '—';
-      externalSection = `
-        <div class="external-section">
-          <div class="external-compact" data-eid="${esc(external.entity_id)}">
-            ${this._renderEditButton(external)}
-            <div class="ext-dot">${esc(this._t("ext_label"))}</div>
-            <div class="ext-compact-info">
-              <div>${esc(displayName)}</div>
-              <div>${esc(percentTextDisplay)}</div>
-            </div>
+    return `${cfsRows}${this._renderExternalCompact(external)}`;
+  }
+
+  /**
+   * The external spool as a compact row, or "" when none is configured.
+   *
+   * Shared by compact and box mode: box mode used to return the box view alone,
+   * so a configured external spool -- and its edit button -- vanished from the
+   * card whenever the selected unit had four populated slots.
+   * @param {object|null} external
+   * @returns {string}
+   */
+  _renderExternalCompact(external) {
+    if (!external) return '';
+    const safeType = external.type && !["unknown", "unavailable", "—", "-"].includes(String(external.type).toLowerCase()) ? external.type : "—";
+    const safeName = external.name && !["unknown", "unavailable", "—", "-"].includes(String(external.name).toLowerCase()) ? external.name : "—";
+    const hasFilament = safeType !== "—" && safeName !== "—";
+    const percentTextDisplay = hasFilament ? (external.percentText || '—') : '—';
+    const displayName = hasFilament ? `${safeName} ${safeType}` : '—';
+    return `
+      <div class="external-section">
+        <div class="external-compact" data-eid="${esc(external.entity_id)}">
+          ${this._renderEditButton(external)}
+          <div class="ext-dot">${esc(this._t("ext_label"))}</div>
+          <div class="ext-compact-info">
+            <div>${esc(displayName)}</div>
+            <div>${esc(percentTextDisplay)}</div>
           </div>
         </div>
-      `;
-    }
-
-    return `${cfsRows}${externalSection}`;
+      </div>
+    `;
   }
 
   _renderCFSRow(box) {
@@ -1707,19 +1729,23 @@ class KCFSCard extends HTMLElement {
     // hass.entities predates HA 2023.4; fall back to asking per entity. Every
     // entity is asked, not just up to the first hit: stopping early resolved a
     // card spanning two printers to whichever answered first, which is exactly
-    // the fail-closed behaviour this method exists to provide.
+    // the fail-closed behaviour this method exists to provide. Asked in parallel
+    // over the distinct ids -- a fully configured card supplies up to 51, and
+    // serial round trips delayed every edit button by all of them.
     if (devices.size === 0) {
-      for (const eid of entityIds) {
+      const answers = await Promise.all([...new Set(entityIds)].map(async (eid) => {
         try {
           const entry = await this._hass.callWS({
             type: "config/entity_registry/get",
             entity_id: eid,
           });
-          if (entry?.device_id) devices.add(entry.device_id);
+          return entry?.device_id || null;
         } catch (_) {
-          // Entity gone, or the user is not an admin. Try the next one.
+          // Entity gone, or the user is not an admin. Ignore just this one.
+          return null;
         }
-      }
+      }));
+      answers.forEach((deviceId) => { if (deviceId) devices.add(deviceId); });
     }
 
     // setConfig ran while we were awaiting callWS: this answer is for the
@@ -1735,6 +1761,13 @@ class KCFSCard extends HTMLElement {
     this._deviceIdError = null;
     [this._deviceId] = [...devices];
     return this._deviceId;
+  }
+
+  /** Whether hass.entities knows about any entity this card is configured with. */
+  _registryHasEntities() {
+    const registry = this._hass?.entities;
+    if (!registry) return false;
+    return this._configuredEntityIds().some((eid) => registry[eid]);
   }
 
   /** Every non-empty entity picker value in the card's config. */
@@ -1972,12 +2005,17 @@ class KCFSCard extends HTMLElement {
 
     const colourInputs = document.createElement("div");
     colourInputs.className = "colour-inputs";
+    // _sanitizeColor preserves a three-digit colour, but input[type=color]
+    // rejects #abc (falling back to #000000, so the swatch stops matching the
+    // text field) and _saveMaterial demands six digits -- it would refuse a
+    // colour the printer itself reported.
+    const prefill = toSixDigitHex(slot.color) || "";
     const picker = document.createElement("input");
     picker.type = "color";
-    picker.value = slot.color || "#cccccc";
+    picker.value = prefill || "#cccccc";
     const hex = document.createElement("input");
     hex.type = "text";
-    hex.value = slot.isMultiColour ? "" : (slot.color || "");
+    hex.value = slot.isMultiColour ? "" : prefill;
     hex.placeholder = "#rrggbb";
 
     if (slot.isMultiColour) {

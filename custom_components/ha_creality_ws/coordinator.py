@@ -413,7 +413,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._notify_primed = True
         self._last_filename = d.get("printFileName")
 
-        progress = d.get("printProgress") or d.get("dProgress")
+        # Same explicit None check as _check_notifications: `or` would baseline a
+        # genuine 0% frame off a stale dProgress of 100 and mark the job already
+        # complete. The re-arm clears that a frame later, but the two paths must
+        # not disagree about the same telemetry.
+        progress = d.get("printProgress")
+        if progress is None:
+            progress = d.get("dProgress")
         try:
             prog_val = int(progress) if progress is not None else 0
         except (ValueError, TypeError):

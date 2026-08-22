@@ -6,8 +6,9 @@ to the printer. Home Assistant is not installed, so the modules it imports are
 stubbed narrowly -- named attributes rather than blanket MagicMocks, so a rename
 in the integration shows up as a failure here instead of silently passing.
 
-Skipped when voluptuous is unavailable (the venv and CI both lack it): a stubbed
-schema would make the validation assertions meaningless.
+Skipped when voluptuous is unavailable: a stubbed schema would make the
+validation assertions meaningless. CI installs it (see .github/workflows/
+tests.yml), so in practice this only skips in a local venv without it.
 """
 
 import asyncio
@@ -391,6 +392,28 @@ def test_a_busy_second_printer_blocks_before_the_first_is_written(integration):
             "device_id": ["d1", "d2"], "box_id": 1, "slot_id": 0, "type": "PLA",
         })
     assert idle.client.sent == [], "the idle printer must not have been written"
+
+
+@requires_voluptuous
+def test_an_empty_device_list_is_refused_not_treated_as_all_printers(integration):
+    """`device_id: []` passes the schema, and a falsy target means "everything".
+
+    That is what request_cfs_info wants, but for a write service it would push
+    this payload to every configured printer.
+    """
+    _module, _notifications, error = integration
+    a = FakeCoordinator("printer-a", IDLE)
+    b = FakeCoordinator("printer-b", IDLE)
+    hass, services, _ = _make_hass(
+        integration, {"e1": a, "e2": b}, {"d1": _device("e1"), "d2": _device("e2")}
+    )
+    _register(integration, hass)
+    with pytest.raises(error):
+        _call_service(integration, hass, services, {
+            "device_id": [], "box_id": 1, "slot_id": 0, "type": "PLA",
+        })
+    assert a.client.sent == [], "no printer may be written"
+    assert b.client.sent == []
 
 
 @requires_voluptuous

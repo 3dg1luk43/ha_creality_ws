@@ -156,6 +156,44 @@ test("busy state is part of the fingerprint", async () => {
   assert.ok(renders > baseline, "a busy transition must re-render");
 });
 
+test("_deviceIdError is part of the fingerprint", async () => {
+  // _renderEditButton reads _deviceIdError to pick the lock icon, the tooltip
+  // and the disabled attribute. Resolution finishes after the first render, so
+  // if the fingerprint ignores it the .then() sees no change, skips the
+  // re-render, and the buttons stay enabled on a card that cannot resolve its
+  // printer -- every click then refused by the guard in _showEditDialog.
+  const card = cardFor(A_SLOT, statesForBoth(), twoPrinterRegistry());
+  await card._resolveDeviceId();
+  card.hass = makeHass(statesForBoth(), { entities: twoPrinterRegistry() });
+
+  let renders = 0;
+  const inner = card._update.bind(card);
+  card._update = (d) => { renders += 1; return inner(d); };
+
+  // Settle the gate, then change _deviceIdError and nothing else.
+  card._updateIfChanged();
+  const baseline = renders;
+  card._deviceIdError = "toast_multiple_devices";
+  card._updateIfChanged();
+  assert.ok(
+    renders > baseline,
+    "a device-resolution error must invalidate the render gate on its own",
+  );
+});
+
+test("a card spanning two printers renders its edit button locked", async () => {
+  const { KCFSCard } = loadCard();
+  const card = new KCFSCard();
+  card.setConfig({ box0_slot0_filament: A_SLOT, box1_slot0_filament: B_SLOT });
+  card.hass = makeHass(statesForBoth(), { entities: twoPrinterRegistry() });
+  await card._resolveDeviceId();
+
+  assert.equal(card._deviceIdError, "toast_multiple_devices", "the card fails closed");
+  const button = card._renderEditButton(card._findSlot(A_SLOT));
+  assert.match(button, /\sdisabled>/, "the button is disabled");
+  assert.match(button, /mdi:lock/, "and shows the lock");
+});
+
 test("a resolve in flight during setConfig cannot write the old device id", async () => {
   // The pre-2023.4 fallback awaits callWS, and entityIds was captured before the
   // await. Reconfiguring the card mid-flight would otherwise cache printer A's

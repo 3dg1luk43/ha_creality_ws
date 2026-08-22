@@ -125,6 +125,34 @@ test("deleting a preset leaves the standard palette intact", async () => {
   assert.equal(swatchesOf(presetsSection(card)).length, 12);
 });
 
+test("right-clicking a custom swatch deletes it", async () => {
+  // remove() is only reachable through the contextmenu listener, which also
+  // calls preventDefault, gates its toast on the return value and rebuilds the
+  // row. Calling remove() directly exercised none of that.
+  const { card } = await setup();
+  const section = presetsSection(card);
+  card._presets.save("Teal", "#008080");
+  const swatches = swatchesOf(presetsSection(card));
+  assert.equal(swatches.length, 13);
+  const custom = swatches.find((sw) => sw.title === "Teal");
+  assert.ok(custom, "the custom swatch is rendered");
+
+  let prevented = false;
+  custom.fire("contextmenu", { preventDefault() { prevented = true; } });
+  assert.ok(prevented, "the browser context menu must be suppressed");
+  assert.ok(!("Teal" in card._presets.presets), "the preset is gone");
+  assert.equal(swatchesOf(presetsSection(card)).length, 12, "the row rebuilt");
+  assert.ok(section, "the section under test existed");
+});
+
+test("right-clicking a standard swatch does not delete it", async () => {
+  const { card } = await setup();
+  const swatches = swatchesOf(presetsSection(card));
+  const standard = swatches.find((sw) => sw.title === "Green");
+  standard.fire("contextmenu", { preventDefault() {} });
+  assert.equal(swatchesOf(presetsSection(card)).length, 12);
+});
+
 test("renaming moves the colour", async () => {
   const { card } = await setup();
   presetsSection(card);

@@ -112,7 +112,29 @@ test("tolerates slots with no temps or pressure", () => {
 // Render gate
 // --------------------------------------------------------------------------- //
 
-/** Count renders by watching the content element's innerHTML writes. */
+/** A registry that resolves this card's slot to a single device. */
+const RESOLVABLE_REGISTRY = {
+  "sensor.printer_cfs_box_1_slot_0_filament": {
+    device_id: "dev_a", platform: "ha_creality_ws",
+  },
+  "sensor.printer_cfs_box_1_slot_0_color": {
+    device_id: "dev_a", platform: "ha_creality_ws",
+  },
+  "sensor.printer_cfs_box_1_slot_0_percent": {
+    device_id: "dev_a", platform: "ha_creality_ws",
+  },
+};
+
+/** makeHass with a resolvable registry, so device resolution cannot add renders. */
+const gateHass = (states) => makeHass(states, { entities: RESOLVABLE_REGISTRY });
+
+/**
+ * Count renders by watching the content element's innerHTML writes.
+ *
+ * Callers pair this with `gateHass`: _deviceIdError is part of the fingerprint,
+ * so a card whose device never resolves would land an extra asynchronous render
+ * and the counts below would stop isolating the state change under test.
+ */
 function countingCard(overrides) {
   const card = cardForOneSlot(overrides);
   card._renderCount = 0;
@@ -124,31 +146,31 @@ function countingCard(overrides) {
 test("an unchanged state does not re-render", () => {
   const card = countingCard();
   const states = slotEntities(1, 0, { attributes: FULL_ATTRS });
-  card.hass = makeHass(states);
+  card.hass = gateHass(states);
   assert.equal(card._renderCount, 1);
-  card.hass = makeHass(states);
-  card.hass = makeHass(states);
+  card.hass = gateHass(states);
+  card.hass = gateHass(states);
   assert.equal(card._renderCount, 1, "identical states must not re-render");
 });
 
 test("a changed percent re-renders", () => {
   const card = countingCard();
-  card.hass = makeHass(slotEntities(1, 0, { percent: 80, attributes: FULL_ATTRS }));
+  card.hass = gateHass(slotEntities(1, 0, { percent: 80, attributes: FULL_ATTRS }));
   assert.equal(card._renderCount, 1);
-  card.hass = makeHass(slotEntities(1, 0, { percent: 79, attributes: FULL_ATTRS }));
+  card.hass = gateHass(slotEntities(1, 0, { percent: 79, attributes: FULL_ATTRS }));
   assert.equal(card._renderCount, 2);
 });
 
 test("a changed colour re-renders", () => {
   const card = countingCard();
-  card.hass = makeHass(slotEntities(1, 0, { color: "#ffffff", attributes: FULL_ATTRS }));
-  card.hass = makeHass(slotEntities(1, 0, { color: "#ff0000", attributes: FULL_ATTRS }));
+  card.hass = gateHass(slotEntities(1, 0, { color: "#ffffff", attributes: FULL_ATTRS }));
+  card.hass = gateHass(slotEntities(1, 0, { color: "#ff0000", attributes: FULL_ATTRS }));
   assert.equal(card._renderCount, 2);
 });
 
 test("switching the selected unit re-renders", () => {
   const card = countingCard();
-  card.hass = makeHass(slotEntities(1, 0, { attributes: FULL_ATTRS }));
+  card.hass = gateHass(slotEntities(1, 0, { attributes: FULL_ATTRS }));
   assert.equal(card._renderCount, 1);
   card._selectedCFS = 1;
   card._updateIfChanged();
@@ -160,7 +182,7 @@ test("setConfig clears the snapshot so the card is not left blank", () => {
   // it and the card would show empty after every visual-editor change.
   const card = cardForOneSlot();
   const states = slotEntities(1, 0, { attributes: FULL_ATTRS });
-  card.hass = makeHass(states);
+  card.hass = gateHass(states);
   const before = card._root.getElementById("content").innerHTML;
   assert.ok(before.length > 0, "content rendered initially");
 
@@ -170,7 +192,7 @@ test("setConfig clears the snapshot so the card is not left blank", () => {
     box0_slot0_percent: "sensor.printer_cfs_box_1_slot_0_percent",
   });
   assert.equal(card._snapshot, null, "snapshot must be reset by setConfig");
-  card.hass = makeHass(states);
+  card.hass = gateHass(states);
   assert.ok(
     card._root.getElementById("content").innerHTML.length > 0,
     "content must be repopulated after setConfig",
@@ -181,7 +203,7 @@ test("no data renders the empty-state message, not a crash", () => {
   const { KCFSCard } = loadCard();
   const card = new KCFSCard();
   card.setConfig({});
-  card.hass = makeHass({});
+  card.hass = gateHass({});
   const html = card._root.getElementById("content").innerHTML;
   assert.match(html, /no-data/);
 });

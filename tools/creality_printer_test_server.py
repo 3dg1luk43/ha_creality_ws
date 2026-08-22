@@ -1375,6 +1375,15 @@ class HttpServer:
                 "ffmpeg not found; falling back to aiortc's H.264 encoder, whose "
                 "keyframe interval is too long for Home Assistant's HLS pipeline"
             )
+        elif source == "h264":
+            # An explicit --video-source h264 that silently produced synthetic
+            # frames looked like the passthrough was broken. Say which condition
+            # actually failed.
+            LOGGER.warning(
+                "--video-source h264 not honoured: peer_offers_h264=%s "
+                "prefer_codec=%s (needs h264); using synthetic video",
+                peer_wants_h264, self.prefer_codec,
+            )
 
         if source == "ffmpeg":
             # Probe the binary here: FFmpegVideoTrack.__init__ does not spawn it,

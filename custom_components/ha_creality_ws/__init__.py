@@ -499,7 +499,18 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
         documented by Creality, so the outgoing value and the printer's echo are
         both logged (see ``_log_material_echo``).
         """
-        targets = _coordinators_for_devices(hass, call.data.get("device_id"))
+        # An explicit target is mandatory here. _coordinators_for_devices reads a
+        # falsy value as "every printer", which request_cfs_info wants but a write
+        # service must not do: `device_id: []` passes the schema and would
+        # otherwise write this payload to every configured printer.
+        requested = call.data.get("device_id")
+        if not requested:
+            raise ServiceValidationError(
+                "set_cfs_material requires a device_id; refusing to write to "
+                "every configured printer."
+            )
+
+        targets = _coordinators_for_devices(hass, requested)
         if not targets:
             raise ServiceValidationError(
                 "No Creality printer matched the selected device."

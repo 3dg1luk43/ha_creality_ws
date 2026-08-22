@@ -214,6 +214,22 @@ def test_a_genuine_zero_percent_frame_re_arms_completion(monkeypatch):
     assert sent == ["Print 'job.gcode' completed successfully!"]
 
 
+def test_priming_reads_progress_the_same_way_as_the_check(monkeypatch):
+    """Both paths must agree: `or` baselined a real 0% off a stale dProgress."""
+    coord, sent = _coordinator(monkeypatch)
+    coord.data = {"printFileName": "job.gcode", "printProgress": 0, "dProgress": 100}
+
+    _run(coord._check_notifications({}))  # this frame is the baseline
+    assert coord._notify_primed is True
+    assert coord._notified_completed is False, (
+        "a 0% frame must not baseline as already complete"
+    )
+
+    coord.data = {"printFileName": "job.gcode", "printProgress": 100, "dProgress": 100}
+    _run(coord._check_notifications({}))
+    assert sent == ["Print 'job.gcode' completed successfully!"]
+
+
 def test_dprogress_is_still_used_when_printprogress_is_absent(monkeypatch):
     """The fallback itself must survive: only a missing value triggers it."""
     coord, sent = _coordinator(monkeypatch)

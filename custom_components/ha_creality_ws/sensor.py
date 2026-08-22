@@ -910,7 +910,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             async_add_entities(new_ents)
 
     # Dynamic CFS entity handler
-    def _on_new_entities():
+    def _on_new_entities() -> None:
         """Handle signal for new entities (e.g. late CFS discovery)."""
         _LOGGER.debug("Dynamic entity signal received, checking for new CFS entities...")
         new_ents = add_cfs_entities()

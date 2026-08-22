@@ -13,8 +13,8 @@ const test = (name, fn) => tests.push([name, fn]);
 
 const ATTRS = (slot) => ({ type: "PLA", vendor: "Creality", box_id: 1, slot_id: slot });
 
-/** A card in box mode with `count` populated slots. */
-function boxCard(count) {
+/** A card in box mode with `count` populated slots, optionally an external spool. */
+function boxCard(count, { external = false } = {}) {
   const { KCFSCard } = loadCard();
   const card = new KCFSCard();
   const cfg = { view_mode: "box" };
@@ -24,6 +24,19 @@ function boxCard(count) {
     cfg[`box0_slot${s}_color`] = `sensor.printer_cfs_box_1_slot_${s}_color`;
     cfg[`box0_slot${s}_percent`] = `sensor.printer_cfs_box_1_slot_${s}_percent`;
     Object.assign(states, slotEntities(1, s, { attributes: ATTRS(s) }));
+  }
+  if (external) {
+    cfg.external_filament = "sensor.printer_cfs_external_filament";
+    cfg.external_color = "sensor.printer_cfs_external_color";
+    cfg.external_percent = "sensor.printer_cfs_external_percent";
+    states["sensor.printer_cfs_external_filament"] = {
+      state: "Creality Hyper PETG",
+      attributes: { type: "PETG", vendor: "Creality", name: "Hyper PETG" },
+    };
+    states["sensor.printer_cfs_external_color"] = { state: "#00ff00", attributes: {} };
+    states["sensor.printer_cfs_external_percent"] = {
+      state: "55", attributes: { unit_of_measurement: "%" },
+    };
   }
   card.setConfig(cfg);
   card.hass = makeHass(states);
@@ -72,6 +85,20 @@ test("box mode maps to the box-mode card class", () => {
 
 test("bays are editable", () => {
   assert.match(html(boxCard(4)), /edit-btn-mini/);
+});
+
+test("box mode keeps a configured external spool", () => {
+  // A four-slot box takes the box-view path, which does not fall back to the
+  // normal renderer -- so the external spool and its edit button used to vanish
+  // from the card entirely.
+  const out = html(boxCard(4, { external: true }));
+  assert.match(out, /class="box-view"/, "still the box view");
+  assert.match(out, /class="external-section"/, "the external spool must survive");
+  assert.match(out, /Hyper PETG/);
+});
+
+test("box mode without an external spool renders no external section", () => {
+  assert.ok(!/class="external-section"/.test(html(boxCard(4))));
 });
 
 test("no hardcoded white separators", () => {
