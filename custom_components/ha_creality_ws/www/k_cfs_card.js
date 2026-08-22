@@ -831,10 +831,14 @@ class KCFSCard extends HTMLElement {
          tied to cfs_box.webp, which is why the mode is gated on a 4-slot box. */
       .bays {
         position: absolute;
-        top: 6%;
-        left: 6.5%;
-        width: 87%;
-        height: 52%;
+        /* Measured against cfs_box.webp: the enclosure interior spans 7.5%-92.5%
+           horizontally with its dividers at 29/50/71%, so four equal columns
+           land one per bay. The height stops at the glass floor so a spool does
+           not spill onto the drawer below. */
+        top: 7%;
+        left: 7.5%;
+        width: 85%;
+        height: 45%;
         display: grid;
         grid-template-columns: repeat(4, 1fr);
       }
@@ -851,7 +855,7 @@ class KCFSCard extends HTMLElement {
         border-left: 1px solid var(--divider-color);
       }
       .bay-spool {
-        width: 58%;
+        width: 50%;
         aspect-ratio: 1;
         border-radius: 50%;
         background: var(--spool-color);
@@ -1161,6 +1165,10 @@ class KCFSCard extends HTMLElement {
           printerSlotId: target.slotId,
           targetIsGuessed: target.guessed,
           vendor: filamentObj?.attributes?.vendor,
+          // `name` above is the sensor *state*, i.e. the composed "vendor name"
+          // label. Editing has to write back the bare material name, or the
+          // vendor ends up duplicated inside it.
+          materialName: filamentObj?.attributes?.name,
           rfid: filamentObj?.attributes?.rfid,
           minTemp: filamentObj?.attributes?.min_temp,
           maxTemp: filamentObj?.attributes?.max_temp,
@@ -1218,6 +1226,7 @@ class KCFSCard extends HTMLElement {
         printerSlotId: filamentObj?.attributes?.slot_id ?? 0,
         targetIsGuessed: filamentObj?.attributes?.box_id === undefined,
         vendor: filamentObj?.attributes?.vendor,
+        materialName: filamentObj?.attributes?.name,
         rfid: filamentObj?.attributes?.rfid,
         minTemp: filamentObj?.attributes?.min_temp,
         maxTemp: filamentObj?.attributes?.max_temp,
@@ -1853,7 +1862,7 @@ class KCFSCard extends HTMLElement {
 
     const values = {
       type: slot.type && slot.type !== "—" ? slot.type : "",
-      name: slot.name && slot.name !== "—" ? slot.name : "",
+      name: slot.materialName || (slot.name && slot.name !== "—" ? slot.name : ""),
       vendor: slot.vendor || "",
       min_temp: slot.minTemp ?? undefined,
       max_temp: slot.maxTemp ?? undefined,
@@ -1989,7 +1998,6 @@ class KCFSCard extends HTMLElement {
       // Scoped to this row, not the document: PR #75 used a document-wide query
       // that also reset swatches in a second card's open dialog.
       swatches.innerHTML = "";
-      swatches.children.length = 0;
 
       for (const [name, colour] of this._presets.entries()) {
         const swatch = document.createElement("button");

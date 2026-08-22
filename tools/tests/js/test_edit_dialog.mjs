@@ -233,6 +233,34 @@ test("a confirmed target does not warn", async () => {
   assert.ok(!form.children.some((c) => c.className === "edit-warning"));
 });
 
+test("the name field prefills the bare material name, not the display label", async () => {
+  // The filament sensor's *state* is "Creality Hyper PLA" (vendor + name). Writing
+  // that back into `name` duplicates the vendor inside it -- the field-duplication
+  // problem PR #75 listed as unresolved.
+  const { card } = await setup({
+    attributes: { ...ATTRS, name: "Hyper PLA", vendor: "Creality" },
+  });
+  const slot = card._findSlot(SLOT);
+  assert.equal(slot.name, "Creality Hyper PLA", "display label is the composed one");
+  assert.equal(slot.materialName, "Hyper PLA", "raw name is kept separately");
+
+  const form = card._renderEditForm(slot, () => {});
+  const haForm = form.children.find((c) => c.tagName === "HA-FORM");
+  assert.equal(haForm.data.name, "Hyper PLA", "the dialog prefills the bare name");
+  assert.equal(haForm.data.vendor, "Creality");
+});
+
+test("a save round-trip does not accumulate the vendor in the name", async () => {
+  const { card, calls } = await setup({
+    attributes: { ...ATTRS, name: "Hyper PLA", vendor: "Creality" },
+  });
+  const slot = card._findSlot(SLOT);
+  const form = card._renderEditForm(slot, () => {});
+  const haForm = form.children.find((c) => c.tagName === "HA-FORM");
+  await card._saveMaterial(slot, { ...haForm.data, color: "#00ff00" });
+  assert.equal(saved(calls).name, "Hyper PLA");
+});
+
 let failed = 0;
 for (const [name, fn] of tests) {
   try { await fn(); console.log(`ok   ${name}`); }

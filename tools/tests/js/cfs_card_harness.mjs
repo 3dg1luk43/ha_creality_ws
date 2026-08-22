@@ -25,7 +25,12 @@ class FakeElement {
     this.style = {};
     this._html = "";
   }
-  set innerHTML(value) { this._html = String(value); }
+  set innerHTML(value) {
+    this._html = String(value);
+    // Assigning innerHTML replaces the subtree, so drop the children too --
+    // without this the shim diverges from the DOM and hides real bugs.
+    this.children.length = 0;
+  }
   get innerHTML() { return this._html; }
   appendChild(child) {
     child._parent = this;
