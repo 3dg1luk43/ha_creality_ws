@@ -27,23 +27,77 @@ requires_voluptuous = pytest.mark.skipif(
 )
 
 
-def _stub(name: str, **attrs) -> types.ModuleType:
-    module = sys.modules.get(name) or types.ModuleType(name)
+_ABSENT = object()
+
+
+class _ModuleState:
+    """Records every sys.modules and attribute change so it can be undone.
+
+    The stubs below are process-wide. Without a restore, whichever test module
+    pytest happens to collect after this one inherits them, which makes the whole
+    suite order-dependent.
+    """
+
+    def __init__(self) -> None:
+        self._modules: dict[str, object] = {}
+        self._attrs: list[tuple[object, str, object]] = []
+
+    def note_module(self, name: str) -> None:
+        self._modules.setdefault(name, sys.modules.get(name, _ABSENT))
+
+    def note_attr(self, obj: object, attr: str) -> None:
+        self._attrs.append((obj, attr, getattr(obj, attr, _ABSENT)))
+
+    def set_attr(self, obj: object, attr: str, value: object) -> None:
+        self.note_attr(obj, attr)
+        setattr(obj, attr, value)
+
+    def restore(self) -> None:
+        for obj, attr, old in reversed(self._attrs):
+            if old is _ABSENT:
+                try:
+                    delattr(obj, attr)
+                except AttributeError:
+                    pass
+            else:
+                setattr(obj, attr, old)
+        for name, old in self._modules.items():
+            if old is _ABSENT:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = old
+
+
+def _stub(state: "_ModuleState", name: str, **attrs) -> types.ModuleType:
+    state.note_module(name)
+    existing = sys.modules.get(name)
+    module = existing or types.ModuleType(name)
     for key, value in attrs.items():
-        setattr(module, key, value)
+        # An existing module is mutated in place, so its attributes have to be
+        # remembered individually; a fresh one is dropped wholesale.
+        if existing is not None:
+            state.set_attr(module, key, value)
+        else:
+            setattr(module, key, value)
     sys.modules[name] = module
     return module
 
 
 def _load_integration():
-    """Execute custom_components/ha_creality_ws/__init__.py under stubs."""
+    """Execute custom_components/ha_creality_ws/__init__.py under stubs.
+
+    Returns the loaded module, the notification sink and the error type, plus a
+    callable that undoes every global change made here.
+    """
     import homeassistant.core as core  # provided by conftest
+
+    state = _ModuleState()
 
     class ServiceCall:
         def __init__(self, data=None):
             self.data = data or {}
 
-    core.ServiceCall = ServiceCall
+    state.set_attr(core, "ServiceCall", ServiceCall)
 
     class HomeAssistantError(Exception):
         pass
@@ -51,30 +105,34 @@ def _load_integration():
     class ServiceValidationError(HomeAssistantError):
         pass
 
-    _stub("homeassistant.config_entries", ConfigEntry=object, OperationNotAllowed=Exception)
+    _stub(state, "homeassistant.config_entries", ConfigEntry=object, OperationNotAllowed=Exception)
     _stub(
+        state,
         "homeassistant.exceptions",
         ConfigEntryNotReady=Exception,
         HomeAssistantError=HomeAssistantError,
         ServiceValidationError=ServiceValidationError,
     )
     _stub(
+        state,
         "homeassistant.helpers.event",
         async_track_time_interval=lambda *a, **k: None,
         async_track_state_change_event=lambda *a, **k: None,
     )
-    _stub("homeassistant.helpers.typing", ConfigType=dict)
+    _stub(state, "homeassistant.helpers.typing", ConfigType=dict)
     # homeassistant.helpers is a plain module in conftest, so submodule imports
     # need a __path__ before they will resolve at all.
     helpers_mod = sys.modules["homeassistant.helpers"]
     if not hasattr(helpers_mod, "__path__"):
-        helpers_mod.__path__ = []
+        state.set_attr(helpers_mod, "__path__", [])
     _stub(
+        state,
         "homeassistant.helpers.dispatcher",
         async_dispatcher_send=lambda *a, **k: None,
         async_dispatcher_connect=lambda *a, **k: None,
     )
     _stub(
+        state,
         "homeassistant.const",
         CONF_HOST="host",
         CONF_PORT="port",
@@ -82,21 +140,21 @@ def _load_integration():
         Platform=MagicMock(),
     )
     # config_validation: only cv.string is used by the schema.
-    _stub("homeassistant.helpers.config_validation", string=str)
-    _stub("homeassistant.helpers.device_registry", async_get=MagicMock())
-    _stub("homeassistant.helpers.entity_registry", async_get=MagicMock())
-    _stub("homeassistant.helpers.aiohttp_client", async_get_clientsession=MagicMock())
+    _stub(state, "homeassistant.helpers.config_validation", string=str)
+    _stub(state, "homeassistant.helpers.device_registry", async_get=MagicMock())
+    _stub(state, "homeassistant.helpers.entity_registry", async_get=MagicMock())
+    _stub(state, "homeassistant.helpers.aiohttp_client", async_get_clientsession=MagicMock())
 
     notifications = []
     _stub(
+        state,
         "homeassistant.components.persistent_notification",
         async_create=lambda hass, **kw: notifications.append(kw),
     )
 
     helpers = sys.modules["homeassistant.helpers"]
-    helpers.config_validation = sys.modules["homeassistant.helpers.config_validation"]
-    helpers.device_registry = sys.modules["homeassistant.helpers.device_registry"]
-    helpers.entity_registry = sys.modules["homeassistant.helpers.entity_registry"]
+    for attr in ("config_validation", "device_registry", "entity_registry"):
+        state.set_attr(helpers, attr, sys.modules[f"homeassistant.helpers.{attr}"])
 
     # Loaded under its real package name: __init__.py uses relative imports
     # (`from .const import ...`), which only resolve if the module is registered
@@ -109,21 +167,25 @@ def _load_integration():
         name, pkg_dir / "__init__.py", submodule_search_locations=[str(pkg_dir)]
     )
     module = importlib.util.module_from_spec(spec)
+    state.note_module(name)
     sys.modules[name] = module
     spec.loader.exec_module(module)
-    return module, notifications, ServiceValidationError
+    return module, notifications, ServiceValidationError, state
 
 
 @pytest.fixture(scope="module")
 def integration():
     if importlib.util.find_spec("voluptuous") is None:
         pytest.skip("voluptuous is not installed")
-    loaded = _load_integration()
+    module, notifications, error, state = _load_integration()
     # The service filters hass.data entries with isinstance(coord, KCoordinator).
     # Point that name at the stand-in rather than building a real coordinator,
     # which would drag in the whole config-entry lifecycle.
-    loaded[0].KCoordinator = FakeCoordinator
-    return loaded
+    state.set_attr(module, "KCoordinator", FakeCoordinator)
+    try:
+        yield module, notifications, error
+    finally:
+        state.restore()
 
 
 class FakeClient:

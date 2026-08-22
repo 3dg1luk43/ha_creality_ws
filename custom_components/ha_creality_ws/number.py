@@ -55,6 +55,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
             has_box_control = True
         if not has_box_control:
             return []
+        # A printer reporting targetBoxTemp has a settable chamber whether or not
+        # it also reports a maximum, and BoxTargetNumber already falls back to
+        # 60 C. Requiring a max here consumed the discovery signal and then left
+        # the control absent for good.
+        if "targetBoxTemp" in coord.data:
+            added.add("box_target")
+            return [BoxTargetNumber(coord)]
         cached_max = entry.data.get(
             "_cached_max_chamber_temp", entry.data.get("_cached_max_box_temp")
         )

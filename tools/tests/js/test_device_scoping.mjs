@@ -192,6 +192,28 @@ test("a resolve in flight during setConfig cannot write the old device id", asyn
   assert.equal(await card._resolveDeviceId(), "dev_b", "and B must still resolve");
 });
 
+test("the legacy fallback rejects a card spanning two printers", async () => {
+  // Stopping at the first device_id resolved a mixed card to whichever entity
+  // answered first, so _saveMaterial wrote filament data to the wrong machine --
+  // the exact defect the hass.entities path was written to avoid.
+  const { KCFSCard } = loadCard();
+  const card = new KCFSCard();
+  card.setConfig({ box0_slot0_filament: A_SLOT, box1_slot0_filament: B_SLOT });
+  const perEntity = { [A_SLOT]: "dev_a", [B_SLOT]: "dev_b" };
+  const asked = [];
+  card.hass = makeHass(statesForBoth(), {
+    entities: {}, // no hass.entities, so the callWS fallback runs
+    callWS: async ({ entity_id }) => {
+      asked.push(entity_id);
+      return { device_id: perEntity[entity_id] ?? null };
+    },
+  });
+
+  assert.equal(await card._resolveDeviceId(), null, "a mixed card must fail closed");
+  assert.equal(card._deviceIdError, "toast_multiple_devices");
+  assert.ok(asked.includes(A_SLOT) && asked.includes(B_SLOT), "every entity is asked");
+});
+
 let failed = 0;
 for (const [name, fn] of tests) {
   try { await fn(); console.log(`ok   ${name}`); }

@@ -136,7 +136,28 @@ def test_the_capability_flag_is_read_inside_the_gate_not_captured():
     )
     # Live telemetry promotes the capability the same way __init__ does when it
     # caches it, so a printer that was off at setup still gets the entity.
-    assert "targetBoxTemp" in gate and "maxBoxTemp" in gate
+    assert "targetBoxTemp" in gate
+    assert "maxBoxTemp" in gate
+
+
+def test_target_box_temp_alone_creates_the_chamber_control():
+    """Promoting the capability then demanding a max made the promotion dead code.
+
+    `BoxTargetNumber` already falls back to 60 C, and the discovery signal fires
+    once -- so returning nothing here left the control permanently absent.
+    """
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "custom_components" / "ha_creality_ws" / "number.py"
+    ).read_text()
+    gate = source.split("def _chamber_entities()", 1)[1].split("\n    ents.extend", 1)[0]
+    # The targetBoxTemp branch must return the entity before the max-temp gate.
+    before_max = gate.split("_cached_max_chamber_temp", 1)[0]
+    assert "BoxTargetNumber(coord)" in before_max, (
+        "targetBoxTemp must create the control without waiting for a maximum"
+    )
 
 
 def test_deferred_entity_adds_are_dropped_after_unload():

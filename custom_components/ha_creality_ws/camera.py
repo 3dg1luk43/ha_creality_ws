@@ -505,7 +505,10 @@ class CrealityWebRTCCamera(_BaseCamera):
         if not self._uses_go2rtc_webrtc_bridge() or not self._stream_name:
             return None
         host, port = self._go2rtc_rtsp_endpoint()
-        return f"rtsp://{host}:{port}/{self._stream_name}"
+        # urlparse().hostname strips the brackets off an IPv6 literal, and
+        # "rtsp://::1:8554/x" is not a parseable URL -- put them back.
+        authority = f"[{host}]" if ":" in host else host
+        return f"rtsp://{authority}:{port}/{self._stream_name}"
 
     async def stream_source(self) -> Optional[str]:
         """Return an RTSP URL that HA's `stream` component can ingest.

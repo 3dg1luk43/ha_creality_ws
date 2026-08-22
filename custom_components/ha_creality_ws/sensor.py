@@ -905,7 +905,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     entry.async_on_unload(_mark_unloaded)
 
-    def _add_if_live(new_ents):
+    def _add_if_live(new_ents: list[SensorEntity]) -> None:
         if platform_live:
             async_add_entities(new_ents)
 

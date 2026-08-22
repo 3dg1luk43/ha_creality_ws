@@ -86,12 +86,26 @@ function esc(value) {
 }
 
 /**
- * Whether a value is a writable hex colour: 3 or 6 digits, `#` optional.
+ * Whether a value is a hex colour: 3 or 6 digits, `#` optional.
  * @param {*} value
  * @returns {boolean}
  */
 function isHexColour(value) {
   return /^#?(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(String(value ?? "").trim());
+}
+
+/**
+ * Expand a hex colour to the six-digit form, or "" if it is not one.
+ *
+ * The service only accepts six digits, so a preset stored as `#abc` would be
+ * selectable and then rejected on save.
+ * @param {*} value
+ * @returns {string}
+ */
+function toSixDigitHex(value) {
+  if (!isHexColour(value)) return "";
+  const hex = String(value).trim().replace(/^#/, "").toLowerCase();
+  return hex.length === 3 ? `#${hex.replace(/./g, (c) => c + c)}` : `#${hex}`;
 }
 
 /**
@@ -132,8 +146,9 @@ class ColourPresetsManager {
     // Validate the input, not the output: _sanitizeColor returns #cccccc both
     // for "unparseable" and for the real grey #cccccc, so comparing against it
     // would refuse to store that colour.
-    if (!key || !isHexColour(colour)) return false;
-    this.presets[key] = KCFSCard._sanitizeColor(colour);
+    const value = toSixDigitHex(colour);
+    if (!key || !value) return false;
+    this.presets[key] = value;
     this._persist();
     return true;
   }
@@ -1689,7 +1704,10 @@ class KCFSCard extends HTMLElement {
       if (deviceId) devices.add(deviceId);
     }
 
-    // hass.entities predates HA 2023.4; fall back to asking per entity.
+    // hass.entities predates HA 2023.4; fall back to asking per entity. Every
+    // entity is asked, not just up to the first hit: stopping early resolved a
+    // card spanning two printers to whichever answered first, which is exactly
+    // the fail-closed behaviour this method exists to provide.
     if (devices.size === 0) {
       for (const eid of entityIds) {
         try {
@@ -1697,10 +1715,7 @@ class KCFSCard extends HTMLElement {
             type: "config/entity_registry/get",
             entity_id: eid,
           });
-          if (entry?.device_id) {
-            devices.add(entry.device_id);
-            break;
-          }
+          if (entry?.device_id) devices.add(entry.device_id);
         } catch (_) {
           // Entity gone, or the user is not an admin. Try the next one.
         }

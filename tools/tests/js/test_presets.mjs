@@ -182,6 +182,18 @@ test("the real grey #cccccc can be saved as a preset", async () => {
   assert.equal(card._presets.save("", "#ff0000"), false);
 });
 
+test("a three-digit preset colour is expanded, not stored short", async () => {
+  // The service only accepts six digits, so a preset stored as #abc would be
+  // selectable from the palette and then rejected on save.
+  const { card } = await setup();
+  presetsSection(card);
+  assert.equal(card._presets.save("Short", "#abc"), true);
+  assert.equal(card._presets.presets.Short, "#aabbcc");
+  card._presets.remove("Short");
+  assert.equal(card._presets.save("Bad", "#ab"), false);
+  assert.equal(card._presets.save("Bad", "#abcd"), false);
+});
+
 test("localStorage is not touched until a dialog opens", async () => {
   // A dashboard with several cards should not all hit storage just to render.
   const { card } = await setup();

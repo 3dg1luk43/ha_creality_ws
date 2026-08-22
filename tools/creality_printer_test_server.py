@@ -1189,7 +1189,15 @@ class HttpServer:
             payload = await request.json()
         except Exception:
             return web.Response(status=400, text="expected a JSON object")
-        box_id = int(payload.get("box_id", 1))
+        # A JSON array or bare string parses fine but has no .get, and a
+        # non-integer box_id raises -- both surfaced as a 500 rather than telling
+        # the caller their payload was wrong.
+        if not isinstance(payload, dict):
+            return web.Response(status=400, text="expected a JSON object")
+        try:
+            box_id = int(payload.get("box_id", 1))
+        except (TypeError, ValueError):
+            return web.Response(status=400, text="box_id must be an integer")
         materials = payload.get("materials")
         if not isinstance(materials, list):
             return web.Response(status=400, text="materials must be a list")
@@ -1369,12 +1377,21 @@ class HttpServer:
             )
 
         if source == "ffmpeg":
-            try:
-                return FFmpegVideoTrack(
-                    self.width, self.height, self.fps, ffmpeg_bin=self.ffmpeg_bin
+            # Probe the binary here: FFmpegVideoTrack.__init__ does not spawn it,
+            # so a missing ffmpeg only failed later inside recv() -- the WebRTC
+            # request succeeded and the track then died instead of falling back.
+            if not shutil.which(self.ffmpeg_bin):
+                LOGGER.warning(
+                    "ffmpeg (%s) not found on PATH; using synthetic video",
+                    self.ffmpeg_bin,
                 )
-            except Exception as exc:
-                LOGGER.warning("FFmpeg not available (%s), using synthetic video", exc)
+            else:
+                try:
+                    return FFmpegVideoTrack(
+                        self.width, self.height, self.fps, ffmpeg_bin=self.ffmpeg_bin
+                    )
+                except Exception as exc:
+                    LOGGER.warning("FFmpeg not available (%s), using synthetic video", exc)
 
         return SyntheticVideoTrack(self.width, self.height, self.fps)
 

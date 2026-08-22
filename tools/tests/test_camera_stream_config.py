@@ -242,6 +242,22 @@ def test_stream_source_uses_go2rtc_default_port_for_external_server():
     assert asyncio.run(run()) == "rtsp://10.0.0.5:8554/creality_k2_1_2_3_4"
 
 
+def test_stream_source_brackets_an_ipv6_go2rtc_host():
+    """urlparse().hostname strips the brackets; rtsp://::1:8554/x is unparseable."""
+    import asyncio
+
+    cam = _camera(go2rtc_url="http://[::1]:11984")
+    cam._go2rtc_server_url = "http://[::1]:11984/"
+    cam._go2rtc_is_ha_managed = False
+
+    async def run():
+        with patch.object(cam, "_ensure_stream_configured", new_callable=AsyncMock):
+            cam._stream_name = "creality_k2_1_2_3_4"
+            return await cam.stream_source()
+
+    assert asyncio.run(run()) == "rtsp://[::1]:8554/creality_k2_1_2_3_4"
+
+
 def test_stream_source_honours_an_explicit_rtsp_port_override():
     import asyncio
 
