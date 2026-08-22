@@ -5,6 +5,7 @@ import json
 from typing import Any, Callable
 from .utils import (
     build_spool_key as _build_spool_key,
+    derive_print_state as _derive_print_state,
     format_filament_label as _format_filament_label,
     normalize_color_hex as _normalize_color_hex,
     parse_position as _parse_position,
@@ -338,48 +339,14 @@ class PrintStatusSensor(KEntity, SensorEntity):
 
     @property
     def native_value(self) -> str | None:
-        # HIGHEST PRIORITY: Check the power switch first.
-        if self.coordinator.power_is_off():
-            return "off"
-
-        # SECOND PRIORITY: Check for a lost WebSocket connection.
-        if not self.coordinator.available:
-            return "unknown"
-
-        # If we get here, the printer is ON and CONNECTED.
-        # Now, determine the operational state.
-        d = self.coordinator.data or {}
-
-        if d.get("err", {}).get("errcode", 0) != 0:
-            return "error"
-
-        if 1 <= d.get("withSelfTest", 0) <= 99:
-            return "self-testing"
-
-        st = d.get("state")
-        fname = d.get("printFileName") or ""
-        progress = d.get("printProgress") or d.get("dProgress")
-
-        # Ensure progress is a number before comparing
-        try:
-            progress = int(progress) if progress is not None else -1
-        except (ValueError, TypeError):
-            progress = -1
-
-        if fname:
-            if progress >= 100:
-                return "completed"
-            # THIS IS THE LINE THAT WAS BROKEN
-            if st == 5 or self.coordinator.paused_flag():
-                return "paused"
-            if st == 4:
-                return "stopped"
-            if st == 1:
-                return "printing"
-            if st == 0:
-                return "processing"
-
-        return "idle"
+        # The mapping lives in utils.derive_print_state so that services gating on
+        # "is the printer busy" use the same definition the dashboard shows.
+        return _derive_print_state(
+            self.coordinator.data or {},
+            power_off=self.coordinator.power_is_off(),
+            available=self.coordinator.available,
+            paused_flag=self.coordinator.paused_flag(),
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

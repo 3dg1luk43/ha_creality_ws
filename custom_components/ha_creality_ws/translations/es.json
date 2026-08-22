@@ -194,6 +194,56 @@
           "description": "La(s) impresora(s) a las que solicitar información. Si se omite, se consultarán todas las impresoras conectadas."
         }
       }
+    },
+    "set_cfs_material": {
+      "name": "Establecer material CFS",
+      "description": "Escribe los ajustes de filamento en una ranura del CFS. Solo se cambian los campos que indiques; lo que dejes vacío conserva el valor que ya tiene la impresora.",
+      "fields": {
+        "device_id": {
+          "name": "Dispositivo",
+          "description": "La impresora en la que escribir."
+        },
+        "box_id": {
+          "name": "ID de caja",
+          "description": "El id de la caja tal como lo indica la impresora. Consulta el atributo box_id del sensor de la ranura; normalmente es 1 para la primera unidad CFS."
+        },
+        "slot_id": {
+          "name": "ID de ranura",
+          "description": "Número de ranura dentro de la caja, empezando en 0."
+        },
+        "type": {
+          "name": "Tipo de material",
+          "description": "Tipo de filamento, por ejemplo PLA, PETG, ABS o TPU."
+        },
+        "name": {
+          "name": "Nombre del material",
+          "description": "Nombre comercial del filamento, por ejemplo Hyper PLA."
+        },
+        "vendor": {
+          "name": "Fabricante",
+          "description": "Fabricante o marca."
+        },
+        "color": {
+          "name": "Color",
+          "description": "Color en seis dígitos hexadecimales, por ejemplo #06c84f. Las bobinas multicolor no se pueden escribir y deben dejarse vacías."
+        },
+        "min_temp": {
+          "name": "Temperatura mínima",
+          "description": "Temperatura mínima de impresión, en °C."
+        },
+        "max_temp": {
+          "name": "Temperatura máxima",
+          "description": "Temperatura máxima de impresión, en °C. No puede ser inferior a la mínima."
+        },
+        "pressure": {
+          "name": "Avance de presión",
+          "description": "Valor de avance de presión, entre 0 y 1."
+        },
+        "rfid": {
+          "name": "RFID",
+          "description": "El id de material de la impresora. Déjalo vacío para conservar la asociación de etiqueta existente; enviar un valor vacío la borraría."
+        }
+      }
     }
   }
 }

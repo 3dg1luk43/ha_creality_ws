@@ -14,6 +14,10 @@ from typing import Callable, List, Optional, Any
 from homeassistant.config_entries import ConfigEntry, OperationNotAllowed # type: ignore[import]
 from homeassistant.core import HomeAssistant, ServiceCall # type: ignore[import]
 from homeassistant.exceptions import ConfigEntryNotReady  # type: ignore[import]
+try:  # HA 2023.10+
+    from homeassistant.exceptions import ServiceValidationError  # type: ignore[import]
+except ImportError:  # pragma: no cover - older cores
+    from homeassistant.exceptions import HomeAssistantError as ServiceValidationError  # type: ignore[import]
 from homeassistant.helpers.event import (  # type: ignore[import]
     async_track_time_interval,
     async_track_state_change_event,
@@ -49,7 +53,12 @@ from .const import (
 )
 from .coordinator import KCoordinator
 from .frontend import CrealityCardRegistration
-from .utils import ModelDetection
+from .utils import (
+    BUSY_PRINT_STATES,
+    ModelDetection,
+    build_modify_material_payload,
+    derive_print_state,
+)
 
 
 
@@ -418,35 +427,46 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+def _coordinators_for_devices(hass: HomeAssistant, device_ids: Any) -> list:
+    """Resolve service ``device_id`` targets to coordinators.
+
+    Shared by every device-targeted service so they agree on what a target means.
+    A falsy ``device_ids`` selects every configured printer, which is what
+    ``request_cfs_info`` relies on for its "refresh everything" behaviour.
+    """
+    target_entry_ids: set[str] = set()
+
+    if device_ids:
+        # The device selector yields a list, but YAML callers often pass a string.
+        if isinstance(device_ids, str):
+            device_ids = [device_ids]
+
+        dev_reg = dr.async_get(hass)
+        for dev_id in device_ids:
+            device = dev_reg.async_get(dev_id)
+            if not device:
+                _LOGGER.warning("No such device: %s", dev_id)
+                continue
+            target_entry_ids.update(device.config_entries)
+
+        if not target_entry_ids:
+            return []
+
+    return [
+        coord
+        for entry_id, coord in hass.data[DOMAIN].items()
+        if isinstance(coord, KCoordinator)
+        and (not target_entry_ids or entry_id in target_entry_ids)
+    ]
+
+
 async def _register_custom_services(hass: HomeAssistant) -> None:
     """Register custom services for the integration."""
 
     async def request_cfs_info(call: ServiceCall) -> None:
         """Service to manually request CFS info from all or specific printers."""
-        device_ids = call.data.get("device_id")
-        target_entry_ids = set()
-        
-        # If devices selected, resolve them to config entries
-        if device_ids:
-            dev_reg = dr.async_get(hass)
-            # Handle single string or list
-            if isinstance(device_ids, str):
-                device_ids = [device_ids]
-                
-            for dev_id in device_ids:
-                device = dev_reg.async_get(dev_id)
-                if device:
-                    for entry_id in device.config_entries:
-                        target_entry_ids.add(entry_id)
-        
-        # Collect coordinators to target
-        targets = []
-        for entry_id, coord in hass.data[DOMAIN].items():
-            if isinstance(coord, KCoordinator):
-                # If no devices selected, target all. Otherwise, check if entry matches.
-                if not target_entry_ids or entry_id in target_entry_ids:
-                    targets.append(coord)
-        
+        targets = _coordinators_for_devices(hass, call.data.get("device_id"))
+
         if not targets:
             _LOGGER.warning("No applicable printers found for CFS info request")
             return
@@ -472,78 +492,158 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
         )
 
     async def set_cfs_material(call: ServiceCall) -> None:
-        """Service to modify CFS material/filament settings."""
-        device_id = call.data.get("device_id")
-        if not device_id:
-            _LOGGER.error("set_cfs_material: device_id is required")
-            return
+        """Write filament metadata to one CFS slot.
 
-        # Find the coordinator for this device
-        dev_reg = dr.async_get(hass)
-        device = dev_reg.async_get(device_id)
-        if not device:
-            _LOGGER.error("set_cfs_material: device not found: %s", device_id)
-            return
-
-        # Get the config entry for this device
-        target_coord = None
-        for entry_id in device.config_entries:
-            coord = hass.data[DOMAIN].get(entry_id)
-            if isinstance(coord, KCoordinator):
-                target_coord = coord
-                break
-
-        if not target_coord:
-            _LOGGER.error(
-                "set_cfs_material: coordinator not found for device %s", device_id
+        This is the only *write* path into the CFS. The payload shape comes from
+        @buzato's work in PR #75, confirmed against real hardware there but not
+        documented by Creality, so the outgoing value and the printer's echo are
+        both logged (see ``_log_material_echo``).
+        """
+        targets = _coordinators_for_devices(hass, call.data.get("device_id"))
+        if not targets:
+            raise ServiceValidationError(
+                "No Creality printer matched the selected device."
             )
-            return
 
-        # Build the modifyMaterial payload
-        material_data = {
-            "id": call.data.get("slot_id", 0),
-            "boxId": call.data.get("box_id", 0),
-            "rfid": call.data.get("rfid", ""),
-            "type": call.data.get("type", "PLA"),
-            "vendor": call.data.get("vendor", "Creality"),
-            "name": call.data.get("name", "Ender-PLA"),
-            "color": call.data.get("color", "#06c84f"),
-            "minTemp": float(call.data.get("min_temp", 190.0)),
-            "maxTemp": float(call.data.get("max_temp", 240.0)),
-            "pressure": float(call.data.get("pressure", 0.04)),
-        }
+        box_id = call.data["box_id"]
+        slot_id = call.data["slot_id"]
 
         try:
-            _LOGGER.info(
-                "Sending modifyMaterial to %s: %s",
-                target_coord.client.host,
-                material_data,
+            payload = build_modify_material_payload(
+                box_id=box_id,
+                slot_id=slot_id,
+                material_type=call.data["type"],
+                name=call.data.get("name"),
+                vendor=call.data.get("vendor"),
+                color=call.data.get("color"),
+                min_temp=call.data.get("min_temp"),
+                max_temp=call.data.get("max_temp"),
+                pressure=call.data.get("pressure"),
+                rfid=call.data.get("rfid"),
             )
-            await target_coord.client.send_set_retry(modifyMaterial=material_data)
+        except ValueError as exc:
+            # Bad input, not a printer failure -- surface it on the call itself.
+            raise ServiceValidationError(str(exc)) from exc
 
-            # Notify success
+        # Check every target before writing to any of them, so a busy second
+        # printer cannot leave the first one already modified.
+        # The card guards this too, but automations and Developer Tools do not go
+        # through the card.
+        for coord in targets:
+            state = derive_print_state(
+                coord.data or {},
+                power_off=coord.power_is_off(),
+                available=coord.available,
+                paused_flag=coord.paused_flag(),
+            )
+            if state in BUSY_PRINT_STATES:
+                raise ServiceValidationError(
+                    f"{coord.client.host} is {state}; refusing to change CFS "
+                    "material while the printer is busy."
+                )
+
+        for coord in targets:
+            host = coord.client.host
+            try:
+                _LOGGER.info("Sending modifyMaterial to %s: %s", host, payload)
+                await coord.client.send_set_retry(modifyMaterial=payload)
+            except Exception as exc:
+                _LOGGER.error("Failed to set CFS material for %s: %s", host, exc)
+                pn_async_create(
+                    hass,
+                    title="CFS Material Update Failed",
+                    message=f"Failed to update material on {host}: {exc}",
+                    notification_id="cfs_material_error",
+                )
+                continue
+
             pn_async_create(
                 hass,
                 title="CFS Material Updated",
-                message=f"Material settings for Box {material_data['boxId']} Slot {material_data['id']} updated successfully.",
+                message=(
+                    f"Box {box_id} slot {slot_id} on {host} updated."
+                ),
                 notification_id="cfs_material_update",
             )
-        except Exception as exc:
-            _LOGGER.error(
-                "Failed to set CFS material for %s: %s", target_coord.client.host, exc
+            hass.async_create_task(_log_material_echo(coord, payload))
+
+    async def _log_material_echo(coord, payload: dict[str, Any]) -> None:
+        """Log what the printer actually stored after a material write.
+
+        Creality streams colours as seven hex characters (a pad character plus
+        RRGGBB) but accepts six on write, and no public documentation confirms how
+        the other fields are echoed. Logging the round trip means the first user
+        with real CFS hardware produces the evidence in their debug log instead of
+        us guessing -- see utils.normalize_color_hex and issues #113/#117.
+        """
+        try:
+            await asyncio.sleep(1.5)
+            await coord.client.request_boxs_info()
+            await asyncio.sleep(1.5)
+
+            boxes = (coord.data or {}).get("boxsInfo", {}).get("materialBoxs", [])
+            for box in boxes:
+                if box.get("id") != payload["boxId"]:
+                    continue
+                for slot in box.get("materials", []):
+                    if slot.get("id") != payload["id"]:
+                        continue
+                    _LOGGER.info(
+                        "modifyMaterial echo for %s box %s slot %s: sent %s, printer "
+                        "now reports %s",
+                        coord.client.host,
+                        payload["boxId"],
+                        payload["id"],
+                        payload,
+                        slot,
+                    )
+                    return
+
+            _LOGGER.info(
+                "modifyMaterial echo for %s: box %s slot %s not present in boxsInfo "
+                "after the write",
+                coord.client.host,
+                payload["boxId"],
+                payload["id"],
             )
-            pn_async_create(
-                hass,
-                title="CFS Material Update Failed",
-                message=f"Failed to update material: {str(exc)}",
-                notification_id="cfs_material_error",
-            )
+        except Exception as exc:  # pragma: no cover - diagnostics only
+            _LOGGER.debug("Could not read back CFS material echo: %s", exc)
+
+    # Bounds mirror services.yaml and the CFS card's edit form so all three agree.
+    set_cfs_material_schema = vol.Schema(
+        {
+            vol.Required("device_id"): vol.Any(cv.string, [cv.string]),
+            vol.Required("box_id"): vol.All(vol.Coerce(int), vol.Range(min=0, max=4)),
+            vol.Required("slot_id"): vol.All(vol.Coerce(int), vol.Range(min=0, max=3)),
+            vol.Required("type"): cv.string,
+            vol.Optional("name"): cv.string,
+            vol.Optional("vendor"): cv.string,
+            # A plain hex string, not a color_rgb selector: that selector returns
+            # [r, g, b], which the printer does not understand.
+            vol.Optional("color"): cv.string,
+            vol.Optional("min_temp"): vol.All(
+                vol.Coerce(float), vol.Range(min=150, max=300)
+            ),
+            vol.Optional("max_temp"): vol.All(
+                vol.Coerce(float), vol.Range(min=150, max=350)
+            ),
+            vol.Optional("pressure"): vol.All(
+                vol.Coerce(float), vol.Range(min=0, max=1)
+            ),
+            vol.Optional("rfid"): cv.string,
+        }
+    )
 
     if not hass.services.has_service(DOMAIN, "request_cfs_info"):
         hass.services.async_register(DOMAIN, "request_cfs_info", request_cfs_info)
 
     if not hass.services.has_service(DOMAIN, "set_cfs_material"):
-        hass.services.async_register(DOMAIN, "set_cfs_material", set_cfs_material)
+        hass.services.async_register(
+            DOMAIN,
+            "set_cfs_material",
+            set_cfs_material,
+            schema=set_cfs_material_schema,
+        )
 
 
 async def _register_diagnostic_service(hass: HomeAssistant) -> None:
