@@ -6,3 +6,6 @@ websockets>=12.0
 # Optional for MJPEG streaming
 Pillow>=10.0
 pytest-asyncio>=0.23
+# Needed by tools/tests/test_cfs_material_service.py, which executes the
+# integration's service handler; the integration itself imports it via HA.
+voluptuous
