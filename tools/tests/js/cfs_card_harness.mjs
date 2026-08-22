@@ -27,7 +27,18 @@ class FakeElement {
   }
   set innerHTML(value) { this._html = String(value); }
   get innerHTML() { return this._html; }
-  appendChild(child) { this.children.push(child); return child; }
+  appendChild(child) {
+    child._parent = this;
+    this.children.push(child);
+    return child;
+  }
+  /** Real elements have this, and the card relies on it to dismiss dialogs/toasts. */
+  remove() {
+    const siblings = this._parent?.children;
+    if (!siblings) return;
+    const at = siblings.indexOf(this);
+    if (at >= 0) siblings.splice(at, 1);
+  }
   // Hand back a stable stub per id (#content, #theme-form, ...) so code that
   // assigns to the looked-up element works and the test can inspect it after.
   getElementById(id) {
@@ -39,7 +50,10 @@ class FakeElement {
   querySelectorAll() { return []; }
   querySelector() { return null; }
   attachShadow() { return this; }
-  addEventListener() {}
+  addEventListener(type, fn) {
+    this._listeners = this._listeners || {};
+    (this._listeners[type] = this._listeners[type] || []).push(fn);
+  }
   dispatchEvent() { return true; }
 }
 

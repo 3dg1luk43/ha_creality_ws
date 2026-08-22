@@ -227,3 +227,69 @@ def test_busy_lookup_is_device_scoped():
     source = _card()
     assert 'translation_key === "print_status"' in source
     assert "entry.device_id === deviceId" in source
+
+
+def test_edit_dialog_is_styled_by_classes_not_inline_styles():
+    """PR #75 set ~90 inline styles because its dialog could not see the CSS.
+
+    It appended to document.body, outside the shadow root, so the injected
+    <style> never reached it. Rendering inside the shadow root is what makes the
+    stylesheet apply -- and this counts the inline assignments that would come
+    back if that regressed.
+    """
+    source = _strip_comments(_card())
+    form = source.split("_renderEditForm(slot, close) {", 1)[1].split("\n  async _saveMaterial", 1)[0]
+    inline = len(re.findall(r"\.style\.[a-zA-Z]+\s*=", form))
+    assert inline < 10, f"{inline} inline style assignments in _renderEditForm"
+
+
+def test_dialog_attaches_to_the_shadow_root():
+    source = _strip_comments(_card())
+    assert "document.body.appendChild" not in source
+    assert "this._root.appendChild(overlay)" in source
+
+
+def test_edit_button_is_reachable_without_hover():
+    """A wall tablet is HA's primary surface and cannot hover.
+
+    PR #75 left the buttons at opacity 0 outside :hover, making the whole
+    feature unreachable there.
+    """
+    source = _card()
+    assert "@media (hover: hover)" in source, (
+        "the hover-reveal must be gated so touch devices keep the button visible"
+    )
+    assert ":focus-visible" in source, "keyboard users need a visible affordance"
+
+
+def test_edit_button_is_a_real_button_with_a_label():
+    source = _card()
+    edit_button = source.split("_renderEditButton(slot, mini = false) {", 1)[1].split("\n  _renderSpoolCard", 1)[0]
+    assert '<button type="button"' in edit_button
+    assert "aria-label=" in edit_button
+
+
+def test_dialog_field_bounds_match_the_service():
+    """The card, services.yaml and the service schema must agree on limits.
+
+    Otherwise the dialog happily accepts a value the service then rejects.
+    """
+    import yaml
+
+    card_form = _card().split("form.schema = [", 1)[1].split("];", 1)[0]
+    services = yaml.safe_load(
+        (ROOT / "custom_components" / "ha_creality_ws" / "services.yaml").read_text()
+    )["set_cfs_material"]["fields"]
+
+    for field in ("min_temp", "max_temp", "pressure"):
+        selector = services[field]["selector"]["number"]
+        entry = re.search(rf'name: "{field}".*?\}}\s*\}},', card_form, re.DOTALL)
+        assert entry, f"{field} missing from the dialog schema"
+        text = entry.group(0)
+        for bound in ("min", "max"):
+            expected = selector[bound]
+            found = re.search(rf"\b{bound}:\s*([0-9.]+)", text)
+            assert found, f"{field}.{bound} not set in the card"
+            assert float(found.group(1)) == float(expected), (
+                f"{field}.{bound}: card {found.group(1)} vs services.yaml {expected}"
+            )

@@ -68,6 +68,28 @@ const CFS_TRANSLATIONS = {
     label_slot_filament: "Box {box} Slot {slot} Filament",
     label_slot_color: "Box {box} Slot {slot} Color",
     label_slot_percent: "Box {box} Slot {slot} Remaining Percent",
+    btn_edit: "Edit material",
+    tooltip_edit_locked: "Editing is disabled while the printer is busy",
+    tooltip_multicolour_readonly: "Multi-colour spools cannot be edited",
+    dialog_edit_title: "Edit material",
+    dialog_edit_target: "Writing to box {box}, slot {slot}",
+    label_material_type: "Material type",
+    label_material_name: "Material name",
+    label_material_vendor: "Vendor",
+    label_material_color: "Colour",
+    label_material_min_temp: "Minimum temperature",
+    label_material_max_temp: "Maximum temperature",
+    label_material_pressure: "Pressure advance",
+    btn_cancel: "Cancel",
+    btn_save: "Save",
+    btn_saving: "Saving…",
+    toast_saved: "Material saved",
+    toast_save_failed: "Could not save material: {error}",
+    toast_temp_range_invalid: "Maximum temperature must not be below the minimum",
+    toast_colour_invalid: "Colour must be six hex digits, for example #06c84f",
+    toast_type_required: "Material type is required",
+    toast_external_not_supported: "This printer does not report a box id for the external spool, so it cannot be edited",
+    warn_box_id_guessed: "The target box was inferred from the card layout — check it matches the printer before saving",
     toast_no_device: "Could not identify the printer for this card. Check the entities in the card configuration.",
     toast_multiple_devices: "This card mixes entities from more than one printer, so material editing is disabled.",
     toast_printer_busy: "Cannot edit material while the printer is busy",
@@ -561,6 +583,7 @@ class KCFSCard extends HTMLElement {
       }
 
       .spool-mini-wrapper {
+        position: relative;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -607,6 +630,7 @@ class KCFSCard extends HTMLElement {
       }
 
       .external-normal {
+        position: relative;
         background: rgba(var(--rgb-primary-text-color), 0.03);
         border-radius: 16px;
         padding: 12px 16px;
@@ -658,6 +682,7 @@ class KCFSCard extends HTMLElement {
       }
 
       .external-compact {
+        position: relative;
         display: flex;
         align-items: center;
         gap: 10px;
@@ -689,6 +714,135 @@ class KCFSCard extends HTMLElement {
         font-size: 10px;
         color: var(--secondary-text-color);
       }
+
+      /* === EDIT AFFORDANCE === */
+      .edit-btn, .edit-btn-mini {
+        position: absolute;
+        top: 4px;
+        left: 4px;
+        z-index: 3;
+        display: grid;
+        place-items: center;
+        padding: 0;
+        border: none;
+        border-radius: 50%;
+        background: var(--secondary-background-color);
+        color: var(--primary-text-color);
+        cursor: pointer;
+        opacity: 1;
+        transition: opacity 120ms ease-in-out;
+      }
+      .edit-btn { width: 26px; height: 26px; }
+      .edit-btn-mini { width: 18px; height: 18px; top: -2px; left: -2px; }
+      .edit-btn ha-icon { --mdc-icon-size: 16px; }
+      .edit-btn-mini ha-icon { --mdc-icon-size: 12px; }
+      .edit-btn[disabled], .edit-btn-mini[disabled] {
+        cursor: not-allowed;
+        opacity: 0.45;
+      }
+      /* Reveal on hover only where hovering exists. A wall tablet is the primary
+         HA surface, and there the button has to be visible without one. */
+      @media (hover: hover) {
+        .edit-btn, .edit-btn-mini { opacity: 0; }
+        .spool-card:hover .edit-btn,
+        .spool-mini-wrapper:hover .edit-btn-mini,
+        .external-normal:hover .edit-btn,
+        .external-compact:hover .edit-btn { opacity: 1; }
+      }
+      .edit-btn:focus-visible, .edit-btn-mini:focus-visible {
+        opacity: 1;
+        outline: 2px solid var(--primary-color);
+        outline-offset: 1px;
+      }
+
+      /* === EDIT DIALOG === */
+      .edit-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        display: grid;
+        place-items: center;
+        padding: 16px;
+        background: rgba(0, 0, 0, 0.55);
+      }
+      .edit-dialog {
+        width: min(420px, 100%);
+        max-height: 85vh;
+        overflow-y: auto;
+        padding: 16px;
+        border-radius: var(--ha-card-border-radius, 12px);
+        background: var(--card-background-color, var(--ha-card-background));
+        color: var(--primary-text-color);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      }
+      .edit-dialog h2 {
+        margin: 0 0 4px;
+        font-size: 18px;
+        font-weight: 500;
+      }
+      .edit-target {
+        margin-bottom: 12px;
+        font-size: 12px;
+        color: var(--secondary-text-color);
+      }
+      .edit-warning {
+        margin-bottom: 12px;
+        padding: 8px 10px;
+        border-radius: 6px;
+        background: var(--warning-color, #ffa726);
+        color: #000;
+        font-size: 12px;
+      }
+      .colour-row { margin: 12px 0 4px; }
+      .colour-row > label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 13px;
+        color: var(--secondary-text-color);
+      }
+      .colour-inputs { display: flex; gap: 8px; align-items: center; }
+      .colour-inputs input[type="color"] {
+        width: 44px;
+        height: 34px;
+        padding: 0;
+        border: 1px solid var(--divider-color);
+        border-radius: 6px;
+        background: none;
+        cursor: pointer;
+      }
+      .colour-inputs input[type="text"] {
+        flex: 1;
+        min-width: 0;
+        padding: 8px;
+        border: 1px solid var(--divider-color);
+        border-radius: 6px;
+        background: var(--secondary-background-color);
+        color: var(--primary-text-color);
+        font-family: monospace;
+      }
+      .colour-inputs input:disabled { opacity: 0.5; cursor: not-allowed; }
+      .dialog-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 20px;
+      }
+      .dialog-btn {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 6px;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      .dialog-btn.secondary {
+        background: var(--secondary-background-color);
+        color: var(--primary-text-color);
+      }
+      .dialog-btn.primary {
+        background: var(--primary-color);
+        color: var(--text-primary-color, #fff);
+      }
+      .dialog-btn[disabled] { opacity: 0.6; cursor: default; }
 
       /* === TOAST === */
       .cfs-toast {
@@ -997,6 +1151,7 @@ class KCFSCard extends HTMLElement {
       externalSection = `
         <div class="external-section">
           <div class="external-normal" data-eid="${external.entity_id}">
+            ${this._renderEditButton(external)}
             <div class="ext-icon">${this._t("ext_label")}</div>
             <div class="ext-info">
               <div class="ext-name">${displayName}</div>
@@ -1039,6 +1194,7 @@ class KCFSCard extends HTMLElement {
       externalSection = `
         <div class="external-section">
           <div class="external-compact" data-eid="${external.entity_id}">
+            ${this._renderEditButton(external)}
             <div class="ext-dot">${this._t("ext_label")}</div>
             <div class="ext-compact-info">
               <div>${displayName}</div>
@@ -1077,6 +1233,41 @@ class KCFSCard extends HTMLElement {
     `;
   }
 
+  /**
+   * The edit button for a slot, or "" when the slot cannot be edited.
+   *
+   * Editing is refused for the external spool until the printer actually tells
+   * us its box id -- PR #75 sent a hardcoded 0, which was a guess.
+   * @param {object} slot from _collectData
+   * @param {boolean} mini smaller variant for the compact rows
+   * @returns {string}
+   */
+  _renderEditButton(slot, mini = false) {
+    if (!slot || !slot.entity_id) return "";
+
+    const busy = this._isPrinterBusy();
+    const unaddressable = slot.printerBoxId === null || slot.printerBoxId === undefined;
+    const disabled = busy || unaddressable || Boolean(this._deviceIdError);
+    const title = busy
+      ? this._t("tooltip_edit_locked")
+      : unaddressable
+        ? this._t("toast_external_not_supported")
+        : this._deviceIdError
+          ? this._t(this._deviceIdError)
+          : this._t("btn_edit");
+
+    return `
+      <button type="button"
+              class="${mini ? "edit-btn-mini" : "edit-btn"}"
+              data-edit="${slot.entity_id}"
+              title="${title}"
+              aria-label="${title}"
+              ${disabled ? "disabled" : ""}>
+        <ha-icon icon="${disabled ? mdi("lock") : mdi("pencil")}"></ha-icon>
+      </button>
+    `;
+  }
+
   _renderSpoolCard(slot) {
     if (!slot) {
       return `<div class="spool-card"></div>`;
@@ -1098,6 +1289,7 @@ class KCFSCard extends HTMLElement {
     return `
       <div class="spool-card ${isActive ? 'active' : ''}" data-eid="${slot.entity_id}">
         ${badge}
+        ${this._renderEditButton(slot)}
         <div class="ring-container">
           <div class="ring-outer" style="--spool-color: ${color}; --spool-pct: ${pct}%"></div>
           <div class="ring-inner">
@@ -1140,15 +1332,19 @@ class KCFSCard extends HTMLElement {
             <span>${pctDisplay}</span>
           </div>
           <div class="spool-mini-type">${safeType}</div>
+          ${this._renderEditButton(slot, true)}
         </div>
       `;
     }
 
     return `
-      <div class="spool-mini ${isActive ? 'active' : ''}" 
-           style="--spool-color: ${color}; --spool-pct: ${pct}%" 
-           data-eid="${slot.entity_id}">
-        <span>${pctDisplay}</span>
+      <div class="spool-mini-wrapper">
+        <div class="spool-mini ${isActive ? 'active' : ''}" 
+             style="--spool-color: ${color}; --spool-pct: ${pct}%" 
+             data-eid="${slot.entity_id}">
+          <span>${pctDisplay}</span>
+        </div>
+        ${this._renderEditButton(slot, true)}
       </div>
     `;
   }
@@ -1277,15 +1473,284 @@ class KCFSCard extends HTMLElement {
   /** Brief, non-blocking feedback. Replaces PR #75's alert() calls. */
   _showToast(message) {
     if (!this._root) return;
-    const existing = this._root.getElementById("cfs-toast");
-    if (existing?.remove) existing.remove();
+
+    // Hold the reference rather than looking it back up by id -- one toast at a
+    // time, and no dependency on where in the tree it was attached.
+    if (this._toastEl?.remove) this._toastEl.remove();
+    clearTimeout(this._toastTimer);
 
     const toast = document.createElement("div");
-    toast.id = "cfs-toast";
     toast.className = "cfs-toast";
     toast.textContent = message;
     this._root.appendChild(toast);
-    setTimeout(() => { if (toast.remove) toast.remove(); }, 4000);
+    this._toastEl = toast;
+    this._toastTimer = setTimeout(() => {
+      if (toast.remove) toast.remove();
+      if (this._toastEl === toast) this._toastEl = null;
+    }, 4000);
+  }
+
+  /**
+   * Find a collected slot by its filament entity id.
+   * @returns {object|null}
+   */
+  _findSlot(entityId) {
+    const { boxes, external } = this._collectData();
+    if (external?.entity_id === entityId) return external;
+    for (const box of boxes) {
+      for (const slot of box.slots) {
+        if (slot?.entity_id === entityId) return slot;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Open the material editor for one slot.
+   *
+   * Rendered inside the shadow root, not document.body. PR #75 appended to
+   * document.body, which put the dialog outside the reach of the injected
+   * <style> -- so its 120 lines of dialog CSS never applied and everything was
+   * styled with ~90 inline assignments instead. :host and ha-card already force
+   * overflow:visible and contain:none, so a fixed overlay still escapes the card.
+   */
+  _showEditDialog(entityId) {
+    if (!this._hass || !this._root) return;
+
+    const slot = this._findSlot(entityId);
+    if (!slot) return;
+
+    // Re-check: the affordance may have been rendered before the print started.
+    if (this._isPrinterBusy()) {
+      this._showToast(this._t("toast_printer_busy"));
+      return;
+    }
+    if (this._deviceIdError) {
+      this._showToast(this._t(this._deviceIdError));
+      return;
+    }
+    if (slot.printerBoxId === null || slot.printerBoxId === undefined) {
+      this._showToast(this._t("toast_external_not_supported"));
+      return;
+    }
+
+    const overlay = document.createElement("div");
+    overlay.className = "edit-overlay";
+    const dialog = document.createElement("div");
+    dialog.className = "edit-dialog";
+    overlay.appendChild(dialog);
+
+    const close = () => { if (overlay.remove) overlay.remove(); };
+    overlay.addEventListener("click", (ev) => { if (ev.target === overlay) close(); });
+
+    dialog.appendChild(this._renderEditForm(slot, close));
+    this._root.appendChild(overlay);
+  }
+
+  /**
+   * Build the dialog body.
+   *
+   * The six text/number fields go through ha-form, which the editor already uses:
+   * it gives HA theming, accessibility and sensible mobile keyboards for free,
+   * and replaces most of PR #75's hand-rolled inputs. Colour stays hand-built
+   * because HA has no hex-colour selector (color_rgb returns [r, g, b]).
+   * @param {object} slot
+   * @param {Function} close
+   * @returns {object} the dialog content element
+   */
+  _renderEditForm(slot, close) {
+    const container = document.createElement("div");
+
+    const heading = document.createElement("h2");
+    heading.textContent = this._t("dialog_edit_title");
+    container.appendChild(heading);
+
+    // Always show which slot is about to be written -- a mis-mapped card is then
+    // visible before saving rather than after.
+    const target = document.createElement("div");
+    target.className = "edit-target";
+    target.textContent = this._t("dialog_edit_target", {
+      box: slot.printerBoxId,
+      slot: slot.printerSlotId,
+    });
+    container.appendChild(target);
+
+    if (slot.targetIsGuessed) {
+      const warn = document.createElement("div");
+      warn.className = "edit-warning";
+      warn.textContent = this._t("warn_box_id_guessed");
+      container.appendChild(warn);
+    }
+
+    const values = {
+      type: slot.type && slot.type !== "—" ? slot.type : "",
+      name: slot.name && slot.name !== "—" ? slot.name : "",
+      vendor: slot.vendor || "",
+      min_temp: slot.minTemp ?? undefined,
+      max_temp: slot.maxTemp ?? undefined,
+      pressure: slot.pressure ?? undefined,
+    };
+
+    const form = document.createElement("ha-form");
+    form.hass = this._hass;
+    form.data = values;
+    // Bounds mirror services.yaml and the service schema so all three agree.
+    form.schema = [
+      { name: "type", selector: { text: {} } },
+      { name: "name", selector: { text: {} } },
+      { name: "vendor", selector: { text: {} } },
+      { name: "min_temp", selector: { number: { min: 150, max: 300, step: 1, unit_of_measurement: "°C", mode: "box" } } },
+      { name: "max_temp", selector: { number: { min: 150, max: 350, step: 1, unit_of_measurement: "°C", mode: "box" } } },
+      { name: "pressure", selector: { number: { min: 0, max: 1, step: 0.01, mode: "box" } } },
+    ];
+    form.computeLabel = (s) => this._t(`label_material_${s.name}`);
+    form.addEventListener("value-changed", (ev) => {
+      Object.assign(values, ev.detail.value);
+    });
+    container.appendChild(form);
+
+    // ---- colour -----------------------------------------------------------
+    const colourRow = document.createElement("div");
+    colourRow.className = "colour-row";
+    const colourLabel = document.createElement("label");
+    colourLabel.textContent = this._t("label_material_color");
+    colourRow.appendChild(colourLabel);
+
+    const colourInputs = document.createElement("div");
+    colourInputs.className = "colour-inputs";
+    const picker = document.createElement("input");
+    picker.type = "color";
+    picker.value = slot.color || "#cccccc";
+    const hex = document.createElement("input");
+    hex.type = "text";
+    hex.value = slot.isMultiColour ? "" : (slot.color || "");
+    hex.placeholder = "#rrggbb";
+
+    if (slot.isMultiColour) {
+      // A two-colour spool cannot be expressed as one value, so editing the
+      // colour at all would quietly discard half of it.
+      picker.disabled = true;
+      hex.disabled = true;
+      hex.placeholder = this._t("tooltip_multicolour_readonly");
+      colourRow.title = this._t("tooltip_multicolour_readonly");
+    } else {
+      picker.addEventListener("input", () => { hex.value = picker.value; });
+      hex.addEventListener("input", () => {
+        if (/^#[0-9a-fA-F]{6}$/.test(hex.value)) picker.value = hex.value;
+      });
+    }
+
+    colourInputs.appendChild(picker);
+    colourInputs.appendChild(hex);
+    colourRow.appendChild(colourInputs);
+    container.appendChild(colourRow);
+
+    // ---- actions ----------------------------------------------------------
+    const actions = document.createElement("div");
+    actions.className = "dialog-actions";
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "dialog-btn secondary";
+    cancel.textContent = this._t("btn_cancel");
+    cancel.addEventListener("click", close);
+    actions.appendChild(cancel);
+
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "dialog-btn primary";
+    save.textContent = this._t("btn_save");
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      save.textContent = this._t("btn_saving");
+      const ok = await this._saveMaterial(slot, {
+        ...values,
+        color: slot.isMultiColour ? undefined : hex.value.trim(),
+      });
+      if (ok) {
+        close();
+      } else {
+        save.disabled = false;
+        save.textContent = this._t("btn_save");
+      }
+    });
+    actions.appendChild(save);
+    container.appendChild(actions);
+
+    return container;
+  }
+
+  /**
+   * Send one slot's edits to the service.
+   * @returns {Promise<boolean>} whether the write was accepted
+   */
+  async _saveMaterial(slot, formData) {
+    const deviceId = await this._resolveDeviceId();
+    if (!deviceId) {
+      this._showToast(this._t(this._deviceIdError || "toast_no_device"));
+      return false;
+    }
+
+    const type = String(formData.type || "").trim();
+    if (!type) {
+      this._showToast(this._t("toast_type_required"));
+      return false;
+    }
+
+    // Number.isFinite, not `||`: `0` is a legitimate pressure and a truthiness
+    // check would silently replace it with the default.
+    const num = (value) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const minTemp = num(formData.min_temp);
+    const maxTemp = num(formData.max_temp);
+    if (minTemp !== undefined && maxTemp !== undefined && maxTemp < minTemp) {
+      // Surfaced rather than clamped: someone who typed these wants to know.
+      this._showToast(this._t("toast_temp_range_invalid"));
+      return false;
+    }
+
+    const colour = String(formData.color || "").trim();
+    if (colour && !/^#?[0-9a-fA-F]{6}$/.test(colour)) {
+      this._showToast(this._t("toast_colour_invalid"));
+      return false;
+    }
+
+    const payload = {
+      device_id: deviceId,
+      box_id: slot.printerBoxId,
+      slot_id: slot.printerSlotId,
+      type,
+    };
+    if (formData.name && String(formData.name).trim()) payload.name = String(formData.name).trim();
+    if (formData.vendor && String(formData.vendor).trim()) payload.vendor = String(formData.vendor).trim();
+    if (colour) payload.color = colour.startsWith("#") ? colour : `#${colour}`;
+    if (minTemp !== undefined) payload.min_temp = minTemp;
+    if (maxTemp !== undefined) payload.max_temp = maxTemp;
+    const pressure = num(formData.pressure);
+    if (pressure !== undefined) payload.pressure = pressure;
+    // Pass the printer's existing tag id straight back; omitting the key would
+    // be fine too, but sending "" would erase it.
+    if (slot.rfid) payload.rfid = slot.rfid;
+
+    try {
+      await this._hass.callService("ha_creality_ws", "set_cfs_material", payload);
+    } catch (err) {
+      this._showToast(this._t("toast_save_failed", { error: err?.message || err }));
+      return false;
+    }
+
+    this._showToast(this._t("toast_saved"));
+    // Ask the printer to re-report so the card shows what actually landed.
+    try {
+      await this._hass.callService("ha_creality_ws", "request_cfs_info", {
+        device_id: deviceId,
+      });
+    } catch (_) {
+      // The write succeeded; a failed refresh only delays the display.
+    }
+    return true;
   }
 
   _attachEventHandlers() {
@@ -1299,6 +1764,19 @@ class KCFSCard extends HTMLElement {
           // the snapshot consistent with what is on screen.
           this._updateIfChanged();
         }
+      };
+    });
+
+    // Edit buttons. Bound before the more-info handler below, and stopping
+    // propagation so clicking edit does not also open the entity dialog.
+    this._root.querySelectorAll('.edit-btn, .edit-btn-mini').forEach(btn => {
+      btn.onclick = (ev) => {
+        ev.stopPropagation();
+        if (btn.disabled) {
+          this._showToast(btn.title);
+          return;
+        }
+        this._showEditDialog(btn.dataset.edit);
       };
     });
 
