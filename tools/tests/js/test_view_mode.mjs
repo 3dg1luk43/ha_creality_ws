@@ -84,27 +84,72 @@ test("compact and full render different markup", () => {
   );
 });
 
-test("getCardSize and getLayoutOptions both survive", () => {
+test("getCardSize scales with the amount configured", () => {
   // PR #75 replaced getCardSize with `return 3` and deleted getLayoutOptions,
-  // silently reverting the dynamic sizing from #73.
-  const c = card({ view_mode: "compact" });
-  c.hass = makeHass(slotEntities(1, 0, { attributes: { type: "PLA" } }));
-  assert.equal(typeof c.getCardSize, "function");
-  assert.equal(typeof c.getLayoutOptions, "function");
-  assert.equal(typeof c.getCardSize(), "number");
-  const layout = c.getLayoutOptions();
-  assert.ok(layout && typeof layout === "object", "getLayoutOptions returns options");
+  // silently reverting the dynamic sizing from #73. `typeof === "number"` and a
+  // `<=` comparison are both satisfied by a constant, so assert that the value
+  // actually responds to the config.
+  // The compact branch is where the sizing is derived; full is a fixed 5 by
+  // design, so asserting against it would only pin a constant.
+  const oneBox = card({ view_mode: "compact", box0_slot0_filament: "sensor.a" });
+  const fourBoxes = card({
+    view_mode: "compact",
+    box0_slot0_filament: "sensor.a",
+    box1_slot0_filament: "sensor.b",
+    box2_slot0_filament: "sensor.c",
+    box3_slot0_filament: "sensor.d",
+  });
+  const states = slotEntities(1, 0, { attributes: { type: "PLA" } });
+  oneBox.hass = makeHass(states);
+  fourBoxes.hass = makeHass(states);
+
+  assert.ok(
+    fourBoxes.getCardSize() > oneBox.getCardSize(),
+    `four boxes (${fourBoxes.getCardSize()}) must be taller than one (${oneBox.getCardSize()})`,
+  );
+  // And an external spool adds a row of its own.
+  const withExternal = card({
+    view_mode: "compact",
+    box0_slot0_filament: "sensor.a",
+    external_filament: "sensor.ext",
+  });
+  withExternal.hass = makeHass(states);
+  assert.ok(
+    withExternal.getCardSize() > oneBox.getCardSize(),
+    "an external spool must add height",
+  );
 });
 
-test("compact sizes smaller than full", () => {
-  const states = slotEntities(1, 0, { attributes: { type: "PLA" } });
-  const full = card({ view_mode: "full" });
-  full.hass = makeHass(states);
-  const compact = card({ view_mode: "compact" });
-  compact.hass = makeHass(states);
+test("getLayoutOptions reports real grid bounds", () => {
+  const c = card({ view_mode: "compact", box0_slot0_filament: "sensor.a" });
+  c.hass = makeHass(slotEntities(1, 0, { attributes: { type: "PLA" } }));
+  const layout = c.getLayoutOptions();
+
+  assert.ok(layout && typeof layout === "object", "an options object");
+  const keys = Object.keys(layout);
+  assert.ok(keys.length > 0, `an empty object would satisfy typeof: ${keys}`);
+  // HA reads grid_* keys; a stub returning {} would silently lose sizing.
   assert.ok(
-    compact.getCardSize() <= full.getCardSize(),
-    `compact ${compact.getCardSize()} should not exceed full ${full.getCardSize()}`,
+    keys.some((k) => k.startsWith("grid_")),
+    `expected grid_* sizing keys, got ${keys}`,
+  );
+});
+
+test("compact is strictly shorter than full for the same config", () => {
+  const config = {
+    box0_slot0_filament: "sensor.a",
+    box1_slot0_filament: "sensor.b",
+  };
+  const states = slotEntities(1, 0, { attributes: { type: "PLA" } });
+  const full = card({ view_mode: "full", ...config });
+  full.hass = makeHass(states);
+  const compact = card({ view_mode: "compact", ...config });
+  compact.hass = makeHass(states);
+
+  // Strict `<`, not `<=`: equality is what a constant return value produces.
+  assert.ok(
+    compact.getCardSize() < full.getCardSize(),
+    `compact ${compact.getCardSize()} should be less than full ${full.getCardSize()}`,
   );
 });
 

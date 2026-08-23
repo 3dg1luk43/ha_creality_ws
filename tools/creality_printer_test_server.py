@@ -56,10 +56,14 @@ from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
 from aiortc.contrib.media import MediaBlackhole
 
 import av
+import pathlib
 import shutil
 
-# Local: split out so it can be tested without aiortc/av.
-from h264_timing import assign_clip_timestamps
+# Local: split out so it can be tested without aiortc/av. The sibling directory
+# is added explicitly rather than relying on sys.path[0], so importing this file
+# as a module (which the tests do) works from any working directory.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from h264_timing import assign_clip_timestamps  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,

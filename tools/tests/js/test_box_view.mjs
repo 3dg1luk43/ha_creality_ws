@@ -84,7 +84,12 @@ test("box mode maps to the box-mode card class", () => {
 });
 
 test("bays are editable", () => {
-  assert.match(html(boxCard(4)), /edit-btn-mini/);
+  // _renderEditButton always emits the <button>, varying only aria-disabled and
+  // the icon -- so matching the class alone passes for an all-locked box view.
+  const out = html(boxCard(4));
+  assert.match(out, /edit-btn-mini/);
+  assert.ok(!/aria-disabled/.test(out), "the bays must be editable, not locked");
+  assert.match(out, /mdi:pencil/, "and show a pencil rather than a lock");
 });
 
 test("box mode keeps a configured external spool", () => {

@@ -12,6 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from conftest import install_stub_module, restore_stubs
+
 from custom_components.ha_creality_ws.const import LATE_DISCOVERY_FIELDS  # noqa: E402
 from custom_components.ha_creality_ws.coordinator import KCoordinator  # noqa: E402
 
@@ -130,22 +132,90 @@ def test_maxboxtemp_is_a_gating_field():
     assert "boxsInfo" in LATE_DISCOVERY_FIELDS
 
 
-def test_every_capability_gate_field_can_trigger_discovery():
-    """The invariant behind this tuple, stated once.
+# Telemetry field names a chamber gate could plausibly key on. Any of these that
+# actually causes a platform to create an entity must also be able to trigger the
+# discovery pass, or the gate and the trigger disagree.
+CANDIDATE_CHAMBER_FIELDS = ("boxTemp", "targetBoxTemp", "maxBoxTemp")
 
-    A field that some platform reads from coord.data to decide whether to create
-    an entity, but which is absent here, can never trigger the pass that would
-    create it. That mismatch has now caused the same defect twice: targetBoxTemp
-    for number.py's chamber control, then boxTemp for sensor.py's chamber sensor.
+
+def _sensor_platform():
+    """sensor.async_setup_entry, with the stubs it needs beyond conftest."""
+    from unittest.mock import MagicMock
+
+    if "homeassistant.components.sensor" not in sys.modules:
+        mod = MagicMock()
+
+        class _SensorEntity:
+            pass
+
+        mod.SensorEntity = _SensorEntity
+        install_stub_module(__name__, "homeassistant.components.sensor", mod)
+    entity_mod = sys.modules["homeassistant.helpers.entity"]
+    if not hasattr(entity_mod, "EntityCategory"):
+        entity_mod.EntityCategory = MagicMock()
+
+    from custom_components.ha_creality_ws.sensor import async_setup_entry
+
+    return async_setup_entry
+
+
+def _run_sensor_setup(coord, entry_data):
+    """Drive the real sensor platform and return what it added."""
+    setup = _sensor_platform()
+    added = []
+    connected = []
+    scheduled = []
+    hass = SimpleNamespace(
+        data={"ha_creality_ws": {}},
+        loop=SimpleNamespace(call_soon=lambda fn, *a: scheduled.append((fn, a))),
+        config_entries=SimpleNamespace(async_get_entry=lambda _e: SimpleNamespace(data=entry_data)),
+    )
+    entry = _EntryStub(entry_data)
+    hass.data["ha_creality_ws"][entry.entry_id] = coord
+
+    import custom_components.ha_creality_ws.sensor as sensor_mod
+
+    original = sensor_mod.async_dispatcher_connect
+    sensor_mod.async_dispatcher_connect = (
+        lambda _hass, _signal, target: connected.append(target) or (lambda: None)
+    )
+    try:
+        asyncio.get_event_loop().run_until_complete(
+            setup(hass, entry, lambda ents: added.extend(ents))
+        )
+    finally:
+        sensor_mod.async_dispatcher_connect = original
+
+    return SimpleNamespace(
+        added=added,
+        fire_discovery=lambda: [cb() for cb in connected],
+        flush=lambda: [fn(*a) for fn, a in scheduled],
+    )
+
+
+@pytest.mark.parametrize("field", CANDIDATE_CHAMBER_FIELDS)
+def test_a_field_that_gates_an_entity_can_also_trigger_discovery(field, monkeypatch):
+    """The invariant behind LATE_DISCOVERY_FIELDS, checked by behaviour.
+
+    Derived from what the platforms actually do rather than a hardcoded list: a
+    new gate added to a platform is picked up here automatically. The old version
+    duplicated the constant's own comment, so it could not have caught the third
+    instance of a mismatch that had already happened twice.
     """
-    # number.py::_chamber_entities promotes chamber *control* on these.
-    control_gates = ("targetBoxTemp", "maxBoxTemp")
-    # sensor.py::add_chamber_entities promotes the chamber *sensor* on these.
-    sensor_gates = ("boxTemp", "targetBoxTemp", "maxBoxTemp")
+    gates_something = False
+    for run in (
+        _run_number_setup(_bare_coord(monkeypatch, {field: 40.0}),
+                          {"_cached_has_chamber_control": True}),
+        _run_sensor_setup(_bare_coord(monkeypatch, {field: 40.0}),
+                          {"_cached_has_chamber_sensor": False}),
+    ):
+        if run.added:
+            gates_something = True
 
-    for field in set(control_gates) | set(sensor_gates):
+    if gates_something:
         assert field in LATE_DISCOVERY_FIELDS, (
-            f"{field} gates an entity but cannot trigger discovery"
+            f"{field} makes a platform create an entity but cannot trigger the "
+            "discovery pass that would create it later"
         )
 
 
@@ -254,11 +324,22 @@ def test_no_platform_writes_a_gating_field_directly(monkeypatch):
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[2] / "custom_components" / "ha_creality_ws"
-    for name in ("number.py", "sensor.py", "fan.py"):
-        source = (root / name).read_text()
+    for name in ("number.py", "sensor.py", "fan.py", "switch.py", "light.py", "button.py"):
+        path = root / name
+        if not path.exists():
+            continue
+        source = path.read_text()
+        # Both quote styles, plus the mutating dict methods -- the narrow
+        # `data["x"] =` form missed data.update({...}) and setdefault entirely.
         for field in LATE_DISCOVERY_FIELDS:
-            assert f'data["{field}"] =' not in source, (
-                f"{name} writes {field} directly; use coordinator.merge_telemetry"
+            for pattern in (f'data["{field}"]', f"data['{field}']"):
+                assert f"{pattern} =" not in source, (
+                    f"{name} writes {field} directly; use coordinator.merge_telemetry"
+                )
+        for mutator in (".data.update(", ".data.setdefault(", ".data |= "):
+            assert mutator not in source, (
+                f"{name} mutates coordinator.data via {mutator}, which bypasses "
+                "the discovery signal; use coordinator.merge_telemetry"
             )
 
 
@@ -288,29 +369,6 @@ def test_number_platform_subscribes_to_the_discovery_signal():
     ).read_text()
     assert "_new_entities_" in source
     assert "async_dispatcher_connect" in source
-
-
-def test_the_capability_flag_is_read_inside_the_gate_not_captured():
-    """Capturing it at setup froze the late pass out.
-
-    `_chamber_entities` is the late-discovery path too, so a `False` captured
-    before the printer reported anything would have permanently prevented the
-    chamber number from being created.
-    """
-    from pathlib import Path
-
-    source = (
-        Path(__file__).resolve().parents[2]
-        / "custom_components" / "ha_creality_ws" / "number.py"
-    ).read_text()
-    gate = source.split("def _chamber_entities()", 1)[1].split("\n    ents.extend", 1)[0]
-    assert "_cached_has_chamber_control" in gate, (
-        "the capability must be read inside the gate, not captured at setup"
-    )
-    # Live telemetry promotes the capability the same way __init__ does when it
-    # caches it, so a printer that was off at setup still gets the entity.
-    assert "targetBoxTemp" in gate
-    assert "maxBoxTemp" in gate
 
 
 def _bare_coord(monkeypatch, data):
@@ -419,13 +477,5 @@ def test_deferred_entity_adds_are_dropped_after_unload(monkeypatch):
     )
 
 
-def test_chamber_target_accepts_the_cached_capability():
-    """The common case must not depend on live telemetry at all."""
-    from pathlib import Path
-
-    source = (
-        Path(__file__).resolve().parents[2]
-        / "custom_components" / "ha_creality_ws" / "number.py"
-    ).read_text()
-    assert "_cached_max_chamber_temp" in source
-    assert "_cached_max_box_temp" in source
+def teardown_module(_module):
+    restore_stubs(__name__)

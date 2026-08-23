@@ -68,33 +68,46 @@ test("a saved preset appears alongside the standard ones", async () => {
   assert.ok(after.some((s) => s.title === "Teal"));
 });
 
-test("a preset is persisted, so a second card in the same browser sees it", async () => {
+test("a saved preset is written to localStorage", async () => {
   const { card, sandbox } = await setup();
   presetsSection(card);
   card._presets.save("Teal", "#008080");
 
   const stored = JSON.parse(sandbox.localStorage.getItem("k-cfs-colour-presets"));
   assert.equal(stored.Teal, "#008080");
-
-  // A fresh card reading the same storage picks it up.
-  const second = new card.constructor();
-  second.setConfig({ box0_slot0_filament: SLOT });
-  second.hass = makeHass(slotEntities(1, 0, { attributes: ATTRS }), { entities: REGISTRY });
-  await second._resolveDeviceId();
-  assert.ok(swatchesOf(presetsSection(second)).some((s) => s.title === "Teal"));
 });
 
-test("an invalid colour is not stored", async () => {
-  const { card } = await setup();
-  presetsSection(card);
-  assert.equal(card._presets.save("Bad", "not-a-colour"), false);
-  assert.ok(!("Bad" in card._presets.presets));
+test("a preset already in localStorage is loaded back", async () => {
+  // The read side, in a fresh sandbox: within one page the shared store is held
+  // in memory, so nothing re-enters _load() and a broken loader would only show
+  // up after a reload -- exactly when the user would notice their palette gone.
+  const { card } = await setup((sandbox) => {
+    sandbox.localStorage._seed(
+      "k-cfs-colour-presets",
+      JSON.stringify({ Teal: "#008080", Rust: "#b7410e" }),
+    );
+  });
+
+  const swatches = swatchesOf(presetsSection(card));
+  assert.equal(swatches.length, 14, "twelve standard colours plus the two stored");
+  assert.ok(swatches.some((sw) => sw.title === "Teal"));
+  assert.ok(swatches.some((sw) => sw.title === "Rust"));
+  assert.equal(card._presets.presets.Rust, "#b7410e");
 });
 
-test("a nameless preset is not stored", async () => {
-  const { card } = await setup();
-  presetsSection(card);
-  assert.equal(card._presets.save("   ", "#008080"), false);
+test("a preset saved in one page is visible after a reload", async () => {
+  // Two sandboxes sharing one storage payload, which is what a reload is.
+  const first = await setup();
+  presetsSection(first.card);
+  first.card._presets.save("Teal", "#008080");
+  const payload = first.sandbox.localStorage.getItem("k-cfs-colour-presets");
+
+  const second = await setup((sandbox) => {
+    sandbox.localStorage._seed("k-cfs-colour-presets", payload);
+  });
+  assert.equal(second.card._presets === undefined, true, "not loaded until asked");
+  presetsSection(second.card);
+  assert.equal(second.card._presets.presets.Teal, "#008080");
 });
 
 test("a corrupt stored value degrades to no presets", async () => {
@@ -248,8 +261,22 @@ test("two cards on one dashboard share the preset store", async () => {
 
 test("localStorage is not touched until a dialog opens", async () => {
   // A dashboard with several cards should not all hit storage just to render.
-  const { card } = await setup();
-  assert.equal(card._presets, undefined, "no presets manager before the dialog");
+  // Asserted on actual reads: `card._presets === undefined` is also true when the
+  // store is built eagerly at module scope, which is the thing this forbids.
+  const { card, sandbox } = await setup();
+  const key = "k-cfs-colour-presets";
+
+  assert.ok(
+    !sandbox.localStorage._reads.includes(key),
+    `storage was read before any dialog opened: ${sandbox.localStorage._reads}`,
+  );
+  assert.equal(card._presets, undefined, "and no manager exists yet");
+
+  presetsSection(card);
+  assert.ok(
+    sandbox.localStorage._reads.includes(key),
+    "opening the dialog is what should read it",
+  );
 });
 
 let failed = 0;

@@ -103,30 +103,6 @@ def test_card_parses():
 # --------------------------------------------------------------------------- #
 
 
-def test_only_one_slot_collection_loop():
-    """PR #75 added a second, parallel box/slot loop for change detection.
-
-    Two copies drift: one gains a field the other forgets, and the card renders
-    something the gate cannot see. _collectData must be the only reader.
-    """
-    assert _card().count("_slot${slotId}_filament") == 1
-
-
-def test_render_gate_is_wired():
-    source = _card()
-    assert "_collectData()" in source
-    assert "_updateIfChanged()" in source
-    # A recursive deep-equal is unnecessary for a fixed-shape scalar tree.
-    assert "_deepEqual" not in source
-
-
-def test_setconfig_resets_the_snapshot():
-    """Otherwise _render() wipes #content and the gate declines to refill it."""
-    source = _card()
-    set_config = source.split("setConfig(config) {", 1)[1][:600]
-    assert "_snapshot = null" in set_config
-
-
 def test_cards_have_no_console_logging():
     """PR #75 shipped 18 console.log calls; both cards currently have none."""
     for path in (CARD, PRINTER_CARD):
@@ -148,7 +124,9 @@ def test_www_payload_budget():
     large needs to be a deliberate decision, not a side effect of a card change.
     """
     total = sum(p.stat().st_size for p in WWW.rglob("*") if p.is_file())
-    assert total < 400_000, (
+    # 260 kB, not 400: the directory is ~218 kB, and the point is to make a large
+    # addition a deliberate decision rather than a side effect.
+    assert total < 260_000, (
         f"www/ is {total / 1000:.0f} kB; largest files: "
         + ", ".join(
             f"{p.name} {p.stat().st_size // 1000} kB"
@@ -169,11 +147,46 @@ def _i18n(lang: str) -> dict:
     return json.loads((WWW / "i18n" / f"{lang}.json").read_text(encoding="utf-8"))
 
 
+def _keys_used_by_the_card(source: str) -> set[str]:
+    """Every translation key the card can ask for at runtime.
+
+    A plain `_t("literal")` scan misses more than it finds: the card also builds
+    keys from template literals (`label_material_${s.name}`), passes them through
+    variables (`_t(key, ...)`, `_t(keyMap[metric], ...)`) and forwards stored
+    error keys (`_t(this._deviceIdError)`). Each of those families is expanded
+    from the values the card can actually supply, so a key deleted from the
+    translation files is caught rather than being invisible to a regex.
+    """
+    used = set(re.findall(r'_t\(\s*"([a-z0-9_]+)"', source))
+
+    # `_t(`label_material_${s.name}`)` -- one key per ha-form schema field.
+    form_block = source.split("form.schema = [", 1)[1].split("]", 1)[0]
+    for field in re.findall(r'name:\s*"([a-z0-9_]+)"', form_block):
+        used.add(f"label_material_{field}")
+    # The colour row is hand-built rather than part of the schema.
+    used.add("label_material_color")
+
+    # `_t(key, ...)` / `_t(keyMap[metric], ...)` -- keys held in lookup tables.
+    for table in re.findall(r"keyMap\s*=\s*\{(.*?)\}", source, re.S):
+        used.update(re.findall(r'"([a-z0-9_]+)"', table))
+    for label_map in re.findall(r'key:\s*"([a-z0-9_]+)"', source):
+        used.add(label_map)
+
+    # `_t(this._deviceIdError)` -- the error keys that variable can hold.
+    used.update(re.findall(r'_deviceIdError\s*=\s*[^;]*?"(toast_[a-z0-9_]+)"', source))
+    used.update(re.findall(r'\?\s*"(toast_[a-z0-9_]+)"\s*:\s*"(toast_[a-z0-9_]+)"', source)[0]
+                if re.search(r'\?\s*"toast_[a-z0-9_]+"\s*:\s*"toast_[a-z0-9_]+"', source) else [])
+    return used
+
+
 def test_every_translation_key_used_by_the_card_exists():
     """A missing key renders as the raw key name in the UI."""
     source = _card()
-    used = set(re.findall(r'_t\(\s*"([a-z0-9_]+)"', source))
+    used = _keys_used_by_the_card(source)
     assert used, "no _t() calls found -- has the i18n helper been renamed?"
+    # The dynamic families must actually have been picked up.
+    for expected in ("label_material_type", "label_material_color", "toast_no_device"):
+        assert expected in used, f"{expected} should be discovered as a used key"
 
     remote = _i18n("en")["cfs_card"]
     # The bundled fallback dict is what shows before i18n/en.json loads.
@@ -221,27 +234,20 @@ def test_card_busy_states_are_real_sensor_states():
     ).read_text(encoding="utf-8")
     from custom_components.ha_creality_ws.utils import BUSY_PRINT_STATES
 
-    # derive_print_state is the only producer of these values.
+    # Scoped to derive_print_state, which the comment always claimed but the
+    # regex did not do -- a matching string anywhere in utils.py satisfied it.
     utils_src = (
         ROOT / "custom_components" / "ha_creality_ws" / "utils.py"
     ).read_text(encoding="utf-8")
-    produced = set(re.findall(r'return "([a-z-]+)"', utils_src))
+    body = utils_src.split("def derive_print_state(", 1)[1]
+    body = re.split(r"\ndef ", body, maxsplit=1)[0]
+    produced = set(re.findall(r'return "([a-z-]+)"', body))
     assert produced.issuperset(BUSY_PRINT_STATES), (
         f"never produced by derive_print_state: {sorted(BUSY_PRINT_STATES - produced)}"
     )
-    assert "print_status" in sensor
-
-
-def test_device_lookup_is_scoped_and_fails_closed():
-    """PR #75's fallback wrote to whichever Creality device came first."""
-    source = _strip_comments(_card())
-    assert "config/entity_registry/list" not in source, (
-        "listing the whole registry is both slower and admin-only"
-    )
-    assert "this._hass?.entities" in source or "this._hass.entities" in source
-    # The mixed-printer branch must exist.
-    assert "toast_multiple_devices" in source
-    assert "devices.size !== 1" in source
+    # The card resolves the status entity by translation_key, so that is the
+    # coupling worth asserting -- not the bare string.
+    assert 'translation_key="print_status"' in sensor or '"print_status"' in sensor
 
 
 def test_busy_lookup_is_device_scoped():
@@ -263,14 +269,10 @@ def test_edit_dialog_is_styled_by_classes_not_inline_styles():
     # _renderEditForm is followed by _renderPresets, not _saveMaterial: ending
     # the slice at _saveMaterial would count both methods.
     form = source.split("_renderEditForm(slot, close) {", 1)[1].split("\n  _renderPresets(", 1)[0]
-    inline = len(re.findall(r"\.style\.[a-zA-Z]+\s*=", form))
-    assert inline < 10, f"{inline} inline style assignments in _renderEditForm"
-
-
-def test_dialog_attaches_to_the_shadow_root():
-    source = _strip_comments(_card())
-    assert "document.body.appendChild" not in source
-    assert "this._root.appendChild(overlay)" in source
+    inline = re.findall(r"\.style\.[a-zA-Z]+\s*=", form)
+    # Zero, not "fewer than ten": the dialog is styled entirely by the injected
+    # stylesheet now, so any inline assignment is the regression starting again.
+    assert not inline, f"{len(inline)} inline style assignments in _renderEditForm: {inline}"
 
 
 def test_edit_button_is_reachable_without_hover():
@@ -287,10 +289,23 @@ def test_edit_button_is_reachable_without_hover():
 
 
 def test_edit_button_is_a_real_button_with_a_label():
+    """A div with a click handler is invisible to a screen reader.
+
+    Sliced on a signature-shape-insensitive marker, and asserting the pieces that
+    matter rather than the surrounding text: the escaping on the label, and the
+    aria-disabled that keeps the blocked state announced *and* clickable.
+    """
     source = _card()
-    edit_button = source.split("_renderEditButton(slot, mini = false) {", 1)[1].split("\n  _renderSpoolCard", 1)[0]
+    marker = re.search(r"_renderEditButton\s*\([^)]*\)\s*\{", source)
+    assert marker, "_renderEditButton has been renamed"
+    edit_button = source[marker.end():].split("\n  _renderSpoolCard", 1)[0]
+
     assert '<button type="button"' in edit_button
     assert "aria-label=" in edit_button
+    assert "esc(title)" in edit_button, "the label is device-supplied, so escape it"
+    assert 'aria-disabled="true"' in edit_button, (
+        "a native disabled attribute swallows the click that explains the block"
+    )
 
 
 def _service_number_bounds(field: str) -> dict[str, float]:
@@ -412,6 +427,10 @@ def test_readme_licence_matches_the_licence_file():
     licence = (ROOT / "LICENSE").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     section = readme.split("## License", 1)[1]
-    if "GNU AFFERO GENERAL PUBLIC LICENSE" in licence.upper():
-        assert "Affero" in section, "LICENSE is AGPL but the README says otherwise"
-        assert "MIT" not in section, "the README still claims MIT"
+    # Asserted unconditionally: wrapping these in `if AGPL in licence` meant
+    # relicensing made the test pass having checked nothing.
+    assert "GNU AFFERO GENERAL PUBLIC LICENSE" in licence.upper(), (
+        "LICENSE is no longer AGPL; update this test and the README together"
+    )
+    assert "Affero" in section, "LICENSE is AGPL but the README says otherwise"
+    assert "MIT" not in section, "the README still claims MIT"

@@ -10,15 +10,35 @@ ALLOWED_HOST_SUBSTRINGS = ["localhost", "http://", "ws://"]
 
 
 def test_platforms_list_unique():
-    """Ensure PLATFORMS list in __init__.py contains no duplicate entries."""
-    text = init_path.read_text(encoding="utf-8")
-    # crude parse for PLATFORMS list line
-    for line in text.splitlines():
-        if line.strip().startswith("PLATFORMS") and "[" in line:
-            inside = line.split("[",1)[1].rsplit("]",1)[0]
-            items = [i.strip().strip("'\"") for i in inside.split(',') if i.strip()]
-            assert len(items) == len(set(items)), "Duplicate platform entries in PLATFORMS"
-            break
+    """PLATFORMS must contain no duplicate entries.
+
+    Parsed with ast rather than scanned line-by-line: the old version only
+    asserted inside a branch requiring `PLATFORMS` and `[` on the same line, so
+    wrapping the list across lines -- the natural result of adding a ninth
+    platform -- made the loop find nothing and the test pass having checked
+    nothing.
+    """
+    import ast
+
+    tree = ast.parse(init_path.read_text(encoding="utf-8"))
+    items = None
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        if not any(isinstance(t, ast.Name) and t.id == "PLATFORMS" for t in targets):
+            continue
+        value = node.value
+        assert isinstance(value, (ast.List, ast.Tuple)), "PLATFORMS must be a literal list"
+        items = [
+            el.value if isinstance(el, ast.Constant) else ast.unparse(el)
+            for el in value.elts
+        ]
+        break
+
+    assert items is not None, "PLATFORMS assignment not found in __init__.py"
+    assert items, "PLATFORMS is empty"
+    assert len(items) == len(set(items)), f"duplicate platform entries: {items}"
 
 
 def test_no_unexpected_cloud_urls():

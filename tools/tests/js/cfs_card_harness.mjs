@@ -257,13 +257,22 @@ export function loadCard() {
     // English fallback rather than depending on the JSON files.
     fetch: () => new Promise(() => {}),
     console,
+    // Access-counting, so "storage is not touched until X" is assertable rather
+    // than inferred from a field still being undefined.
     localStorage: (() => {
       const store = new Map();
+      const reads = [];
+      const writes = [];
       return {
-        getItem: (k) => (store.has(k) ? store.get(k) : null),
-        setItem: (k, v) => store.set(k, String(v)),
+        getItem: (k) => { reads.push(k); return store.has(k) ? store.get(k) : null; },
+        setItem: (k, v) => { writes.push(k); store.set(k, String(v)); },
         removeItem: (k) => store.delete(k),
         clear: () => store.clear(),
+        /** Keys read since load, for tests that care about *when* storage is hit. */
+        _reads: reads,
+        _writes: writes,
+        /** Seed a value without counting it as a read or a write. */
+        _seed: (k, v) => store.set(k, String(v)),
       };
     })(),
     setTimeout,

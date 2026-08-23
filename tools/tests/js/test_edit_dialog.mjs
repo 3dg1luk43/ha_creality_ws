@@ -194,12 +194,28 @@ test("a multi-colour spool cannot have its colour written", async () => {
 });
 
 test("an unaddressable slot cannot be edited", async () => {
+  // Two halves: the affordance is locked, *and* the dialog refuses if something
+  // opens it anyway. Only asserting the first left _showEditDialog free to drop
+  // its guard, and _saveMaterial copies printerBoxId straight into the payload
+  // without re-validating -- so the service would receive box_id: null.
   const { card, slot } = await setup({ attributes: { type: "PLA" } });
-  // No box_id attribute and a non-conventional entity id would guess; here the
-  // entity id supplies box 1, so force the unaddressable case directly.
+  // The entity id supplies box 1 via the naming convention, so the unaddressable
+  // case has to be forced -- and forced through _findSlot, which is what
+  // _showEditDialog consults.
   const orphan = { ...slot, printerBoxId: null };
-  const html = card._renderEditButton(orphan);
-  assert.match(html, /aria-disabled="true"/);
+  card._findSlot = (eid) => (eid === SLOT ? orphan : null);
+
+  assert.match(card._renderEditButton(orphan), /aria-disabled="true"/);
+
+  const toasts = [];
+  card._showToast = (msg) => toasts.push(msg);
+  card._showEditDialog(SLOT);
+
+  assert.ok(
+    !card._root.children.some((c) => c.className === "edit-overlay"),
+    "the dialog must refuse to open",
+  );
+  assert.equal(toasts.length, 1, "and say why");
 });
 
 test("cancel closes the dialog", async () => {

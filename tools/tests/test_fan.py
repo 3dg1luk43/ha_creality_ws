@@ -136,10 +136,36 @@ def test_test_server_prefers_h264_for_video():
     keyframe interval (aiortc's encoder inherits libx264's 250-frame default).
     """
     source = _test_server_source()
-    assert '"--prefer-codec"' in source
-    assert 'default="h264"' in source
+    # The parser is built by a module-level function, so the default is a value
+    # rather than a string in the file.
     assert "H264PassthroughTrack" in source
-    assert "keyint=" in source
+    assert "keyint=" in source, "libx264's 250-frame default is too long for HLS"
+
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "tools" / "creality_printer_test_server.py"
+    name = "_sim_for_args"
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    # Registered before execution: a @dataclass in the module resolves its own
+    # __module__ through sys.modules, and fails with an opaque AttributeError
+    # otherwise.
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:  # pragma: no cover - aiortc/av absent in CI
+        pytest.skip(f"simulator not importable here: {exc}")
+    finally:
+        sys.modules.pop(name, None)
+
+    parser = module.build_argparser() if hasattr(module, "build_argparser") else None
+    if parser is None:
+        pytest.skip("simulator does not expose its parser separately")
+    defaults = parser.parse_args([])
+    assert defaults.prefer_codec == "h264", (
+        "aiortc answers VP8 first, which HA's HLS pipeline cannot package"
+    )
 
 
 def _h264_timing():

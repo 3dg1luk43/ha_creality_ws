@@ -210,6 +210,59 @@ test("no data renders the empty-state message, not a crash", () => {
 
 // --------------------------------------------------------------------------- //
 
+// --------------------------------------------------------------------------- //
+// Gate-vs-render drift
+// --------------------------------------------------------------------------- //
+
+test("every collected slot field is visible to the render gate", () => {
+  // The invariant the old source-text "only one collection loop" guard was
+  // gesturing at: two readers drift, one gains a field the other forgets, and
+  // the card renders something the gate cannot see. Counting a literal in the
+  // source could not catch that; changing each field and demanding a re-render
+  // can.
+  const attrChanges = {
+    type: "PETG",
+    name: "Hyper PETG",
+    vendor: "Elegoo",
+    min_temp: 200,
+    max_temp: 250,
+    pressure: 0.09,
+    rfid: "999999",
+    box_id: 2,
+    slot_id: 3,
+  };
+
+  for (const [attr, next] of Object.entries(attrChanges)) {
+    const card = countingCard();
+    card.hass = gateHass(slotEntities(1, 0, { attributes: FULL_ATTRS }));
+    const baseline = card._renderCount;
+
+    card.hass = gateHass(slotEntities(1, 0, {
+      attributes: { ...FULL_ATTRS, [attr]: next },
+    }));
+    assert.ok(
+      card._renderCount > baseline,
+      `changing ${attr} must invalidate the gate (renders stayed at ${baseline})`,
+    );
+  }
+
+  // And the three entity states, not just the attributes.
+  for (const [label, states] of [
+    ["filament", slotEntities(1, 0, { filament: "Other PLA", attributes: FULL_ATTRS })],
+    ["color", slotEntities(1, 0, { color: "#123456", attributes: FULL_ATTRS })],
+    ["percent", slotEntities(1, 0, { percent: 42, attributes: FULL_ATTRS })],
+  ]) {
+    const card = countingCard();
+    card.hass = gateHass(slotEntities(1, 0, { attributes: FULL_ATTRS }));
+    const baseline = card._renderCount;
+    card.hass = gateHass(states);
+    assert.ok(
+      card._renderCount > baseline,
+      `changing the ${label} state must invalidate the gate`,
+    );
+  }
+});
+
 let failed = 0;
 for (const [name, fn] of tests) {
   try {
