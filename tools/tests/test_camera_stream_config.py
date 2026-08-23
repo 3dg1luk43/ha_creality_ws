@@ -8,7 +8,14 @@ if "aiohttp" not in sys.modules:
 # Mock go2rtc_client if needed
 if "go2rtc_client" not in sys.modules:
     sys.modules["go2rtc_client"] = MagicMock()
-    sys.modules["go2rtc_client.exceptions"] = MagicMock()
+    exceptions_mod = MagicMock()
+
+    class Go2RtcClientError(Exception):
+        """Real class, not a MagicMock: camera.py catches it, and `except` on a
+        non-exception raises TypeError instead of exercising the handler."""
+
+    exceptions_mod.Go2RtcClientError = Go2RtcClientError
+    sys.modules["go2rtc_client.exceptions"] = exceptions_mod
 
 # Mock homeassistant.components.camera
 if "homeassistant.components" in sys.modules:
@@ -392,6 +399,43 @@ def test_custom_rtsp_sources_keep_their_go2rtc_settings():
     assert "_make_go2rtc_camera(go2rtc_source=custom_url)" in camera, (
         "the Custom non-http path still builds a go2rtc camera"
     )
+
+
+def test_concurrent_callers_configure_the_stream_once():
+    """stream_source, snapshots and WebRTC offers all call this, concurrently.
+
+    Without serialization each caller creates (or deletes and recreates) the same
+    go2rtc stream before _stream_name is set, and one failing sets
+    _force_recreate_stream while another has just succeeded.
+    """
+    import asyncio
+
+    cam = _camera()
+    cam._go2rtc_is_ha_managed = True
+    cam._go2rtc_server_url = "http://localhost:11984/"
+
+    client = MagicMock()
+    client.streams.list = AsyncMock(return_value={})
+
+    added = []
+
+    async def _add(name, **_kwargs):
+        added.append(name)
+        # Yield inside the critical section: without a lock the other callers
+        # get in here too.
+        await asyncio.sleep(0)
+
+    client.streams.add = AsyncMock(side_effect=_add)
+    cam._go2rtc_client = client
+
+    async def run():
+        await asyncio.gather(*(cam._ensure_stream_configured() for _ in range(5)))
+
+    asyncio.run(run())
+
+    assert len(added) == 1, f"stream configured {len(added)} times: {added}"
+    assert cam._stream_name, "the stream name must be recorded"
+    assert cam._force_recreate_stream is False
 
 
 def test_stream_source_is_none_for_direct_signaling():

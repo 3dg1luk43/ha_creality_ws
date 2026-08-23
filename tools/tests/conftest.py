@@ -100,6 +100,40 @@ setattr(aiohttp_client_mod, "async_get_clientsession", async_get_clientsession)
 sys.modules["homeassistant.helpers.aiohttp_client"] = aiohttp_client_mod
 setattr(helpers_mod, "aiohttp_client", aiohttp_client_mod)
 
+# --- MOCK components.number + const + helpers.entity_registry ---
+# Needed by number.py, which test_late_discovery drives directly. Registered here
+# rather than inside that test module: these are process-wide, so a per-module
+# install leaks into whatever pytest collects next.
+number_mod = types.ModuleType("homeassistant.components.number")
+
+class NumberEntity:
+    pass
+
+number_mod.NumberEntity = NumberEntity
+number_mod.NumberMode = MagicMock()
+number_mod.NumberDeviceClass = MagicMock()
+sys.modules["homeassistant.components.number"] = number_mod
+components_mod.number = number_mod
+
+# A MagicMock rather than a real module: the integration imports a moving set of
+# unit constants from here (including an older-core fallback block), and every
+# `from homeassistant.const import X` has to resolve. Named attributes are pinned
+# where a test asserts on the value.
+const_mod = MagicMock()
+const_mod.PERCENTAGE = "%"
+const_mod.UnitOfTemperature.CELSIUS = "°C"
+sys.modules["homeassistant.const"] = const_mod
+ha_mod.const = const_mod
+
+entity_registry_mod = types.ModuleType("homeassistant.helpers.entity_registry")
+# Legacy fan numbers are only created for entities that already exist, so the
+# default "nothing registered" keeps a fresh setup to the modern entities.
+entity_registry_mod.async_get = MagicMock(
+    return_value=MagicMock(async_get_entity_id=MagicMock(return_value=None))
+)
+sys.modules["homeassistant.helpers.entity_registry"] = entity_registry_mod
+helpers_mod.entity_registry = entity_registry_mod
+
 # --- MOCK helpers.entity ---
 class DeviceInfo:
     def __init__(self, **kwargs):

@@ -76,7 +76,17 @@ DEFAULT_GO2RTC_RTSP_PORT = 8554
 # otherwise never fire a discovery pass, and the control would stay absent until
 # a restart happened to race the right way -- the very defect this list exists
 # to prevent.
-LATE_DISCOVERY_FIELDS: tuple[str, ...] = ("boxsInfo", "maxBoxTemp", "targetBoxTemp")
+# Must stay in step with every gate that reads these from coord.data:
+# number.py promotes chamber *control* on targetBoxTemp/maxBoxTemp, and sensor.py
+# promotes the chamber *sensor* on boxTemp/targetBoxTemp/maxBoxTemp. A field that
+# gates an entity but does not appear here can never trigger the pass that would
+# create it.
+LATE_DISCOVERY_FIELDS: tuple[str, ...] = (
+    "boxsInfo",
+    "boxTemp",
+    "maxBoxTemp",
+    "targetBoxTemp",
+)
 
 # Notifications
 CONF_NOTIFY_DEVICE = "notify_device"

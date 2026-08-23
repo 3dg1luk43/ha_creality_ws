@@ -23,33 +23,9 @@ coord_mod = sys.modules[KCoordinator.__module__]
 def _number_platform():
     """number.async_setup_entry, imported without executing the real package init.
 
-    number.py pulls in a few HA modules the shared conftest leaves bare; they are
-    stubbed here rather than in conftest because only this module needs them.
+    The HA modules it needs are stubbed in the shared conftest, so nothing is
+    installed (or leaked) from here.
     """
-    from unittest.mock import MagicMock
-
-    if "homeassistant.components.number" not in sys.modules:
-        mod = MagicMock()
-
-        class _NumberEntity:  # minimal stand-in
-            pass
-
-        mod.NumberEntity = _NumberEntity
-        mod.NumberMode = MagicMock()
-        mod.NumberDeviceClass = MagicMock()
-        sys.modules["homeassistant.components.number"] = mod
-    if "homeassistant.const" not in sys.modules:
-        const_mod = MagicMock()
-        const_mod.UnitOfTemperature = MagicMock()
-        const_mod.PERCENTAGE = "%"
-        sys.modules["homeassistant.const"] = const_mod
-    helpers = sys.modules["homeassistant.helpers"]
-    if not hasattr(helpers, "entity_registry"):
-        reg = MagicMock()
-        reg.async_get.return_value.async_get_entity_id.return_value = None
-        sys.modules["homeassistant.helpers.entity_registry"] = reg
-        helpers.entity_registry = reg
-
     from custom_components.ha_creality_ws.number import async_setup_entry
 
     return async_setup_entry
@@ -154,6 +130,25 @@ def test_maxboxtemp_is_a_gating_field():
     assert "boxsInfo" in LATE_DISCOVERY_FIELDS
 
 
+def test_every_capability_gate_field_can_trigger_discovery():
+    """The invariant behind this tuple, stated once.
+
+    A field that some platform reads from coord.data to decide whether to create
+    an entity, but which is absent here, can never trigger the pass that would
+    create it. That mismatch has now caused the same defect twice: targetBoxTemp
+    for number.py's chamber control, then boxTemp for sensor.py's chamber sensor.
+    """
+    # number.py::_chamber_entities promotes chamber *control* on these.
+    control_gates = ("targetBoxTemp", "maxBoxTemp")
+    # sensor.py::add_chamber_entities promotes the chamber *sensor* on these.
+    sensor_gates = ("boxTemp", "targetBoxTemp", "maxBoxTemp")
+
+    for field in set(control_gates) | set(sensor_gates):
+        assert field in LATE_DISCOVERY_FIELDS, (
+            f"{field} gates an entity but cannot trigger discovery"
+        )
+
+
 def test_targetboxtemp_is_a_gating_field():
     """number.py gates the chamber control on it, so it must also trigger.
 
@@ -182,7 +177,9 @@ def _gating_value(field):
     return 80.0 if field == "maxBoxTemp" else 40.0
 
 
-@pytest.mark.parametrize("field", ["boxsInfo", "maxBoxTemp", "targetBoxTemp"])
+# Parametrized over the constant itself, so a field added there without a working
+# trigger fails here rather than being silently untested.
+@pytest.mark.parametrize("field", LATE_DISCOVERY_FIELDS)
 def test_first_appearance_of_a_gating_field_triggers_discovery(coord, field):
     _feed(coord, {"model": "K2 Plus"})
     assert coord.signals == []

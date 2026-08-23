@@ -380,6 +380,8 @@ class CrealityWebRTCCamera(_BaseCamera):
         self._go2rtc_source = go2rtc_source
         self._stream_name: str | None = None
         self._force_recreate_stream = False
+        # Guards stream creation/recreation; see _ensure_stream_configured.
+        self._stream_config_lock = asyncio.Lock()
         self._last_error: str | None = None
         # Frontend ICE candidates queued per session for the non-trickle direct POST.
         self._direct_sessions: dict[str, list] = {}
@@ -740,9 +742,26 @@ class CrealityWebRTCCamera(_BaseCamera):
 
 
     async def _ensure_stream_configured(self) -> None:
-        """Ensure the go2rtc stream is configured using HA's go2rtc client."""
+        """Ensure the go2rtc stream is configured using HA's go2rtc client.
+
+        Serialized: stream_source(), still-image capture and WebRTC offer
+        handling all call this, and HA can drive them concurrently. Before
+        _stream_name is set, two callers would each create (or delete and
+        recreate) the same go2rtc stream, and one failing would set
+        _force_recreate_stream while the other had just succeeded.
+        """
         if self._stream_name and not self._force_recreate_stream:
-            return  # Already configured
+            return  # Already configured, no lock needed for the common path
+
+        async with self._stream_config_lock:
+            # Re-check inside the lock: another caller may have finished while we
+            # were waiting for it.
+            if self._stream_name and not self._force_recreate_stream:
+                return
+            await self._configure_stream_locked()
+
+    async def _configure_stream_locked(self) -> None:
+        """Body of _ensure_stream_configured; caller holds _stream_config_lock."""
         
         # Initialize client if needed
         if not self._go2rtc_client:
