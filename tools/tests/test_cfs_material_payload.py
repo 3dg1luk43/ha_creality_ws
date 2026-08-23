@@ -182,3 +182,35 @@ def test_busy_states_are_exactly_the_uninterruptible_ones():
     assert BUSY_PRINT_STATES == {"printing", "paused", "processing", "self-testing"}
     for state in ("idle", "completed", "stopped", "off", "unknown", "error"):
         assert state not in BUSY_PRINT_STATES
+
+
+def test_an_unparseable_number_is_rejected_not_dropped():
+    """safe_float returning None is indistinguishable from "not supplied".
+
+    Omitting the field and reporting success meant a direct caller's typo became
+    a silent no-op.
+    """
+    for field in ("min_temp", "max_temp", "pressure"):
+        with pytest.raises(ValueError, match=field):
+            build_modify_material_payload(
+                box_id=1, slot_id=0, material_type="PLA", **{field: "abc"}
+            )
+
+
+def test_omitted_numbers_are_still_omitted():
+    """Rejecting bad input must not turn absence into an error."""
+    payload = build_modify_material_payload(box_id=1, slot_id=0, material_type="PLA")
+    assert "minTemp" not in payload
+    assert "maxTemp" not in payload
+    assert "pressure" not in payload
+
+
+def test_numeric_strings_are_still_accepted():
+    """YAML and the service schema both hand over strings."""
+    payload = build_modify_material_payload(
+        box_id=1, slot_id=0, material_type="PLA",
+        min_temp="190", max_temp="240", pressure="0.04",
+    )
+    assert payload["minTemp"] == 190.0
+    assert payload["maxTemp"] == 240.0
+    assert payload["pressure"] == 0.04

@@ -66,7 +66,12 @@ DEFAULT_GO2RTC_RTSP_PORT = 8554
 # printer must not block the config entry), so an entity depending on one of
 # these would otherwise never be created until the next restart that happens to
 # race the right way. The first appearance of any of them fires a discovery pass.
-LATE_DISCOVERY_FIELDS: tuple[str, ...] = ("boxsInfo", "maxBoxTemp")
+# targetBoxTemp is here because number.py gates the chamber control on it: a
+# printer that reports a chamber target but never a maximum (K2 Base) would
+# otherwise never fire a discovery pass, and the control would stay absent until
+# a restart happened to race the right way -- the very defect this list exists
+# to prevent.
+LATE_DISCOVERY_FIELDS: tuple[str, ...] = ("boxsInfo", "maxBoxTemp", "targetBoxTemp")
 
 # Notifications
 CONF_NOTIFY_DEVICE = "notify_device"

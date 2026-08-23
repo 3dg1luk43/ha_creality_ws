@@ -9,12 +9,8 @@ appears; this checks it fires for each gating field, exactly once each.
 import asyncio
 import sys
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
-
-if "homeassistant.helpers.dispatcher" not in sys.modules:
-    sys.modules["homeassistant.helpers.dispatcher"] = MagicMock()
 
 from custom_components.ha_creality_ws.const import LATE_DISCOVERY_FIELDS  # noqa: E402
 from custom_components.ha_creality_ws.coordinator import KCoordinator  # noqa: E402
@@ -66,12 +62,40 @@ def test_maxboxtemp_is_a_gating_field():
     assert "boxsInfo" in LATE_DISCOVERY_FIELDS
 
 
-@pytest.mark.parametrize("field", ["boxsInfo", "maxBoxTemp"])
+def test_targetboxtemp_is_a_gating_field():
+    """number.py gates the chamber control on it, so it must also trigger.
+
+    A K2 Base reports a chamber target but never a maximum. With targetBoxTemp
+    missing from this tuple, the gate in _chamber_entities and the signal that
+    re-runs it disagreed, and the control stayed absent until a restart raced the
+    right way -- the exact defect the tuple exists to prevent.
+    """
+    assert "targetBoxTemp" in LATE_DISCOVERY_FIELDS
+
+
+def test_a_target_box_temp_only_printer_triggers_discovery(coord):
+    """The runtime path, not just the constant: feed only targetBoxTemp."""
+    _feed(coord, {"model": "K2", "nozzleTemp": 25})
+    assert coord.signals == []
+
+    _feed(coord, {"targetBoxTemp": 40.0})
+    assert len(coord.signals) == 1, (
+        "a chamber target with no maximum must still re-run entity discovery"
+    )
+
+
+def _gating_value(field):
+    if field == "boxsInfo":
+        return {"materialBoxs": []}
+    return 80.0 if field == "maxBoxTemp" else 40.0
+
+
+@pytest.mark.parametrize("field", ["boxsInfo", "maxBoxTemp", "targetBoxTemp"])
 def test_first_appearance_of_a_gating_field_triggers_discovery(coord, field):
     _feed(coord, {"model": "K2 Plus"})
     assert coord.signals == []
 
-    _feed(coord, {field: 80.0 if field == "maxBoxTemp" else {"materialBoxs": []}})
+    _feed(coord, {field: _gating_value(field)})
     assert coord.signals == ["ha_creality_ws_new_entities_entry1"]
 
 

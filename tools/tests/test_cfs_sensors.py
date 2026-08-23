@@ -21,9 +21,6 @@ if "homeassistant.components.sensor" not in sys.modules:
 if not hasattr(sys.modules["homeassistant.helpers.entity"], "EntityCategory"):
     sys.modules["homeassistant.helpers.entity"].EntityCategory = MagicMock()
 
-if "homeassistant.helpers.dispatcher" not in sys.modules:
-    sys.modules["homeassistant.helpers.dispatcher"] = MagicMock()
-
 if "homeassistant.const" not in sys.modules:
     const_mod = MagicMock()
     sys.modules["homeassistant.const"] = const_mod

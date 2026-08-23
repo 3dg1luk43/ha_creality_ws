@@ -71,6 +71,23 @@ setattr(uc_mod, "CoordinatorEntity", CoordinatorEntity)
 setattr(helpers_mod, "update_coordinator", uc_mod)
 sys.modules["homeassistant.helpers.update_coordinator"] = uc_mod
 
+# --- MOCK helpers.dispatcher ---
+# Installed here rather than in each test module: four of them used to do
+# `if "homeassistant.helpers.dispatcher" not in sys.modules: ... MagicMock()`,
+# which made the module every later import saw depend on pytest's collection
+# order. Named no-ops rather than a blanket MagicMock, so a rename in the
+# integration surfaces as a failure instead of silently passing. Tests that need
+# to observe a dispatch monkeypatch the name the module under test imported.
+dispatcher_mod = types.ModuleType("homeassistant.helpers.dispatcher")
+def async_dispatcher_send(hass, signal, *args):  # noqa: ANN001, ANN201
+    return None
+def async_dispatcher_connect(hass, signal, target):  # noqa: ANN001, ANN201
+    return lambda: None
+setattr(dispatcher_mod, "async_dispatcher_send", async_dispatcher_send)
+setattr(dispatcher_mod, "async_dispatcher_connect", async_dispatcher_connect)
+sys.modules["homeassistant.helpers.dispatcher"] = dispatcher_mod
+setattr(helpers_mod, "dispatcher", dispatcher_mod)
+
 # --- MOCK aiohttp_client ---
 aiohttp_client_mod = types.ModuleType("homeassistant.helpers.aiohttp_client")
 def async_get_clientsession(hass):

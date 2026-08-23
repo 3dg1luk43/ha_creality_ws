@@ -6,18 +6,12 @@ notification on every Home Assistant restart.
 """
 
 import asyncio
-import sys
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 
-# coordinator.py imports a few HA helpers that the shared conftest leaves bare.
-if "homeassistant.helpers.dispatcher" not in sys.modules:
-    sys.modules["homeassistant.helpers.dispatcher"] = MagicMock()
-
-from custom_components.ha_creality_ws.const import NOTIFY_PRIME_GRACE_SECS  # noqa: E402
-from custom_components.ha_creality_ws.coordinator import KCoordinator  # noqa: E402
+from custom_components.ha_creality_ws.const import NOTIFY_PRIME_GRACE_SECS
+from custom_components.ha_creality_ws.coordinator import KCoordinator
 
 
 class HassStub:

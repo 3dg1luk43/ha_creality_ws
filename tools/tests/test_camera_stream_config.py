@@ -272,6 +272,27 @@ def test_stream_source_honours_an_explicit_rtsp_port_override():
     assert asyncio.run(run()) == "rtsp://10.0.0.5:9554/creality_k2_1_2_3_4"
 
 
+def test_a_failed_custom_go2rtc_does_not_keep_its_rtsp_override():
+    """Custom init failed, discovery fell back to HA's go2rtc.
+
+    The configured override points at the server we could not reach, so honouring
+    it aimed HLS at a port nothing is listening on. HA-managed RTSP is 18554.
+    """
+    import asyncio
+
+    cam = _camera(go2rtc_url="http://10.0.0.5:1984", go2rtc_rtsp_port=9554)
+    # What _async_init_go2rtc leaves behind on that path.
+    cam._go2rtc_server_url = "http://localhost:11984/"
+    cam._go2rtc_is_ha_managed = True
+
+    async def run():
+        with patch.object(cam, "_ensure_stream_configured", new_callable=AsyncMock):
+            cam._stream_name = "creality_k2_1_2_3_4"
+            return await cam.stream_source()
+
+    assert asyncio.run(run()) == "rtsp://127.0.0.1:18554/creality_k2_1_2_3_4"
+
+
 def test_stream_source_is_none_for_direct_signaling():
     """Direct-signaling cameras never register a go2rtc stream, so no HLS."""
     import asyncio

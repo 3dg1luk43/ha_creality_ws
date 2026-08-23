@@ -401,6 +401,7 @@ class KCFSCard extends HTMLElement {
     this._deviceIdError = null;
     this._deviceIdGeneration = (this._deviceIdGeneration || 0) + 1;
     this._deviceIdPending = false;
+    this._deviceIdRetried = false;
     this._statusEid = null;
     this._render();
   }
@@ -422,8 +423,18 @@ class KCFSCard extends HTMLElement {
     // HA does not guarantee hass.entities is populated on the first assignment.
     // A resolution that failed against an empty registry caches null, and null
     // is not undefined, so nothing would ever retry it. Reopen the question once
-    // the registry actually knows about one of our entities.
-    if (this._deviceId === null && !this._deviceIdPending && this._registryHasEntities()) {
+    // the registry actually knows about one of our entities -- but only once.
+    // A card that legitimately cannot resolve (entities spanning two printers,
+    // or an entity with no device at all) also sits at null with a populated
+    // registry, and retrying it on every telemetry frame flipped the edit
+    // buttons between pencil and lock for the whole session.
+    if (
+      this._deviceId === null
+      && !this._deviceIdPending
+      && !this._deviceIdRetried
+      && this._registryHasEntities()
+    ) {
+      this._deviceIdRetried = true;
       this._deviceId = undefined;
       this._deviceIdError = null;
     }
@@ -1817,7 +1828,10 @@ class KCFSCard extends HTMLElement {
         break;
       }
     }
-    this._statusEid = { deviceId, entityId: found };
+    // Only a hit is memoized: late discovery can add the print_status entity
+    // after this first lookup, and caching the miss would leave _isPrinterBusy()
+    // permanently false -- so the lock affordance would never appear.
+    if (found) this._statusEid = { deviceId, entityId: found };
     return found;
   }
 

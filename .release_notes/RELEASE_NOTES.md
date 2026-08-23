@@ -25,7 +25,7 @@ Salvages the CFS material-editing work from [#75](https://github.com/3dg1luk43/h
 - **The card's `compact_view` option became `view_mode`** (`full` | `compact` | `box`). Existing dashboards migrate automatically on load, and the old key is dropped the next time you edit the card. No action needed.
 - **The card only re-renders when something it displays has actually changed**, instead of on every state update.
 - **Printer status is derived in one place** now, shared by the status sensor and the service's "is it safe to write" check, so the card and the service cannot disagree about whether the printer is busy.
-- **The bundled CFS unit image is 32 kB instead of 509 kB** (WebP). The whole `www/` directory had been 143 kB, so as a PNG this one decorative asset would have made every install over four times larger.
+- **The bundled CFS unit image is 17 kB instead of 509 kB** (WebP). The whole `www/` directory had been 143 kB, so as a PNG this one decorative asset would have made every install over four times larger.
 
 ### Notes for anyone with CFS hardware
 Creality does not document the `modifyMaterial` command. The payload shape comes from @buzato's testing against a real CFS, and is verified here against the bundled printer simulator — but two details are still unconfirmed: the printer *streams* colours as seven hex characters yet appears to accept six on write, and the `rfid` field name is inferred from telemetry rather than from a confirmed dump. Every write logs both the outgoing payload and what the printer reports back afterwards. **If a material edit does something unexpected, please open an issue with that part of your debug log** — that is what will settle these.

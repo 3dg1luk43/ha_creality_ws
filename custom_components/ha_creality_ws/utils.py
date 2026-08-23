@@ -558,8 +558,23 @@ def build_modify_material_payload(
     if color is not None:
         payload["color"] = normalize_material_color(color)
 
-    low = safe_float(min_temp)
-    high = safe_float(max_temp)
+    def _number(name: str, value: Any) -> float | None:
+        """Parse an optional number, refusing input that is not one.
+
+        safe_float returning None is indistinguishable from "not supplied", so
+        min_temp="abc" used to be dropped and reported as a successful write. The
+        service schema coerces these fields, but a direct caller would get a
+        silent no-op.
+        """
+        if value is None:
+            return None
+        parsed = safe_float(value)
+        if parsed is None:
+            raise ValueError(f"{name} must be a number, got {value!r}")
+        return parsed
+
+    low = _number("min_temp", min_temp)
+    high = _number("max_temp", max_temp)
     if low is not None and high is not None and high < low:
         raise ValueError(
             f"max_temp ({high}) must not be below min_temp ({low})"
@@ -569,7 +584,7 @@ def build_modify_material_payload(
     if high is not None:
         payload["maxTemp"] = high
 
-    advance = safe_float(pressure)
+    advance = _number("pressure", pressure)
     if advance is not None:
         if not 0.0 <= advance <= 1.0:
             raise ValueError(f"pressure must be between 0 and 1, got {advance}")

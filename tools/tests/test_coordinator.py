@@ -26,9 +26,8 @@ sys.modules["homeassistant.helpers.update_coordinator"] = mock_update_coordinato
 mock_aiohttp_client = MagicMock()
 sys.modules["homeassistant.helpers.aiohttp_client"] = mock_aiohttp_client
 
-# Mock homeassistant.helpers.dispatcher
-mock_dispatcher = MagicMock()
-sys.modules["homeassistant.helpers.dispatcher"] = mock_dispatcher
+# homeassistant.helpers.dispatcher comes from conftest; installing another stub
+# here would clobber it for every module collected afterwards.
 
 from custom_components.ha_creality_ws.coordinator import KCoordinator
 

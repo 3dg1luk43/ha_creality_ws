@@ -142,6 +142,24 @@ test("a renamed status entity is still found via translation_key", async () => {
   assert.equal(card._isPrinterBusy(), true);
 });
 
+test("a status entity discovered late is picked up, not cached as missing", async () => {
+  // This PR adds late entity discovery, so print_status can enter the registry
+  // after the first lookup. Memoizing the miss left _isPrinterBusy() false for
+  // good, and the lock affordance never appeared.
+  const registryWithoutStatus = {
+    [A_SLOT]: { device_id: "dev_a", platform: "ha_creality_ws" },
+  };
+  const card = cardFor(A_SLOT, statesForBoth({ aStatus: "printing" }), registryWithoutStatus);
+  await card._resolveDeviceId();
+  assert.equal(card._isPrinterBusy(), false, "nothing to find yet");
+
+  // The status sensor is created by the late-discovery pass.
+  card.hass = makeHass(statesForBoth({ aStatus: "printing" }), {
+    entities: twoPrinterRegistry(),
+  });
+  assert.equal(card._isPrinterBusy(), true, "the late entity must be found");
+});
+
 test("busy state is part of the fingerprint", async () => {
   // Otherwise the lock affordance goes stale for the whole print.
   const card = cardFor(A_SLOT, statesForBoth(), twoPrinterRegistry());
@@ -192,6 +210,34 @@ test("a card spanning two printers renders its edit button locked", async () => 
   const button = card._renderEditButton(card._findSlot(A_SLOT));
   assert.match(button, /\sdisabled>/, "the button is disabled");
   assert.match(button, /mdi:lock/, "and shows the lock");
+});
+
+test("a card that cannot resolve is retried once, not on every update", async () => {
+  // The empty-registry retry needs exactly one attempt. Without an "already
+  // retried" guard, a mixed-printer card sits at _deviceId === null with a
+  // populated registry forever, so every telemetry frame cleared the error,
+  // rendered the buttons unlocked, then re-resolved and rendered them locked --
+  // flip-flopping for the whole session, and re-issuing the callWS fallback.
+  const { KCFSCard } = loadCard();
+  const card = new KCFSCard();
+  card.setConfig({ box0_slot0_filament: A_SLOT, box1_slot0_filament: B_SLOT });
+
+  let resolves = 0;
+  const inner = card._resolveDeviceId.bind(card);
+  card._resolveDeviceId = () => { resolves += 1; return inner(); };
+
+  for (let i = 0; i < 5; i += 1) {
+    card.hass = makeHass(statesForBoth({ aStatus: "idle" }), { entities: twoPrinterRegistry() });
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  assert.equal(card._deviceIdError, "toast_multiple_devices", "still failing closed");
+  assert.ok(card._deviceId === null, "and still unresolved");
+  assert.ok(
+    resolves <= 2,
+    `resolution must not repeat per update, ran ${resolves} times`,
+  );
 });
 
 test("a resolve in flight during setConfig cannot write the old device id", async () => {

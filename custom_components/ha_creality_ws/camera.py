@@ -482,7 +482,10 @@ class CrealityWebRTCCamera(_BaseCamera):
         """
         host, api_port = self._go2rtc_host_and_api_port()
 
-        override = self._custom_go2rtc_rtsp_port
+        # Only honour the override while we are actually talking to the custom
+        # server. If its initialization failed and discovery fell back to HA's
+        # go2rtc, the custom port points at nothing.
+        override = None if self._go2rtc_is_ha_managed else self._custom_go2rtc_rtsp_port
         if override:
             try:
                 port = int(override)
