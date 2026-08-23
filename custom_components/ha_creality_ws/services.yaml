@@ -27,8 +27,10 @@ set_cfs_material:
       default: 1
       selector:
         number:
+          # No upper bound: box_id is whatever the printer reports, and an
+          # external unit can present a high id (7 has been observed). Capping it
+          # at 4 made those slots unwritable. The printer rejects an unknown id.
           min: 0
-          max: 4
           mode: box
     slot_id:
       required: true

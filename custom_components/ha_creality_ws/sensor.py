@@ -692,6 +692,11 @@ class KCFSSlotSensor(KEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        # native_value already zeroes here; publishing the last-known material
+        # alongside a zeroed state is worse than publishing nothing, because the
+        # card builds its edit payload out of these attributes.
+        if self._should_zero():
+            return {}
         data = self._get_slot_data()
         if not data:
             return {}
@@ -754,6 +759,8 @@ class KCFSExtSlotSensor(KEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        if self._should_zero():
+            return {}
         data = self._get_slot_data()
         if not data:
             return {}
@@ -960,7 +967,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         _LOGGER.debug("Dynamic entity signal received, checking for new CFS entities...")
         new_ents = add_cfs_entities() + add_chamber_entities()
         if new_ents:
-            _LOGGER.info("Adding %d dynamic entities", len(new_ents))
+            _LOGGER.debug("Adding %d dynamic entities", len(new_ents))
             # Must not be called inline from the dispatcher: async_add_entities
             # eager-starts a task on the config entry, and doing that from inside
             # the dispatch chain leaves it unreferenced ("Task was destroyed but

@@ -524,8 +524,14 @@ def test_the_schema_rejects_out_of_range_and_missing_fields(integration):
     base = {"device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA"}
     schema(base)  # the minimum accepted call
 
+    # A high box_id is legitimate: the id is whatever the printer reports, and an
+    # external unit can present e.g. 7 (see test_cfs_sensors.py). Capping it at 4
+    # made those slots unwritable, so only negatives are rejected now.
+    schema({**base, "box_id": 7})
+    schema({**base, "box_id": 9})
+
     for bad in (
-        {**base, "box_id": 9},          # only 0-4 exist
+        {**base, "box_id": -1},         # ids are non-negative
         {**base, "slot_id": 7},         # only 0-3 exist
         {**base, "min_temp": 40},       # below the selector's floor
         {**base, "pressure": 5},        # pressure advance is 0-1

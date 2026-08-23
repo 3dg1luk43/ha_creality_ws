@@ -158,3 +158,42 @@ def test_external_slot_sensor_reports_the_printers_box_id_not_zero():
     attrs = KCFSExtSlotSensor(coord, slot_id=0, sensor_type="filament").extra_state_attributes
     assert attrs["box_id"] == 7
     assert attrs["slot_id"] == 0
+
+
+def test_a_powered_off_printer_publishes_no_stale_material_attributes():
+    """The state zeroes when the printer is off; the attributes must follow.
+
+    The card builds its edit payload out of these attributes, so publishing the
+    last-known material next to a zeroed state is worse than publishing nothing.
+    """
+    coord = SimpleNamespace(
+        client=SimpleNamespace(_host="1.2.3.4"),
+        data={
+            "boxsInfo": {
+                "materialBoxs": [
+                    {"id": 1, "type": 0, "materials": [{**GENERIC_SLOT, "id": 0}]},
+                ]
+            }
+        },
+        available=True,
+        power_is_off=lambda: True,
+    )
+    sensor = KCFSSlotSensor(coord, box_id=1, slot_id=0, sensor_type="filament")
+    assert sensor.extra_state_attributes == {}
+
+
+def test_an_offline_external_slot_publishes_no_stale_attributes():
+    coord = SimpleNamespace(
+        client=SimpleNamespace(_host="1.2.3.4"),
+        data={
+            "boxsInfo": {
+                "materialBoxs": [
+                    {"id": 7, "type": 1, "materials": [{**GENERIC_SLOT, "id": 0}]},
+                ]
+            }
+        },
+        available=True,
+        power_is_off=lambda: True,
+    )
+    sensor = KCFSExtSlotSensor(coord, slot_id=0, sensor_type="filament")
+    assert sensor.extra_state_attributes == {}

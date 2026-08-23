@@ -167,12 +167,3 @@ export function slotEntities(boxId, slotId, { filament, color, percent, attribut
   };
 }
 
-/** Card config pointing card position `pos` at the sensors for box/slot. */
-export function slotConfig(pos, slotId, boxId, slot = 0) {
-  const base = `sensor.printer_cfs_box_${boxId}_slot_${slot}`;
-  return {
-    [`box${pos}_slot${slotId}_filament`]: `${base}_filament`,
-    [`box${pos}_slot${slotId}_color`]: `${base}_color`,
-    [`box${pos}_slot${slotId}_percent`]: `${base}_percent`,
-  };
-}

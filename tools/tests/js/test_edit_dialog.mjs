@@ -199,7 +199,7 @@ test("an unaddressable slot cannot be edited", async () => {
   // entity id supplies box 1, so force the unaddressable case directly.
   const orphan = { ...slot, printerBoxId: null };
   const html = card._renderEditButton(orphan);
-  assert.match(html, /disabled/);
+  assert.match(html, /\sdisabled>/);
 });
 
 test("cancel closes the dialog", async () => {

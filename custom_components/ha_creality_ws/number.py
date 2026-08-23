@@ -91,7 +91,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         """Late discovery: the printer has just reported a gating field."""
         new_ents = _chamber_entities()
         if new_ents:
-            _LOGGER.info("Adding %d late-discovered number entities", len(new_ents))
+            _LOGGER.debug("Adding %d late-discovered number entities", len(new_ents))
             # Deferred, not inline: see the matching note in sensor.py.
             hass.loop.call_soon(_add_if_live, new_ents)
 

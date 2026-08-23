@@ -1140,7 +1140,6 @@ class HttpServer:
             web.post("/test/cfs", self.handle_test_cfs),
             web.get("/test/state", self.handle_test_state),
         ])
-        self._sessions: set[MediaBlackhole | RTCPeerConnection] = set()
         self._cleanup_tasks: set[asyncio.Task] = set()
         self._runner: Optional[web.AppRunner] = None
         self._site: Optional[web.BaseSite] = None

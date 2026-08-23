@@ -626,7 +626,10 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
     set_cfs_material_schema = vol.Schema(
         {
             vol.Required("device_id"): vol.Any(cv.string, [cv.string]),
-            vol.Required("box_id"): vol.All(vol.Coerce(int), vol.Range(min=0, max=4)),
+            # No max: box_id is printer-reported and an external unit can
+            # present a high id, so an artificial ceiling made real slots
+            # unwritable. See the note in services.yaml.
+            vol.Required("box_id"): vol.All(vol.Coerce(int), vol.Range(min=0)),
             vol.Required("slot_id"): vol.All(vol.Coerce(int), vol.Range(min=0, max=3)),
             vol.Required("type"): cv.string,
             vol.Optional("name"): cv.string,

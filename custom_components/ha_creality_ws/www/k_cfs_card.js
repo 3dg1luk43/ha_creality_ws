@@ -2296,7 +2296,7 @@ class KCFSCard extends HTMLElement {
     });
 
     // Spool cards and mini spools - show more info
-    this._root.querySelectorAll('.spool-card, .spool-mini, .spool-mini-wrapper .spool-mini, .external-normal, .external-compact').forEach(el => {
+    this._root.querySelectorAll('.spool-card, .spool-mini, .spool-mini-wrapper .spool-mini, .bay, .external-normal, .external-compact').forEach(el => {
       const eid = el.dataset.eid;
       if (!eid) return;
 
