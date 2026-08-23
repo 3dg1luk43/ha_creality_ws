@@ -146,11 +146,20 @@ def _load_integration():
     _stub(state, "homeassistant.helpers.entity_registry", async_get=MagicMock())
     _stub(state, "homeassistant.helpers.aiohttp_client", async_get_clientsession=MagicMock())
 
-    notifications = []
+    class _Notifications(list):
+        """The created notifications, with the dismissed ids alongside them."""
+
+        dismissed: list[str]
+
+    notifications = _Notifications()
+    notifications.dismissed = []
     _stub(
         state,
         "homeassistant.components.persistent_notification",
         async_create=lambda hass, **kw: notifications.append(kw),
+        async_dismiss=lambda hass, notification_id: notifications.dismissed.append(
+            notification_id
+        ),
     )
 
     helpers = sys.modules["homeassistant.helpers"]
@@ -493,6 +502,31 @@ def test_each_printer_gets_its_own_notification_id(integration):
     assert len(ids) == len(set(ids)), f"notification ids collide: {ids}"
     assert "cfs_material_error_unreachable" in ids, ids
     assert "cfs_material_update_reachable" in ids, ids
+
+
+@requires_voluptuous
+def test_a_successful_retry_dismisses_the_earlier_failure(integration):
+    """Otherwise "Update Failed" and "Updated" sit on the dashboard together."""
+    _module, notifications, _ = integration
+    notifications.clear()
+    notifications.dismissed.clear()
+
+    coord = FakeCoordinator("printer-a", IDLE, fail=True)
+    hass, services, _ = _make_hass(integration, {"e": coord}, {"d": _device("e")})
+    _register(integration, hass)
+    call = {"device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA"}
+
+    _call_service(integration, hass, services, call)
+    assert any("Failed" in str(n.get("title")) for n in notifications)
+    assert notifications.dismissed == [], "nothing to dismiss yet"
+
+    # The printer comes back and the user retries.
+    coord.client._fail = False
+    _call_service(integration, hass, services, call)
+
+    assert "cfs_material_error_printer-a" in notifications.dismissed, (
+        "the stale failure must be cleared on success"
+    )
 
 
 @requires_voluptuous

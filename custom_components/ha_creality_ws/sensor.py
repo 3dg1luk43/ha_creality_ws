@@ -1067,6 +1067,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
         async_add_entities(ents)
     except Exception as err:  # pylint: disable=broad-except
         _LOGGER.error("Failed to add static sensors: %s", err)
+        # add_chamber_entities marked its uids before handing them over, so a
+        # failure here would otherwise make every later discovery pass return []
+        # and the chamber sensors would stay missing for the whole session.
+        added_chamber_uids.clear()
 
     # --- CFS Entities (Dynamic Initial Load) ---
     try:

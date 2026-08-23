@@ -210,7 +210,7 @@ def test_both_fields_in_one_frame_signal_once(coord):
 
 
 def test_a_direct_data_write_of_a_gating_field_still_announces(coord):
-    """Every writer of a gating field must go through _merge_and_announce.
+    """Every writer of a gating field must go through merge_telemetry.
 
     On a K2 Base the WS feed pops targetBoxTemp:0, so the Moonraker poll is the
     only source of the field that gates the chamber control. Writing straight
@@ -221,7 +221,7 @@ def test_a_direct_data_write_of_a_gating_field_still_announces(coord):
     _feed(coord, {"model": "K2", "nozzleTemp": 25})
     assert coord.signals == []
 
-    coord._merge_and_announce({"targetBoxTemp": 40.0})
+    coord.merge_telemetry({"targetBoxTemp": 40.0})
     assert len(coord.signals) == 1, "a first-seen gating field must fire discovery"
 
     # Still a one-shot: a later frame with the same field must not re-fire.
@@ -238,10 +238,35 @@ def test_the_moonraker_fallback_uses_the_announcing_merge():
         / "custom_components" / "ha_creality_ws" / "coordinator.py"
     ).read_text()
     poll = source.split("async def _poll_moonraker_extras", 1)[1]
-    assert '_merge_and_announce({"targetBoxTemp"' in poll, (
+    assert 'merge_telemetry({"targetBoxTemp"' in poll, (
         "the Moonraker poll must not write targetBoxTemp into self.data directly"
     )
     assert 'self.data["targetBoxTemp"] =' not in poll
+
+
+def test_no_platform_writes_a_gating_field_directly(monkeypatch):
+    """A direct `coordinator.data[field] = v` skips the signal and burns the one-shot.
+
+    number.py's optimistic chamber-target write did exactly that. Harmless while
+    the only gate on targetBoxTemp is the one that entity already satisfies, but
+    it is the same trap that made the Moonraker path silently break discovery.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2] / "custom_components" / "ha_creality_ws"
+    for name in ("number.py", "sensor.py", "fan.py"):
+        source = (root / name).read_text()
+        for field in LATE_DISCOVERY_FIELDS:
+            assert f'data["{field}"] =' not in source, (
+                f"{name} writes {field} directly; use coordinator.merge_telemetry"
+            )
+
+
+def test_merge_telemetry_is_the_public_entry_point(coord):
+    """Platforms call it, so it must not be name-mangled back to private."""
+    assert hasattr(coord, "merge_telemetry")
+    coord.merge_telemetry({"boxsInfo": {"materialBoxs": []}})
+    assert len(coord.signals) == 1
 
 
 def test_number_platform_does_not_await_the_add_callback():

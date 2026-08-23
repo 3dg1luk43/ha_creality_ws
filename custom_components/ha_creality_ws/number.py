@@ -281,8 +281,12 @@ class BoxTargetNumber(KEntity, NumberEntity):
         if max_v is not None:
             v = min(int(max_v), v)
         
-        # Optimistic update
-        self.coordinator.data["targetBoxTemp"] = v
+        # Optimistic update. Via the coordinator helper, not a direct write:
+        # targetBoxTemp is a LATE_DISCOVERY_FIELDS entry, and writing it straight
+        # into .data consumes the one-shot that other gates depend on. Harmless
+        # today (this entity only exists once that gate is already satisfied) but
+        # the invariant has been broken this way before.
+        self.coordinator.merge_telemetry({"targetBoxTemp": v})
         self.coordinator.async_update_listeners()
 
         await self.coordinator.client.send_set_retry(boxTempControl=v)

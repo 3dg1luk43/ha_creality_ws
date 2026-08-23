@@ -299,27 +299,44 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             )
 
             if camera_mode == CAM_MODE_WEBRTC or custom_uses_go2rtc:
-                self._working[CONF_GO2RTC_URL] = (
-                    str(user_input.get(CONF_GO2RTC_URL) or "").strip() or DEFAULT_GO2RTC_URL
-                )
-                port = user_input.get(CONF_GO2RTC_PORT)
-                try:
-                    self._working[CONF_GO2RTC_PORT] = int(port) if port is not None else DEFAULT_GO2RTC_PORT
-                except (ValueError, TypeError):
+                # Only fields the form actually rendered are applied. A submit can
+                # reach here without them: switching to Custom hides the go2rtc
+                # fields, and the Custom-uses-go2rtc branch then ran with no
+                # go2rtc keys in user_input, so `.get() or DEFAULT` silently
+                # replaced a configured external server with localhost:11984.
+                if CONF_GO2RTC_URL in user_input:
+                    self._working[CONF_GO2RTC_URL] = (
+                        str(user_input.get(CONF_GO2RTC_URL) or "").strip() or DEFAULT_GO2RTC_URL
+                    )
+                elif CONF_GO2RTC_URL not in self._working:
+                    self._working[CONF_GO2RTC_URL] = DEFAULT_GO2RTC_URL
+
+                if CONF_GO2RTC_PORT in user_input:
+                    port = user_input.get(CONF_GO2RTC_PORT)
+                    try:
+                        self._working[CONF_GO2RTC_PORT] = int(port) if port is not None else DEFAULT_GO2RTC_PORT
+                    except (ValueError, TypeError):
+                        self._working[CONF_GO2RTC_PORT] = DEFAULT_GO2RTC_PORT
+                elif CONF_GO2RTC_PORT not in self._working:
                     self._working[CONF_GO2RTC_PORT] = DEFAULT_GO2RTC_PORT
+
                 # RTSP port is only needed for HA's HLS pipeline; blank/0 means
                 # "auto-detect" (18554 for HA-managed go2rtc, 8554 otherwise).
-                rtsp_port = user_input.get(CONF_GO2RTC_RTSP_PORT)
-                try:
-                    rtsp_port_int = int(rtsp_port) if rtsp_port is not None else 0
-                except (ValueError, TypeError):
-                    rtsp_port_int = 0
-                if rtsp_port_int > 0:
-                    self._working[CONF_GO2RTC_RTSP_PORT] = rtsp_port_int
-                else:
-                    self._working.pop(CONF_GO2RTC_RTSP_PORT, None)
-            else:
+                if CONF_GO2RTC_RTSP_PORT in user_input:
+                    rtsp_port = user_input.get(CONF_GO2RTC_RTSP_PORT)
+                    try:
+                        rtsp_port_int = int(rtsp_port) if rtsp_port is not None else 0
+                    except (ValueError, TypeError):
+                        rtsp_port_int = 0
+                    if rtsp_port_int > 0:
+                        self._working[CONF_GO2RTC_RTSP_PORT] = rtsp_port_int
+                    else:
+                        self._working.pop(CONF_GO2RTC_RTSP_PORT, None)
+            elif not errors:
                 # Drop go2rtc settings for non-go2rtc modes so they don't linger.
+                # Only once the submission is otherwise valid: an invalid Custom
+                # URL re-renders this step, and discarding the settings meanwhile
+                # lost them before the user could correct the URL.
                 self._working.pop(CONF_GO2RTC_URL, None)
                 self._working.pop(CONF_GO2RTC_PORT, None)
                 self._working.pop(CONF_GO2RTC_RTSP_PORT, None)

@@ -333,7 +333,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as exc:
                 _LOGGER.warning("Queued resume failed; will retry. Error: %s", exc)
 
-    def _merge_and_announce(self, payload: dict[str, Any]) -> None:
+    def merge_telemetry(self, payload: dict[str, Any]) -> None:
         """Merge telemetry into self.data, firing the discovery signal once.
 
         Entities gated on a capability field can only be created once the printer
@@ -362,14 +362,22 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _handle_message(self, payload: dict[str, Any]) -> None:
         """Handle incoming WebSocket telemetry data."""
-        # Suppress broken targetBoxTemp:0 from K2 Base port 9999
-        if self._is_k2_base is None:
+        # Suppress broken targetBoxTemp:0 from K2 Base port 9999.
+        # Only decide once a frame actually identifies the printer: the board code
+        # lives in model/modelVersion, which arrive across several frames (see the
+        # wait_for_fields call in async_setup_entry). Latching False off a first
+        # frame that carried neither left a real K2 Base without the suppression
+        # and without the Moonraker poll -- the only source of its targetBoxTemp --
+        # so the chamber target snapped back to 0 after every set.
+        if self._is_k2_base is None and (
+            payload.get("model") or payload.get("modelVersion")
+        ):
             self._is_k2_base = ModelDetection(payload).is_k2_base
              
         if (payload.get("targetBoxTemp") == 0) and self._is_k2_base:
             payload.pop("targetBoxTemp")
 
-        self._merge_and_announce(payload)
+        self.merge_telemetry(payload)
 
         self._recompute_paused_from_telemetry()
         
@@ -626,7 +634,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             # WS feed pops targetBoxTemp:0, so this poll is the
                             # only source of the field that gates the chamber
                             # control, and it has to fire discovery itself.
-                            self._merge_and_announce({"targetBoxTemp": target})
+                            self.merge_telemetry({"targetBoxTemp": target})
                             self.async_update_listeners()
         except Exception as e:
             # Moonraker might be disabled or port 7125 blocked; fail silently but log debug

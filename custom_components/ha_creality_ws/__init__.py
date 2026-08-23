@@ -32,7 +32,10 @@ from homeassistant.const import (  # type: ignore[import]
 import voluptuous as vol  # type: ignore[import]
 from homeassistant.helpers import config_validation as cv, entity_registry as er, device_registry as dr # type: ignore[import]
 from homeassistant.helpers.aiohttp_client import async_get_clientsession # type: ignore[import]
-from homeassistant.components.persistent_notification import async_create as pn_async_create # type: ignore[import]
+from homeassistant.components.persistent_notification import (  # type: ignore[import]
+    async_create as pn_async_create,
+    async_dismiss as pn_async_dismiss,
+)
 
 from .const import (
     DOMAIN, 
@@ -572,6 +575,9 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
                 )
                 continue
 
+            # Clear any earlier failure for this printer, so a successful retry
+            # does not leave "Update Failed" and "Updated" on screen together.
+            pn_async_dismiss(hass, f"cfs_material_error_{host}")
             pn_async_create(
                 hass,
                 title="CFS Material Updated",

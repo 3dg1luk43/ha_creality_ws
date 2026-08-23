@@ -982,19 +982,25 @@ class CrealityWebRTCCamera(_BaseCamera):
                 self._stream_name, go2rtc_err, exc_info=True
             )
 
-            # Attempt recovery by invalidating the stream to force reconfiguration next time
-            if self._stream_name:
-                _LOGGER.warning("ha_creality_ws: Invalidating stream '%s' due to go2rtc error", self._stream_name)
-                try:
-                    await self._go2rtc_client.streams.delete(self._stream_name)
-                    self._stream_name = None
-                    self._force_recreate_stream = False
-                except Exception as cleanup_exc:
-                    _LOGGER.debug(
-                        "ha_creality_ws: error deleting stream '%s' during cleanup: %s",
-                        self._stream_name, cleanup_exc,
-                    )
-                    self._force_recreate_stream = True
+            # Attempt recovery by invalidating the stream to force reconfiguration
+            # next time. Under the same lock as configuration: without it this
+            # could delete a stream another task had just created and then leave
+            # _stream_name pointing at it, so the fast path reported "already
+            # configured" for a stream that no longer existed in go2rtc.
+            async with self._stream_config_lock:
+                stale_name = self._stream_name
+                if stale_name:
+                    _LOGGER.warning("ha_creality_ws: Invalidating stream '%s' due to go2rtc error", stale_name)
+                    try:
+                        await self._go2rtc_client.streams.delete(stale_name)
+                        self._stream_name = None
+                        self._force_recreate_stream = False
+                    except Exception as cleanup_exc:
+                        _LOGGER.debug(
+                            "ha_creality_ws: error deleting stream '%s' during cleanup: %s",
+                            stale_name, cleanup_exc,
+                        )
+                        self._force_recreate_stream = True
 
             send_message(
                 self._wrap_send_message(
