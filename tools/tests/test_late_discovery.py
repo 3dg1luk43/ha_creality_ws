@@ -120,6 +120,41 @@ def test_both_fields_in_one_frame_signal_once(coord):
     assert len(coord.signals) == 1
 
 
+def test_a_direct_data_write_of_a_gating_field_still_announces(coord):
+    """Every writer of a gating field must go through _merge_and_announce.
+
+    On a K2 Base the WS feed pops targetBoxTemp:0, so the Moonraker poll is the
+    only source of the field that gates the chamber control. Writing straight
+    into coord.data skipped the signal *and* consumed the one-shot, so a later
+    frame carrying the field was no longer "newly seen" -- the control could then
+    never be created.
+    """
+    _feed(coord, {"model": "K2", "nozzleTemp": 25})
+    assert coord.signals == []
+
+    coord._merge_and_announce({"targetBoxTemp": 40.0})
+    assert len(coord.signals) == 1, "a first-seen gating field must fire discovery"
+
+    # Still a one-shot: a later frame with the same field must not re-fire.
+    _feed(coord, {"targetBoxTemp": 45.0})
+    assert len(coord.signals) == 1
+
+
+def test_the_moonraker_fallback_uses_the_announcing_merge():
+    """Pins the call site, since the bug was a direct dict write."""
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "custom_components" / "ha_creality_ws" / "coordinator.py"
+    ).read_text()
+    poll = source.split("async def _poll_moonraker_extras", 1)[1]
+    assert '_merge_and_announce({"targetBoxTemp"' in poll, (
+        "the Moonraker poll must not write targetBoxTemp into self.data directly"
+    )
+    assert 'self.data["targetBoxTemp"] =' not in poll
+
+
 def test_number_platform_does_not_await_the_add_callback():
     """`async_add_entities` is a sync @callback; awaiting it raises TypeError."""
     from pathlib import Path
@@ -182,6 +217,29 @@ def test_target_box_temp_alone_creates_the_chamber_control():
     assert "BoxTargetNumber(coord)" in before_max, (
         "targetBoxTemp must create the control without waiting for a maximum"
     )
+
+
+def test_sensor_late_discovery_rechecks_chamber_not_only_cfs():
+    """maxBoxTemp is a gating field, so the signal must re-check its sensors.
+
+    _on_new_entities used to call only add_cfs_entities(), so a printer that was
+    off at setup and later reported maxBoxTemp never got its chamber sensors --
+    the gate was computed once from an empty coord.data.
+    """
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "custom_components" / "ha_creality_ws" / "sensor.py"
+    ).read_text()
+    handler = source.split("def _on_new_entities()", 1)[1].split("entry.async_on_unload", 1)[0]
+    assert "add_chamber_entities()" in handler, (
+        "the late pass must re-evaluate chamber sensors too"
+    )
+    # And the gate must read state fresh rather than a setup-time snapshot.
+    gate = source.split("def add_chamber_entities()", 1)[1].split("\n    # Dynamic CFS", 1)[0]
+    assert "_cached_has_chamber_sensor" in gate
+    assert "coord.data" in gate
 
 
 def test_deferred_entity_adds_are_dropped_after_unload():

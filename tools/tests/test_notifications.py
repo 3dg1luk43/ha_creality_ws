@@ -224,6 +224,48 @@ def test_priming_reads_progress_the_same_way_as_the_check(monkeypatch):
     assert sent == ["Print 'job.gcode' completed successfully!"]
 
 
+def test_a_new_job_does_not_notify_off_the_previous_jobs_progress(monkeypatch):
+    """The filename-change reset armed completion against stale telemetry.
+
+    The frame that first carries a new file name usually still carries the
+    previous job's 100, so clearing _notified_completed there fired "completed"
+    the instant the new job started -- and then swallowed the real one.
+    """
+    coord, sent = _coordinator(monkeypatch)
+
+    coord.data = {"printFileName": "job_a.gcode", "printProgress": 100}
+    _run(coord._check_notifications({}))  # baseline: previous job already done
+    assert sent == []
+    assert coord._notified_completed is True
+
+    # New job; progress has not caught up yet.
+    coord.data = {"printFileName": "job_b.gcode", "printProgress": 100}
+    _run(coord._check_notifications({}))
+    assert sent == [], "a new job must not inherit the old job's completion"
+
+    # Real progress arrives, then the job genuinely finishes.
+    coord.data = {"printFileName": "job_b.gcode", "printProgress": 4}
+    _run(coord._check_notifications({}))
+    coord.data = {"printFileName": "job_b.gcode", "printProgress": 100}
+    _run(coord._check_notifications({}))
+    assert sent == ["Print 'job_b.gcode' completed successfully!"]
+
+
+def test_a_new_job_starting_from_zero_still_notifies(monkeypatch):
+    """The fix must not suppress a completion when progress really did reset."""
+    coord, sent = _coordinator(monkeypatch)
+
+    coord.data = {"printFileName": "job_a.gcode", "printProgress": 100}
+    _run(coord._check_notifications({}))
+    coord.data = {"printFileName": "job_b.gcode", "printProgress": 0}
+    _run(coord._check_notifications({}))
+    assert coord._notified_completed is False, "a real 0% must leave it armed"
+
+    coord.data = {"printFileName": "job_b.gcode", "printProgress": 100}
+    _run(coord._check_notifications({}))
+    assert sent == ["Print 'job_b.gcode' completed successfully!"]
+
+
 def test_dprogress_is_still_used_when_printprogress_is_absent(monkeypatch):
     """The fallback itself must survive: only a missing value triggers it."""
     coord, sent = _coordinator(monkeypatch)

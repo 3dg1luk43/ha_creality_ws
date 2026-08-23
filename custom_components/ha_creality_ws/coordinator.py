@@ -333,19 +333,20 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as exc:
                 _LOGGER.warning("Queued resume failed; will retry. Error: %s", exc)
 
-    async def _handle_message(self, payload: dict[str, Any]) -> None:
-        """Handle incoming WebSocket telemetry data."""
-        # Suppress broken targetBoxTemp:0 from K2 Base port 9999
-        if self._is_k2_base is None:
-            self._is_k2_base = ModelDetection(payload).is_k2_base
-             
-        if (payload.get("targetBoxTemp") == 0) and self._is_k2_base:
-            payload.pop("targetBoxTemp")
+    def _merge_and_announce(self, payload: dict[str, Any]) -> None:
+        """Merge telemetry into self.data, firing the discovery signal once.
 
-        # Entities gated on a capability field can only be created once the
-        # printer has actually reported it, which may be long after the platforms
-        # were set up. Fire one discovery signal the first time any such field
-        # shows up so every platform can re-check (see LATE_DISCOVERY_FIELDS).
+        Entities gated on a capability field can only be created once the printer
+        has actually reported it, which may be long after the platforms were set
+        up. The first appearance of any LATE_DISCOVERY_FIELDS entry fires one
+        signal so every platform can re-check.
+
+        Every writer of a gating field has to come through here. Writing straight
+        into self.data both skips the signal and consumes the one-shot, because
+        the field is then no longer "newly seen" when a later frame carries it --
+        which is what made the chamber control unreachable on a K2 Base, whose
+        targetBoxTemp only ever arrives via the Moonraker fallback.
+        """
         newly_seen = [f for f in LATE_DISCOVERY_FIELDS if f not in self.data and f in payload]
 
         self.data.update(payload)
@@ -358,6 +359,17 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if "boxsInfo" in newly_seen:
                 _LOGGER.debug("CFS Raw Data: %s", json.dumps(payload.get("boxsInfo"), default=str))
             async_dispatcher_send(self.hass, f"{DOMAIN}_new_entities_{self._config_entry_id}")
+
+    async def _handle_message(self, payload: dict[str, Any]) -> None:
+        """Handle incoming WebSocket telemetry data."""
+        # Suppress broken targetBoxTemp:0 from K2 Base port 9999
+        if self._is_k2_base is None:
+            self._is_k2_base = ModelDetection(payload).is_k2_base
+             
+        if (payload.get("targetBoxTemp") == 0) and self._is_k2_base:
+            payload.pop("targetBoxTemp")
+
+        self._merge_and_announce(payload)
 
         self._recompute_paused_from_telemetry()
         
@@ -479,23 +491,30 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self._notify_device:
             return
 
-        # Check if we started a new print (filename changed)
-        # Store last filename in instance to compare
-        if getattr(self, "_last_filename", None) != fname:
-            self._last_filename = fname
-            self._notified_completed = False
-            self._notified_minutes_to_end = False
-            self._notified_filament_runout = False
-            self._last_error_code = 0
-        
-        if not fname:
-            return
-
-        # 1) Completion
         try:
             prog_val = int(progress) if progress is not None else 0
         except (ValueError, TypeError):
             prog_val = 0
+
+        # Check if we started a new print (filename changed)
+        # Store last filename in instance to compare
+        if getattr(self, "_last_filename", None) != fname:
+            self._last_filename = fname
+            self._notified_minutes_to_end = False
+            self._notified_filament_runout = False
+            self._last_error_code = 0
+            # Baseline completion off the progress we can actually see, exactly
+            # as _prime_notification_state does. Telemetry arrives incrementally,
+            # so the frame that first carries the new file name usually still
+            # carries the *previous* job's 100 -- arming here unconditionally
+            # fired "completed" the instant a new job started, and then swallowed
+            # the real completion.
+            self._notified_completed = prog_val >= 100
+
+        if not fname:
+            return
+
+        # 1) Completion
 
         # Progress falling back below 100% means a new job cycle started, even if
         # it reprints the same file (in which case the file name never changes and
@@ -603,7 +622,11 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         # Only update if it's different to avoid unnecessary listener triggers
                         if self.data.get("targetBoxTemp") != target:
                             _LOGGER.debug("Updated targetBoxTemp from Moonraker: %s", target)
-                            self.data["targetBoxTemp"] = target
+                            # Via the helper, not a direct write: on a K2 Base the
+                            # WS feed pops targetBoxTemp:0, so this poll is the
+                            # only source of the field that gates the chamber
+                            # control, and it has to fire discovery itself.
+                            self._merge_and_announce({"targetBoxTemp": target})
                             self.async_update_listeners()
         except Exception as e:
             # Moonraker might be disabled or port 7125 blocked; fail silently but log debug

@@ -909,13 +909,58 @@ async def async_setup_entry(hass, entry, async_add_entities):
         if platform_live:
             async_add_entities(new_ents)
 
+    added_chamber_uids: set[str] = set()
+
+    def add_chamber_entities() -> list[SensorEntity]:
+        """Chamber sensors not yet created, re-evaluated on every call.
+
+        Capability is read fresh rather than captured at setup: a printer that was
+        off during setup reports boxTemp/maxBoxTemp later, and the discovery
+        signal is what brings us back here. Returning [] and never being asked
+        again left the sensors missing for the whole session.
+        """
+        has_chamber = entry.data.get(
+            "_cached_has_chamber_sensor", entry.data.get("_cached_has_box_sensor", False)
+        )
+        live = coord.data or {}
+        if not has_chamber and any(
+            k in live for k in ("boxTemp", "targetBoxTemp", "maxBoxTemp")
+        ):
+            has_chamber = True
+        if not has_chamber:
+            return []
+
+        out: list[SensorEntity] = []
+        if "box_temperature" not in added_chamber_uids:
+            for spec in SPECS:
+                if spec.get("uid") == "box_temperature":
+                    added_chamber_uids.add("box_temperature")
+                    out.append(KSimpleFieldSensor(coord, spec))
+                    break
+
+        if "max_box_temp" not in added_chamber_uids:
+            max_box = entry.data.get(
+                "_cached_max_chamber_temp", entry.data.get("_cached_max_box_temp")
+            )
+            if max_box is None:
+                max_box = live.get("maxBoxTemp")
+            if max_box is not None:
+                added_chamber_uids.add("max_box_temp")
+                out.append(
+                    KMaxTempSensor(
+                        coord, uid="max_box_temp", key="max_box_temp",
+                        translation_key="max_chamber_temp",
+                    )
+                )
+        return out
+
     # Dynamic CFS entity handler
     def _on_new_entities() -> None:
         """Handle signal for new entities (e.g. late CFS discovery)."""
         _LOGGER.debug("Dynamic entity signal received, checking for new CFS entities...")
-        new_ents = add_cfs_entities()
+        new_ents = add_cfs_entities() + add_chamber_entities()
         if new_ents:
-            _LOGGER.info("Adding %d dynamic CFS entities", len(new_ents))
+            _LOGGER.info("Adding %d dynamic entities", len(new_ents))
             # Must not be called inline from the dispatcher: async_add_entities
             # eager-starts a task on the config entry, and doing that from inside
             # the dispatch chain leaves it unreferenced ("Task was destroyed but
@@ -962,19 +1007,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
     ))
 
 
-    # Add chamber temperature if supported by model. Also allow live-telemetry fallback if cache missing.
-    has_box_sensor = entry.data.get("_cached_has_chamber_sensor", entry.data.get("_cached_has_box_sensor", False))
-    live = coord.data or {}
-    if not has_box_sensor:
-        # Heuristics: if boxTemp or targetBoxTemp appears, expose the sensor.
-        if any(k in live for k in ("boxTemp", "targetBoxTemp", "maxBoxTemp")):
-            has_box_sensor = True
-    
+    # Chamber sensors come from add_chamber_entities() so the late-discovery pass
+    # applies the identical gate; everything else is unconditional.
     for spec in SPECS:
-        if spec.get("uid") == "box_temperature":
-            if has_box_sensor:
-                ents.append(KSimpleFieldSensor(coord, spec))
-        else:
+        if spec.get("uid") != "box_temperature":
             ents.append(KSimpleFieldSensor(coord, spec))
 
     # Mapped sensors
@@ -1011,15 +1047,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     max_noz = _cached_or_live("max_nozzle_temp")
     max_bed = _cached_or_live("max_bed_temp")
-    max_box = _cached_or_live("max_box_temp")
 
     if max_noz is not None:
         ents.append(KMaxTempSensor(coord, uid="max_nozzle_temp", key="max_nozzle_temp", translation_key="max_nozzle_temp"))
     if max_bed is not None:
         ents.append(KMaxTempSensor(coord, uid="max_bed_temp", key="max_bed_temp", translation_key="max_bed_temp"))
-    # Only expose chamber max if model supports chamber sensor/control or we detect a value
-    if has_box_sensor and max_box is not None:
-        ents.append(KMaxTempSensor(coord, uid="max_box_temp", key="max_box_temp", translation_key="max_chamber_temp"))
+    # Chamber max is gated with the chamber temperature sensor, in one place.
+    ents.extend(add_chamber_entities())
 
     # Register static entities immediately
     try:
