@@ -222,6 +222,30 @@ test("a three-digit preset colour is expanded, not stored short", async () => {
   assert.equal(card._presets.save("Bad", "#abcd"), false);
 });
 
+test("two cards on one dashboard share the preset store", async () => {
+  // Each card used to build its own manager, caching localStorage in its own
+  // constructor -- so a save or delete in one dialog left the other card serving
+  // a stale copy until the page reloaded.
+  const loaded = loadCard();
+  const mk = () => {
+    const card = new loaded.KCFSCard();
+    card.setConfig({ box0_slot0_filament: SLOT });
+    card.hass = makeHass(slotEntities(1, 0, { attributes: ATTRS }), { entities: REGISTRY });
+    return card;
+  };
+  const a = mk();
+  const b = mk();
+  // Opening each dialog is what creates the manager.
+  presetsSection(a);
+  presetsSection(b);
+
+  assert.equal(a._presets, b._presets, "both cards must use one store");
+  a._presets.save("Teal", "#008080");
+  assert.equal(b._presets.presets.Teal, "#008080", "a save is visible to the other card");
+  a._presets.remove("Teal");
+  assert.ok(!("Teal" in b._presets.presets), "a delete is visible to the other card");
+});
+
 test("localStorage is not touched until a dialog opens", async () => {
   // A dashboard with several cards should not all hit storage just to render.
   const { card } = await setup();

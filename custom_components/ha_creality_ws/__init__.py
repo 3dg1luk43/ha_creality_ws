@@ -427,7 +427,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-def _coordinators_for_devices(hass: HomeAssistant, device_ids: Any) -> list:
+def _coordinators_for_devices(
+    hass: HomeAssistant, device_ids: str | list[str] | None
+) -> list[KCoordinator]:
     """Resolve service ``device_id`` targets to coordinators.
 
     Shared by every device-targeted service so they agree on what a target means.

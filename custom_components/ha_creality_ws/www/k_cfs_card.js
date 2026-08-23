@@ -182,6 +182,21 @@ class ColourPresetsManager {
   }
 }
 
+/**
+ * The one presets store for this page.
+ *
+ * Per-card instances each cached localStorage in their own constructor, so
+ * saving or deleting in one card's dialog left every other card on the dashboard
+ * serving a stale copy until reload. Created lazily: rendering a card must not
+ * touch storage, only opening a dialog does.
+ * @returns {ColourPresetsManager}
+ */
+let _sharedPresets = null;
+function sharedPresets() {
+  if (!_sharedPresets) _sharedPresets = new ColourPresetsManager();
+  return _sharedPresets;
+}
+
 const BUSY_PRINT_STATES = new Set([
   "printing",
   "paused",
@@ -2111,7 +2126,7 @@ class KCFSCard extends HTMLElement {
   _renderPresets(picker, hex) {
     // Constructed on first use, so a dashboard full of cards does not all touch
     // localStorage just to render.
-    this._presets = this._presets || new ColourPresetsManager();
+    this._presets = sharedPresets();
 
     const section = document.createElement("div");
     section.className = "presets";

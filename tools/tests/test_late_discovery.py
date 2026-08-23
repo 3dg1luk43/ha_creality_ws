@@ -20,6 +20,98 @@ from custom_components.ha_creality_ws.coordinator import KCoordinator  # noqa: E
 coord_mod = sys.modules[KCoordinator.__module__]
 
 
+def _number_platform():
+    """number.async_setup_entry, imported without executing the real package init.
+
+    number.py pulls in a few HA modules the shared conftest leaves bare; they are
+    stubbed here rather than in conftest because only this module needs them.
+    """
+    from unittest.mock import MagicMock
+
+    if "homeassistant.components.number" not in sys.modules:
+        mod = MagicMock()
+
+        class _NumberEntity:  # minimal stand-in
+            pass
+
+        mod.NumberEntity = _NumberEntity
+        mod.NumberMode = MagicMock()
+        mod.NumberDeviceClass = MagicMock()
+        sys.modules["homeassistant.components.number"] = mod
+    if "homeassistant.const" not in sys.modules:
+        const_mod = MagicMock()
+        const_mod.UnitOfTemperature = MagicMock()
+        const_mod.PERCENTAGE = "%"
+        sys.modules["homeassistant.const"] = const_mod
+    helpers = sys.modules["homeassistant.helpers"]
+    if not hasattr(helpers, "entity_registry"):
+        reg = MagicMock()
+        reg.async_get.return_value.async_get_entity_id.return_value = None
+        sys.modules["homeassistant.helpers.entity_registry"] = reg
+        helpers.entity_registry = reg
+
+    from custom_components.ha_creality_ws.number import async_setup_entry
+
+    return async_setup_entry
+
+
+class _EntryStub:
+    """Just the ConfigEntry surface number.async_setup_entry touches."""
+
+    def __init__(self, data):
+        self.data = data
+        self.entry_id = "entry1"
+        self.options = {}
+        self.unload_callbacks = []
+
+    def async_on_unload(self, cb):
+        self.unload_callbacks.append(cb)
+        return cb
+
+    def unload(self):
+        for cb in reversed(self.unload_callbacks):
+            cb()
+
+
+def _run_number_setup(coord, entry_data):
+    """Drive the real platform and return (added_entities, hass, entry, connected).
+
+    `connected` is the dispatcher callback the platform registered, so a test can
+    fire the discovery signal directly.
+    """
+    setup = _number_platform()
+    added = []
+    connected = []
+    scheduled = []
+
+    hass = SimpleNamespace(
+        data={"ha_creality_ws": {}},
+        loop=SimpleNamespace(call_soon=lambda fn, *a: scheduled.append((fn, a))),
+    )
+    entry = _EntryStub(entry_data)
+    hass.data["ha_creality_ws"][entry.entry_id] = coord
+
+    import custom_components.ha_creality_ws.number as number_mod
+
+    original_connect = number_mod.async_dispatcher_connect
+    number_mod.async_dispatcher_connect = (
+        lambda _hass, _signal, target: connected.append(target) or (lambda: None)
+    )
+    try:
+        asyncio.get_event_loop().run_until_complete(
+            setup(hass, entry, lambda ents: added.extend(ents))
+        )
+    finally:
+        number_mod.async_dispatcher_connect = original_connect
+
+    return SimpleNamespace(
+        added=added, hass=hass, entry=entry,
+        fire_discovery=lambda: [cb() for cb in connected],
+        flush=lambda: [fn(*a) for fn, a in scheduled],
+        scheduled=scheduled,
+    )
+
+
 class HassStub:
     def __init__(self):
         self.loop = asyncio.get_event_loop()
@@ -199,61 +291,110 @@ def test_the_capability_flag_is_read_inside_the_gate_not_captured():
     assert "maxBoxTemp" in gate
 
 
-def test_target_box_temp_alone_creates_the_chamber_control():
-    """Promoting the capability then demanding a max made the promotion dead code.
+def _bare_coord(monkeypatch, data):
+    """A coordinator carrying `data`, with the frame handler stubbed out."""
+    monkeypatch.setattr(coord_mod, "async_dispatcher_send", lambda *_a, **_k: None)
+    c = KCoordinator(HassStub(), host="1.2.3.4", config_entry_id="entry1")
+    c.data = dict(data)
+    return c
 
-    `BoxTargetNumber` already falls back to 60 C, and the discovery signal fires
-    once -- so returning nothing here left the control permanently absent.
+
+def test_target_box_temp_alone_creates_the_chamber_control(monkeypatch):
+    """A chamber target with no maximum must still produce BoxTargetNumber.
+
+    Promoting the capability and then demanding a maximum made the promotion dead
+    code: the discovery signal fires once, so returning nothing left the control
+    permanently absent. BoxTargetNumber already falls back to 60 C.
     """
-    from pathlib import Path
+    coord = _bare_coord(monkeypatch, {"targetBoxTemp": 40.0})
+    run = _run_number_setup(coord, {"_cached_has_chamber_control": True})
 
-    source = (
-        Path(__file__).resolve().parents[2]
-        / "custom_components" / "ha_creality_ws" / "number.py"
-    ).read_text()
-    gate = source.split("def _chamber_entities()", 1)[1].split("\n    ents.extend", 1)[0]
-    # The targetBoxTemp branch must return the entity before the max-temp gate.
-    before_max = gate.split("_cached_max_chamber_temp", 1)[0]
-    assert "BoxTargetNumber(coord)" in before_max, (
-        "targetBoxTemp must create the control without waiting for a maximum"
+    names = [type(e).__name__ for e in run.added]
+    assert "BoxTargetNumber" in names, f"chamber control missing from {names}"
+
+
+def test_the_chamber_control_is_created_late_when_telemetry_arrives(monkeypatch):
+    """The real late-discovery path: nothing at setup, then the field appears."""
+    coord = _bare_coord(monkeypatch, {})
+    run = _run_number_setup(coord, {"_cached_has_chamber_control": True})
+
+    assert "BoxTargetNumber" not in [type(e).__name__ for e in run.added], (
+        "nothing gates the control yet"
+    )
+
+    # Printer comes online and reports the chamber target.
+    coord.data["targetBoxTemp"] = 40.0
+    run.fire_discovery()
+    run.flush()  # the platform defers the add via loop.call_soon
+
+    assert "BoxTargetNumber" in [type(e).__name__ for e in run.added], (
+        "the late pass must create the control"
     )
 
 
-def test_sensor_late_discovery_rechecks_chamber_not_only_cfs():
-    """maxBoxTemp is a gating field, so the signal must re-check its sensors.
+def test_the_chamber_control_is_not_created_twice(monkeypatch):
+    """Repeated discovery signals must not duplicate the entity."""
+    coord = _bare_coord(monkeypatch, {"targetBoxTemp": 40.0})
+    run = _run_number_setup(coord, {"_cached_has_chamber_control": True})
+    before = [type(e).__name__ for e in run.added].count("BoxTargetNumber")
 
-    _on_new_entities used to call only add_cfs_entities(), so a printer that was
-    off at setup and later reported maxBoxTemp never got its chamber sensors --
-    the gate was computed once from an empty coord.data.
+    run.fire_discovery()
+    run.fire_discovery()
+    run.flush()
+
+    assert [type(e).__name__ for e in run.added].count("BoxTargetNumber") == before == 1
+
+
+def test_no_chamber_control_without_the_capability(monkeypatch):
+    """A printer with no chamber must not gain the control from telemetry alone."""
+    coord = _bare_coord(monkeypatch, {"nozzleTemp": 25})
+    run = _run_number_setup(coord, {"_cached_has_chamber_control": False})
+
+    assert "BoxTargetNumber" not in [type(e).__name__ for e in run.added]
+    run.fire_discovery()
+    run.flush()
+    assert "BoxTargetNumber" not in [type(e).__name__ for e in run.added]
+
+
+def test_a_cached_maximum_alone_does_not_imply_chamber_control(monkeypatch):
+    """A cached chamber *maximum* is not a control capability.
+
+    Some models report a chamber maximum for the read-only sensor while having no
+    settable chamber. Without the capability check the cached maximum alone would
+    create BoxTargetNumber, giving those printers a control that does nothing.
     """
-    from pathlib import Path
+    coord = _bare_coord(monkeypatch, {"nozzleTemp": 25})
+    run = _run_number_setup(coord, {
+        "_cached_has_chamber_control": False,
+        "_cached_max_chamber_temp": 60,
+    })
 
-    source = (
-        Path(__file__).resolve().parents[2]
-        / "custom_components" / "ha_creality_ws" / "sensor.py"
-    ).read_text()
-    handler = source.split("def _on_new_entities()", 1)[1].split("entry.async_on_unload", 1)[0]
-    assert "add_chamber_entities()" in handler, (
-        "the late pass must re-evaluate chamber sensors too"
+    assert "BoxTargetNumber" not in [type(e).__name__ for e in run.added], (
+        "a maximum without the control capability must not create the entity"
     )
-    # And the gate must read state fresh rather than a setup-time snapshot.
-    gate = source.split("def add_chamber_entities()", 1)[1].split("\n    # Dynamic CFS", 1)[0]
-    assert "_cached_has_chamber_sensor" in gate
-    assert "coord.data" in gate
 
 
-def test_deferred_entity_adds_are_dropped_after_unload():
-    """`call_soon` cannot be cancelled, and unloading does not unschedule it."""
-    from pathlib import Path
+def test_deferred_entity_adds_are_dropped_after_unload(monkeypatch):
+    """`call_soon` cannot be cancelled, and unloading does not unschedule it.
 
-    root = Path(__file__).resolve().parents[2] / "custom_components" / "ha_creality_ws"
-    for name in ("number.py", "sensor.py"):
-        source = (root / name).read_text()
-        assert "hass.loop.call_soon(_add_if_live" in source, (
-            f"{name} defers the raw add callback, so it can run against a "
-            "removed entry"
-        )
-        assert "entry.async_on_unload(_mark_unloaded)" in source, name
+    Executed rather than grepped: the callback is queued, the entry is unloaded,
+    and only then is the queue drained -- which is the ordering the flag exists
+    for.
+    """
+    coord = _bare_coord(monkeypatch, {})
+    run = _run_number_setup(coord, {"_cached_has_chamber_control": True})
+
+    coord.data["targetBoxTemp"] = 40.0
+    run.fire_discovery()
+    assert run.scheduled, "the add must be deferred, not inline"
+
+    added_before = len(run.added)
+    run.entry.unload()   # HA drains _on_unload
+    run.flush()          # the already-queued callback now runs
+
+    assert len(run.added) == added_before, (
+        "a deferred add must not run against an unloaded entry"
+    )
 
 
 def test_chamber_target_accepts_the_cached_capability():

@@ -8,7 +8,42 @@ import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-# sensor.py pulls in a handful of HA modules that conftest does not stub.
+# sensor.py pulls in a handful of HA modules that conftest does not stub. These
+# are process-wide, so what was replaced is recorded and undone in teardown --
+# otherwise whichever module pytest collects next inherits these stand-ins
+# instead of the shared conftest ones, and the suite becomes order-dependent.
+_ABSENT = object()
+_RESTORE_MODULES: dict[str, object] = {}
+_RESTORE_ATTRS: list[tuple[object, str, object]] = []
+
+
+def _install_module(name, module):
+    _RESTORE_MODULES.setdefault(name, sys.modules.get(name, _ABSENT))
+    sys.modules[name] = module
+
+
+def _install_attr(obj, attr, value):
+    _RESTORE_ATTRS.append((obj, attr, getattr(obj, attr, _ABSENT)))
+    setattr(obj, attr, value)
+
+
+def teardown_module(_module):
+    """Undo the process-wide stubs installed at import time."""
+    for obj, attr, old in reversed(_RESTORE_ATTRS):
+        if old is _ABSENT:
+            try:
+                delattr(obj, attr)
+            except AttributeError:
+                pass
+        else:
+            setattr(obj, attr, old)
+    for name, old in _RESTORE_MODULES.items():
+        if old is _ABSENT:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = old
+
+
 if "homeassistant.components.sensor" not in sys.modules:
     sensor_mod = MagicMock()
 
@@ -16,14 +51,13 @@ if "homeassistant.components.sensor" not in sys.modules:
         pass
 
     sensor_mod.SensorEntity = _SensorEntity
-    sys.modules["homeassistant.components.sensor"] = sensor_mod
+    _install_module("homeassistant.components.sensor", sensor_mod)
 
 if not hasattr(sys.modules["homeassistant.helpers.entity"], "EntityCategory"):
-    sys.modules["homeassistant.helpers.entity"].EntityCategory = MagicMock()
+    _install_attr(sys.modules["homeassistant.helpers.entity"], "EntityCategory", MagicMock())
 
 if "homeassistant.const" not in sys.modules:
-    const_mod = MagicMock()
-    sys.modules["homeassistant.const"] = const_mod
+    _install_module("homeassistant.const", MagicMock())
 
 from custom_components.ha_creality_ws.sensor import (  # noqa: E402
     KCFSExtSlotSensor,
