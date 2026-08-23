@@ -136,6 +136,52 @@ def test_test_server_prefers_h264_for_video():
     assert "keyint=" in source
 
 
+def test_h264_clip_timestamps_stay_monotonic_across_the_loop():
+    """The clip wraps forever, so pts must never go backwards at the seam.
+
+    Timestamps were derived from `enumerate(demux(...))` while the clip length was
+    derived from the *kept* packet count. A skipped zero-size packet made the
+    length shorter than the real span, so _pts_offset advanced by less than one
+    clip and the second loop's timestamps overlapped the first.
+    """
+    fps = 30
+    step = int(90000 / fps)
+
+    # Replay the demux loop exactly as _ensure_clip does, with a zero-size packet
+    # in the middle -- which is what ffmpeg emits for a flush.
+    class FakePacket:
+        def __init__(self, size):
+            self.size = size
+            self.pts = None
+            self.dts = None
+            self.time_base = None
+
+    demuxed = [FakePacket(120), FakePacket(0), FakePacket(140), FakePacket(90)]
+    packets = []
+    kept = 0
+    for packet in demuxed:
+        if packet.size == 0:
+            continue
+        packet.pts = kept * step
+        packet.dts = packet.pts
+        packets.append(packet)
+        kept += 1
+    clip_duration_pts = len(packets) * step
+
+    assert [p.pts for p in packets] == [0, step, 2 * step], "contiguous, no gap"
+    # The wrap invariant: the next loop's first pts must be exactly one step past
+    # the previous loop's last.
+    assert packets[-1].pts + step == clip_duration_pts
+
+    # And the source must derive both from the kept count, not the demuxed one.
+    source = _test_server_source()
+    clip = source.split("async def _ensure_clip", 1)[1].split("\n    async def recv", 1)[0]
+    assert "enumerate(container.demux" not in clip, (
+        "pts must not be indexed by demuxed position; zero-size packets are skipped"
+    )
+    assert "kept += 1" in clip
+
+
 def test_test_server_does_not_close_healthy_webrtc_sessions_on_a_timer():
     """A fixed sleep-then-close made every consumer reconnect in a loop.
 

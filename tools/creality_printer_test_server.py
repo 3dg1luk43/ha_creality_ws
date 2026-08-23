@@ -276,13 +276,21 @@ class H264PassthroughTrack(MediaStreamTrack):
                 stream = container.streams.video[0]
                 # Annex-B raw H.264 has no container timestamps; synthesise them.
                 step = int(90000 / self.fps)
-                for i, packet in enumerate(container.demux(stream)):
+                # Counts kept packets, not demuxed ones: a skipped zero-size
+                # packet would leave the last pts at (demuxed-1)*step while
+                # _clip_duration_pts below is len(kept)*step. The wrap in recv()
+                # would then advance _pts_offset by less than the real clip span,
+                # so the second loop's timestamps overlap the first instead of
+                # increasing monotonically.
+                kept = 0
+                for packet in container.demux(stream):
                     if packet.size == 0:
                         continue
-                    packet.pts = i * step
+                    packet.pts = kept * step
                     packet.dts = packet.pts
                     packet.time_base = self._time_base
                     self._packets.append(packet)
+                    kept += 1
             finally:
                 container.close()
         finally:

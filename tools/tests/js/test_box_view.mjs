@@ -103,7 +103,6 @@ test("box mode without an external spool renders no external section", () => {
 
 test("no hardcoded white separators", () => {
   // PR #75 used rgba(255,255,255,0.5), which inverts badly in light themes.
-  const { sandbox } = loadCard();
   const style = boxCard(4)._root.innerHTML;
   assert.ok(!/rgba\(255,\s*255,\s*255/.test(style), "use theme variables");
 });

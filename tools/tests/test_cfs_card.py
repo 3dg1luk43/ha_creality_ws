@@ -51,8 +51,23 @@ def _strip_comments(text: str) -> str:
 # --------------------------------------------------------------------------- #
 
 
+JS_SUITES = sorted(p.name for p in JS_TESTS.glob("test_*.mjs"))
+
+
+def test_the_javascript_suites_are_discoverable():
+    """An empty glob parametrizes to nothing and drops all node coverage silently.
+
+    Same reasoning as the "has this been renamed?" guards further down: a moved or
+    renamed directory must fail loudly rather than quietly testing less.
+    """
+    assert JS_SUITES, f"no test_*.mjs found under {JS_TESTS}"
+    # The suites that carry the behavioural coverage, by name.
+    for expected in ("test_collector.mjs", "test_edit_dialog.mjs", "test_device_scoping.mjs"):
+        assert expected in JS_SUITES, f"{expected} is missing from {JS_SUITES}"
+
+
 @requires_node
-@pytest.mark.parametrize("suite", sorted(p.name for p in JS_TESTS.glob("test_*.mjs")))
+@pytest.mark.parametrize("suite", JS_SUITES)
 def test_javascript_suite(suite):
     """Run a node test file and surface its output on failure."""
     result = subprocess.run(
