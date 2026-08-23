@@ -197,6 +197,20 @@ def test_an_unparseable_number_is_rejected_not_dropped():
             )
 
 
+def test_non_finite_numbers_are_rejected():
+    """nan compares False against everything, so the ordering check misses it.
+
+    json.dumps then emits bare NaN/Infinity, which is not valid JSON, so the
+    printer would receive a malformed modifyMaterial payload.
+    """
+    for field in ("min_temp", "max_temp", "pressure"):
+        for value in ("nan", "inf", "-inf", float("nan"), float("inf")):
+            with pytest.raises(ValueError, match="finite"):
+                build_modify_material_payload(
+                    box_id=1, slot_id=0, material_type="PLA", **{field: value}
+                )
+
+
 def test_omitted_numbers_are_still_omitted():
     """Rejecting bad input must not turn absence into an error."""
     payload = build_modify_material_payload(box_id=1, slot_id=0, material_type="PLA")

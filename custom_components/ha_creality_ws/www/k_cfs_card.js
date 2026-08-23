@@ -1732,9 +1732,11 @@ class KCFSCard extends HTMLElement {
     const registry = this._hass?.entities || {};
     const devices = new Set();
 
+    const unresolved = [];
     for (const eid of entityIds) {
       const deviceId = registry[eid]?.device_id;
       if (deviceId) devices.add(deviceId);
+      else unresolved.push(eid);
     }
 
     // hass.entities predates HA 2023.4; fall back to asking per entity. Every
@@ -1743,8 +1745,13 @@ class KCFSCard extends HTMLElement {
     // the fail-closed behaviour this method exists to provide. Asked in parallel
     // over the distinct ids -- a fully configured card supplies up to 51, and
     // serial round trips delayed every edit button by all of them.
-    if (devices.size === 0) {
-      const answers = await Promise.all([...new Set(entityIds)].map(async (eid) => {
+    // Every entity the registry could not answer for is asked individually --
+    // not just when the registry answered for none of them. hass.entities can be
+    // partially populated, and accepting the one device it did know about
+    // resolved a card spanning two printers to that printer, so editing a slot
+    // on the other one wrote its box and slot ids to the wrong machine.
+    if (unresolved.length) {
+      const answers = await Promise.all([...new Set(unresolved)].map(async (eid) => {
         try {
           const entry = await this._hass.callWS({
             type: "config/entity_registry/get",

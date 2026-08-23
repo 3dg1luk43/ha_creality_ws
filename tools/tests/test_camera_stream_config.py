@@ -272,25 +272,94 @@ def test_stream_source_honours_an_explicit_rtsp_port_override():
     assert asyncio.run(run()) == "rtsp://10.0.0.5:9554/creality_k2_1_2_3_4"
 
 
-def test_a_failed_custom_go2rtc_does_not_keep_its_rtsp_override():
-    """Custom init failed, discovery fell back to HA's go2rtc.
+def _run_initialize(cam, *, custom_ok, ha_url="http://localhost:11984/"):
+    """Drive the real _initialize_go2rtc_client() with a stubbed go2rtc client.
 
-    The configured override points at the server we could not reach, so honouring
-    it aimed HLS at a port nothing is listening on. HA-managed RTSP is 18554.
+    `custom_ok=False` makes the custom server's version check raise, which is the
+    branch that falls back to HA's go2rtc.
     """
     import asyncio
+    from custom_components.ha_creality_ws import camera as camera_mod
 
-    cam = _camera(go2rtc_url="http://10.0.0.5:1984", go2rtc_rtsp_port=9554)
-    # What _async_init_go2rtc leaves behind on that path.
-    cam._go2rtc_server_url = "http://localhost:11984/"
-    cam._go2rtc_is_ha_managed = True
+    ha_data = MagicMock()
+    ha_data.url = ha_url
+    ha_data.session = MagicMock()
+    cam.hass.data = {camera_mod.GO2RTC_DOMAIN: ha_data}
 
-    async def run():
+    made = []
+
+    def _client(_session, url):
+        client = MagicMock()
+        # The custom attempt is the one carrying the configured URL.
+        is_custom = cam._custom_go2rtc_url is not None and url != ha_url
+        if is_custom and not custom_ok:
+            client.validate_server_version = AsyncMock(side_effect=RuntimeError("refused"))
+        else:
+            client.validate_server_version = AsyncMock(return_value="1.9.4")
+        made.append(url)
+        return client
+
+    with patch.object(camera_mod, "Go2RtcRestClient", side_effect=_client), \
+            patch.object(camera_mod, "async_get_clientsession", return_value=MagicMock()), \
+            patch.object(camera_mod, "GO2RTC_CLIENT_AVAILABLE", True):
+        ok = asyncio.run(cam._initialize_go2rtc_client())
+    return ok, made
+
+
+def _stream_source(cam, name="creality_k2_1_2_3_4"):
+    import asyncio
+
+    async def run() -> "str | None":
         with patch.object(cam, "_ensure_stream_configured", new_callable=AsyncMock):
-            cam._stream_name = "creality_k2_1_2_3_4"
+            cam._stream_name = name
             return await cam.stream_source()
 
-    assert asyncio.run(run()) == "rtsp://127.0.0.1:18554/creality_k2_1_2_3_4"
+    return asyncio.run(run())
+
+
+def test_a_failed_custom_go2rtc_does_not_keep_its_rtsp_override():
+    """Custom init fails, discovery falls back to HA's go2rtc.
+
+    The override was configured for a server we could not reach, so honouring it
+    aimed HLS at a port nothing is listening on. Drives the real initializer, so
+    this fails if the fallback branch stops recording that it fell back.
+    """
+    cam = _camera(go2rtc_url="http://10.0.0.5:1984", go2rtc_rtsp_port=9554)
+    ok, attempted = _run_initialize(cam, custom_ok=False)
+
+    assert ok is True, "the fallback must still produce a working client"
+    assert cam._go2rtc_fell_back_from_custom is True
+    assert cam._go2rtc_is_ha_managed is True
+    assert len(attempted) == 2, f"custom then HA-managed, got {attempted}"
+    assert _stream_source(cam) == "rtsp://127.0.0.1:18554/creality_k2_1_2_3_4"
+
+
+def test_an_ha_managed_instance_keeps_an_explicit_rtsp_override():
+    """The options flow stores an explicit RTSP port for any go2rtc mode.
+
+    Suppressing it for every HA-managed client -- rather than only after a
+    fallback -- sent HLS to 18554 for a user who had deliberately configured a
+    different port.
+    """
+    cam = _camera(go2rtc_rtsp_port=9554)
+    ok, _ = _run_initialize(cam, custom_ok=True)
+
+    assert ok is True
+    assert cam._go2rtc_is_ha_managed is True
+    assert cam._go2rtc_fell_back_from_custom is False, "no custom server was configured"
+    # Host comes from the resolved go2rtc URL, which for HA-managed is localhost.
+    assert _stream_source(cam) == "rtsp://localhost:9554/creality_k2_1_2_3_4"
+
+
+def test_a_reachable_custom_go2rtc_keeps_its_override():
+    """The ordinary custom case must be unaffected by the fallback handling."""
+    cam = _camera(go2rtc_url="http://10.0.0.5:1984", go2rtc_rtsp_port=9554)
+    ok, _ = _run_initialize(cam, custom_ok=True)
+
+    assert ok is True
+    assert cam._go2rtc_fell_back_from_custom is False
+    assert cam._go2rtc_is_ha_managed is False
+    assert _stream_source(cam) == "rtsp://10.0.0.5:9554/creality_k2_1_2_3_4"
 
 
 def test_stream_source_is_none_for_direct_signaling():

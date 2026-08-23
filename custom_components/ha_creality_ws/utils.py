@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, ClassVar, Optional
 
@@ -571,6 +572,11 @@ def build_modify_material_payload(
         parsed = safe_float(value)
         if parsed is None:
             raise ValueError(f"{name} must be a number, got {value!r}")
+        # nan compares False against everything, so the min/max ordering check
+        # below cannot reject it, and json.dumps emits bare NaN/Infinity -- which
+        # is not valid JSON and would reach the printer as a malformed payload.
+        if not math.isfinite(parsed):
+            raise ValueError(f"{name} must be a finite number, got {value!r}")
         return parsed
 
     low = _number("min_temp", min_temp)

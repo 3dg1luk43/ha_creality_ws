@@ -397,6 +397,11 @@ class CrealityWebRTCCamera(_BaseCamera):
         # can sit on localhost:11984 too, and only HA's build moves RTSP to
         # 18554 -- so the RTSP port cannot be guessed from the URL alone.
         self._go2rtc_is_ha_managed: bool = False
+        # Set only when a configured custom server failed and discovery fell back
+        # to HA's. Distinct from _go2rtc_is_ha_managed: a user can also point the
+        # integration at HA's go2rtc *and* give it a non-default RTSP port, and
+        # that override must still be honoured.
+        self._go2rtc_fell_back_from_custom: bool = False
         
         _LOGGER.info(
             "ha_creality_ws: WebRTC camera initialized for printer: %s",
@@ -482,10 +487,10 @@ class CrealityWebRTCCamera(_BaseCamera):
         """
         host, api_port = self._go2rtc_host_and_api_port()
 
-        # Only honour the override while we are actually talking to the custom
-        # server. If its initialization failed and discovery fell back to HA's
-        # go2rtc, the custom port points at nothing.
-        override = None if self._go2rtc_is_ha_managed else self._custom_go2rtc_rtsp_port
+        # An explicit override always wins -- except when it was configured for a
+        # custom server we could not reach and discovery fell back to HA's
+        # go2rtc, in which case the port points at nothing.
+        override = None if self._go2rtc_fell_back_from_custom else self._custom_go2rtc_rtsp_port
         if override:
             try:
                 port = int(override)
@@ -592,6 +597,7 @@ class CrealityWebRTCCamera(_BaseCamera):
                 self._go2rtc_client = Go2RtcRestClient(session, url)
                 self._go2rtc_server_url = url
                 self._go2rtc_is_ha_managed = False
+                self._go2rtc_fell_back_from_custom = False
                 
                 # Validate server version
                 version = await self._go2rtc_client.validate_server_version()
@@ -613,6 +619,7 @@ class CrealityWebRTCCamera(_BaseCamera):
                 self._go2rtc_client = None
                 self._go2rtc_server_url = None
                 self._go2rtc_is_ha_managed = False
+                self._go2rtc_fell_back_from_custom = True
 
 
         # Get HA's go2rtc configuration

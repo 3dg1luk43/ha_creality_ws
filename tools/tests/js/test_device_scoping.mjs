@@ -212,6 +212,31 @@ test("a card spanning two printers renders its edit button locked", async () => 
   assert.match(button, /mdi:lock/, "and shows the lock");
 });
 
+test("a partially populated registry does not resolve a mixed card", async () => {
+  // hass.entities is not guaranteed complete. Accepting the one device it knew
+  // about -- because the callWS fallback only ran when it knew about none --
+  // resolved a two-printer card to printer A, so editing a slot on printer B
+  // sent B's box and slot ids to A.
+  const { KCFSCard } = loadCard();
+  const card = new KCFSCard();
+  card.setConfig({ box0_slot0_filament: A_SLOT, box1_slot0_filament: B_SLOT });
+
+  const asked = [];
+  card.hass = makeHass(statesForBoth(), {
+    // Only printer A is in the registry so far.
+    entities: { [A_SLOT]: { device_id: "dev_a", platform: "ha_creality_ws" } },
+    callWS: async ({ entity_id }) => {
+      asked.push(entity_id);
+      return { device_id: entity_id === B_SLOT ? "dev_b" : "dev_a" };
+    },
+  });
+
+  assert.equal(await card._resolveDeviceId(), null, "a mixed card must fail closed");
+  assert.equal(card._deviceIdError, "toast_multiple_devices");
+  assert.ok(asked.includes(B_SLOT), "the entity the registry could not answer for is asked");
+  assert.ok(!asked.includes(A_SLOT), "the one it did answer for is not asked again");
+});
+
 test("a card that cannot resolve is retried once, not on every update", async () => {
   // The empty-registry retry needs exactly one attempt. Without an "already
   // retried" guard, a mixed-printer card sits at _deviceId === null with a
