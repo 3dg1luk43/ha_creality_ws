@@ -188,3 +188,33 @@ class KClient:  # type: ignore
 
 setattr(ws_client_mod, "KClient", KClient)
 sys.modules["custom_components.ha_creality_ws.ws_client"] = ws_client_mod
+
+
+# --- Shared stub bookkeeping for test modules ---------------------------------
+# sys.modules is process-wide, so a module that installs a stub at import time
+# leaks it into whatever pytest collects next and makes the suite order-dependent.
+# A module that needs its own stub registers it here and calls restore_stubs()
+# from its teardown_module.
+_ABSENT = object()
+_MODULE_STUBS: dict[str, list] = {}
+
+
+def install_stub_module(owner: str, name: str, module) -> None:
+    """Install `module` at `name`, remembering what `owner` displaced."""
+    _MODULE_STUBS.setdefault(owner, []).append((name, sys.modules.get(name, _ABSENT)))
+    sys.modules[name] = module
+
+
+def drop_stub_module(owner: str, name: str) -> None:
+    """Remove `name` from sys.modules, remembering it for restore_stubs."""
+    _MODULE_STUBS.setdefault(owner, []).append((name, sys.modules.get(name, _ABSENT)))
+    sys.modules.pop(name, None)
+
+
+def restore_stubs(owner: str) -> None:
+    """Put back everything `owner` installed or dropped, newest first."""
+    for name, old in reversed(_MODULE_STUBS.pop(owner, [])):
+        if old is _ABSENT:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = old

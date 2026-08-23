@@ -457,10 +457,20 @@ class KCFSCard extends HTMLElement {
     // out of band once; re-render when it lands so the lock icon settles.
     if (this._deviceId === undefined && !this._deviceIdPending) {
       this._deviceIdPending = true;
-      this._resolveDeviceId().then(() => {
-        this._deviceIdPending = false;
-        this._updateIfChanged();
-      });
+      // .catch as well as .then: _resolveDeviceId can reject (a malformed config,
+      // a hass assigned before setConfig), and an unhandled rejection left
+      // _deviceIdPending true forever, so both gates here refused to retry and
+      // the card could never resolve while still rendering its buttons enabled.
+      this._resolveDeviceId()
+        .catch((err) => {
+          this._deviceIdError = "toast_no_device";
+          this._deviceId = null;
+          console.warn("k-cfs-card: device resolution failed", err);
+        })
+        .finally(() => {
+          this._deviceIdPending = false;
+          this._updateIfChanged();
+        });
     }
     this._updateIfChanged();
   }
@@ -984,14 +994,19 @@ class KCFSCard extends HTMLElement {
       .edit-btn-mini { width: 18px; height: 18px; top: -2px; left: -2px; }
       .edit-btn ha-icon { --mdc-icon-size: 16px; }
       .edit-btn-mini ha-icon { --mdc-icon-size: 12px; }
-      .edit-btn[disabled], .edit-btn-mini[disabled] {
+      .edit-btn[aria-disabled="true"], .edit-btn-mini[aria-disabled="true"] {
         cursor: not-allowed;
         opacity: 0.45;
       }
       /* Reveal on hover only where hovering exists. A wall tablet is the primary
          HA surface, and there the button has to be visible without one. */
       @media (hover: hover) {
-        .edit-btn, .edit-btn-mini { opacity: 0; }
+        /* The [aria-disabled] selectors are repeated here on purpose: they are
+           more specific than a bare .edit-btn, and a media query adds no
+           specificity, so without them a locked button stays visible while the
+           editable ones hide. */
+        .edit-btn, .edit-btn-mini,
+        .edit-btn[aria-disabled="true"], .edit-btn-mini[aria-disabled="true"] { opacity: 0; }
         .spool-card:hover .edit-btn,
         .spool-mini-wrapper:hover .edit-btn-mini,
         .bay:hover .edit-btn-mini,
@@ -1638,7 +1653,7 @@ class KCFSCard extends HTMLElement {
               data-edit="${esc(slot.entity_id)}"
               title="${esc(title)}"
               aria-label="${esc(title)}"
-              ${disabled ? "disabled" : ""}>
+              ${disabled ? 'aria-disabled="true"' : ""}>
         <ha-icon icon="${disabled ? mdi("lock") : mdi("pencil")}"></ha-icon>
       </button>
     `;
@@ -1765,6 +1780,7 @@ class KCFSCard extends HTMLElement {
     // partially populated, and accepting the one device it did know about
     // resolved a card spanning two printers to that printer, so editing a slot
     // on the other one wrote its box and slot ids to the wrong machine.
+    let anyLookupFailed = false;
     if (unresolved.length) {
       const answers = await Promise.all([...new Set(unresolved)].map(async (eid) => {
         try {
@@ -1772,20 +1788,29 @@ class KCFSCard extends HTMLElement {
             type: "config/entity_registry/get",
             entity_id: eid,
           });
-          return entry?.device_id || null;
+          return { deviceId: entry?.device_id || null, failed: false };
         } catch (_) {
-          // Entity gone, or the user is not an admin. Ignore just this one.
-          return null;
+          // config/entity_registry/get is admin-only, so for a non-admin
+          // dashboard user every one of these fails. Treating that as "this
+          // entity has no device" is what let a two-printer card resolve to
+          // whichever printer *was* in hass.entities, and _saveMaterial then
+          // sent the other printer's box and slot ids to it.
+          return { deviceId: null, failed: true };
         }
       }));
-      answers.forEach((deviceId) => { if (deviceId) devices.add(deviceId); });
+      for (const answer of answers) {
+        if (answer.failed) anyLookupFailed = true;
+        else if (answer.deviceId) devices.add(answer.deviceId);
+      }
     }
 
     // setConfig ran while we were awaiting callWS: this answer is for the
     // previous config, so drop it rather than caching it.
     if (isStale()) return this._deviceId ?? null;
 
-    if (devices.size !== 1) {
+    // Fail closed when an entity's device could not be determined at all: this
+    // card may well span two printers and we simply cannot see it.
+    if (devices.size !== 1 || anyLookupFailed) {
       this._deviceIdError = devices.size > 1 ? "toast_multiple_devices" : "toast_no_device";
       this._deviceId = null;
       return null;
@@ -2302,7 +2327,11 @@ class KCFSCard extends HTMLElement {
     this._root.querySelectorAll('.edit-btn, .edit-btn-mini').forEach(btn => {
       btn.onclick = (ev) => {
         ev.stopPropagation();
-        if (btn.disabled) {
+        // aria-disabled rather than the disabled property: the point of letting
+        // the click through is to say why editing is blocked. _showEditDialog
+        // re-checks all three conditions, so this is an explanation, not the
+        // guard.
+        if (btn.getAttribute("aria-disabled") === "true") {
           this._showToast(btn.title);
           return;
         }

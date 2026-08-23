@@ -2,12 +2,14 @@ import sys
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
+from conftest import install_stub_module, restore_stubs
+
 if "aiohttp" not in sys.modules:
-    sys.modules["aiohttp"] = MagicMock()
+    install_stub_module(__name__, "aiohttp", MagicMock())
 
 # Mock go2rtc_client if needed
 if "go2rtc_client" not in sys.modules:
-    sys.modules["go2rtc_client"] = MagicMock()
+    install_stub_module(__name__, "go2rtc_client", MagicMock())
     exceptions_mod = MagicMock()
 
     class Go2RtcClientError(Exception):
@@ -15,7 +17,7 @@ if "go2rtc_client" not in sys.modules:
         non-exception raises TypeError instead of exercising the handler."""
 
     exceptions_mod.Go2RtcClientError = Go2RtcClientError
-    sys.modules["go2rtc_client.exceptions"] = exceptions_mod
+    install_stub_module(__name__, "go2rtc_client.exceptions", exceptions_mod)
 
 # Mock homeassistant.components.camera
 if "homeassistant.components" in sys.modules:
@@ -27,7 +29,7 @@ if "homeassistant.components" in sys.modules:
                 pass
         cam_mod.Camera = MockCamera
         cam_mod.CameraEntityFeature = MagicMock()
-        sys.modules["homeassistant.components.camera"] = cam_mod
+        install_stub_module(__name__, "homeassistant.components.camera", cam_mod)
         components_mod.camera = cam_mod
 else:
     # Fallback
@@ -45,6 +47,10 @@ else:
     sys.modules["homeassistant.components"].camera = cam_mod
 
 from custom_components.ha_creality_ws.camera import CrealityWebRTCCamera
+
+
+def teardown_module(_module):
+    restore_stubs(__name__)
 
 def test_ensure_stream_configured_uses_creality_format():
     import asyncio

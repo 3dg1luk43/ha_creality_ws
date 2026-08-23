@@ -12,6 +12,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from conftest import install_stub_module, restore_stubs
+
 # fan.py needs homeassistant.components.fan, which the shared conftest omits.
 if "homeassistant.components.fan" not in sys.modules:
     fan_mod = MagicMock()
@@ -27,9 +29,13 @@ if "homeassistant.components.fan" not in sys.modules:
     fan_mod.FanEntity = _FanEntity
     fan_mod.FanEntityFeature = _FanEntityFeature
     fan_mod.ATTR_PERCENTAGE = "percentage"
-    sys.modules["homeassistant.components.fan"] = fan_mod
+    install_stub_module(__name__, "homeassistant.components.fan", fan_mod)
 
 from custom_components.ha_creality_ws.fan import _KFanEntity  # noqa: E402
+
+
+def teardown_module(_module):
+    restore_stubs(__name__)
 
 
 # (uid, telemetry field, M106 channel) as wired up in fan.async_setup_entry.

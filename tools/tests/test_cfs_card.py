@@ -62,7 +62,10 @@ def test_the_javascript_suites_are_discoverable():
     """
     assert JS_SUITES, f"no test_*.mjs found under {JS_TESTS}"
     # The suites that carry the behavioural coverage, by name.
-    for expected in ("test_collector.mjs", "test_edit_dialog.mjs", "test_device_scoping.mjs"):
+    for expected in (
+        "test_collector.mjs", "test_edit_dialog.mjs", "test_device_scoping.mjs",
+        "test_interactions.mjs",
+    ):
         assert expected in JS_SUITES, f"{expected} is missing from {JS_SUITES}"
 
 

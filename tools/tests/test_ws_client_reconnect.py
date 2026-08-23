@@ -14,6 +14,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import patch
 
+from conftest import drop_stub_module, restore_stubs
+
 # ---------------------------------------------------------------------------
 # Bootstrap: make sure the real ws_client module is importable without HA
 # ---------------------------------------------------------------------------
@@ -22,7 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # Remove the conftest stub so we load the real module
-sys.modules.pop("custom_components.ha_creality_ws.ws_client", None)
+drop_stub_module(__name__, "custom_components.ha_creality_ws.ws_client")
 
 # Provide minimal stubs for any HA imports the module might pull in
 for mod_name in [
@@ -229,3 +231,7 @@ def test_normal_loop_connects_when_power_on():
         )
 
     asyncio.run(run())
+
+
+def teardown_module(_module):
+    restore_stubs(__name__)

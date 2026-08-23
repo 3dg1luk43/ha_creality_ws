@@ -208,7 +208,7 @@ test("a card spanning two printers renders its edit button locked", async () => 
 
   assert.equal(card._deviceIdError, "toast_multiple_devices", "the card fails closed");
   const button = card._renderEditButton(card._findSlot(A_SLOT));
-  assert.match(button, /\sdisabled>/, "the button is disabled");
+  assert.match(button, /aria-disabled="true"/, "the button is disabled");
   assert.match(button, /mdi:lock/, "and shows the lock");
 });
 
@@ -235,6 +235,50 @@ test("a partially populated registry does not resolve a mixed card", async () =>
   assert.equal(card._deviceIdError, "toast_multiple_devices");
   assert.ok(asked.includes(B_SLOT), "the entity the registry could not answer for is asked");
   assert.ok(!asked.includes(A_SLOT), "the one it did answer for is not asked again");
+});
+
+test("a failed registry lookup fails closed rather than assuming one printer", async () => {
+  // config/entity_registry/get is admin-only, so for a non-admin dashboard user
+  // every fallback lookup throws. Treating that as "this entity has no device"
+  // let a two-printer card resolve to whichever printer hass.entities happened to
+  // know, and _saveMaterial then sent the other printer's ids to it.
+  const { KCFSCard } = loadCard();
+  const card = new KCFSCard();
+  card.setConfig({ box0_slot0_filament: A_SLOT, box1_slot0_filament: B_SLOT });
+  card.hass = makeHass(statesForBoth(), {
+    // Only printer A is known locally; asking about B is refused.
+    entities: { [A_SLOT]: { device_id: "dev_a", platform: "ha_creality_ws" } },
+    callWS: async () => { throw new Error("unauthorized"); },
+  });
+
+  assert.equal(await card._resolveDeviceId(), null, "must not settle on dev_a");
+  assert.ok(card._deviceIdError, "and must say why");
+});
+
+test("a rejecting resolve does not wedge the card", async () => {
+  // An unhandled rejection left _deviceIdPending true forever, so both gates in
+  // the hass setter refused to retry while _deviceIdError stayed null -- buttons
+  // rendered enabled on a card that could never resolve.
+  const { KCFSCard } = loadCard();
+  const card = new KCFSCard();
+  card.setConfig({ box0_slot0_filament: A_SLOT });
+
+  const boom = () => Promise.reject(new Error("kaboom"));
+  const original = card._resolveDeviceId.bind(card);
+  card._resolveDeviceId = boom;
+  card.hass = makeHass(statesForBoth(), { entities: twoPrinterRegistry() });
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(card._deviceIdPending, false, "the pending flag must be released");
+  assert.ok(card._deviceIdError, "and the failure must be visible to renderers");
+
+  // And a later assignment can still resolve once the cause clears.
+  card._resolveDeviceId = original;
+  card._deviceId = undefined;
+  card._deviceIdError = null;
+  assert.equal(await card._resolveDeviceId(), "dev_a");
 });
 
 test("a card that cannot resolve is retried once, not on every update", async () => {

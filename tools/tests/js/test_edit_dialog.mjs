@@ -172,14 +172,14 @@ test("the edit button is disabled and shows a lock while printing", async () => 
   const html = card._renderEditButton(slot);
   // The tooltip reads "Editing is disabled while the printer is busy", so a bare
   // /disabled/ would pass even with the attribute removed from the <button>.
-  assert.match(html, /\sdisabled>/);
+  assert.match(html, /aria-disabled="true"/);
   assert.match(html, /mdi:lock/);
 });
 
 test("the edit button is enabled and shows a pencil when idle", async () => {
   const { card, slot } = await setup();
   const html = card._renderEditButton(slot);
-  assert.ok(!/\sdisabled>/.test(html));
+  assert.ok(!/aria-disabled="true"/.test(html));
   assert.match(html, /mdi:pencil/);
 });
 
@@ -199,7 +199,7 @@ test("an unaddressable slot cannot be edited", async () => {
   // entity id supplies box 1, so force the unaddressable case directly.
   const orphan = { ...slot, printerBoxId: null };
   const html = card._renderEditButton(orphan);
-  assert.match(html, /\sdisabled>/);
+  assert.match(html, /aria-disabled="true"/);
 });
 
 test("cancel closes the dialog", async () => {
