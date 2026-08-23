@@ -58,6 +58,11 @@ DEFAULT_GO2RTC_PORT = 11984
 # homeassistant/components/go2rtc/server.py); a stand-alone go2rtc defaults to
 # 8554. Users with a non-default RTSP port can override it in the options flow.
 CONF_GO2RTC_RTSP_PORT = "go2rtc_rtsp_port"
+# Custom-camera URL schemes that go2rtc ingests rather than Home Assistant
+# fetching directly. A Custom source using one of these ends up on the same
+# go2rtc camera as CAM_MODE_WEBRTC, so it needs the same settings.
+GO2RTC_SOURCE_SCHEMES = ("rtsp", "rtmp", "srt")
+
 HA_MANAGED_GO2RTC_RTSP_PORT = 18554
 DEFAULT_GO2RTC_RTSP_PORT = 8554
 

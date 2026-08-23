@@ -28,6 +28,7 @@ from .const import (
     CONF_GO2RTC_URL,
     CONF_GO2RTC_PORT,
     CONF_GO2RTC_RTSP_PORT,
+    GO2RTC_SOURCE_SCHEMES,
     CONF_CUSTOM_CAMERA_URL,
     DEFAULT_GO2RTC_URL,
     DEFAULT_GO2RTC_PORT,
@@ -281,13 +282,23 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 parsed = urlparse(custom_url)
                 # Require a supported scheme and a host. http(s) -> MJPEG/snapshot;
                 # rtsp/rtmp/srt -> ingested via go2rtc (see camera.async_setup_entry).
-                if parsed.scheme.lower() not in ("http", "https", "rtsp", "rtmp", "srt") or not parsed.netloc:
+                if parsed.scheme.lower() not in ("http", "https") + GO2RTC_SOURCE_SCHEMES or not parsed.netloc:
                     errors[CONF_CUSTOM_CAMERA_URL] = "invalid_camera_url"
                     effective_mode = CAM_MODE_CUSTOM  # ensure the URL field is shown
                 else:
                     self._working[CONF_CUSTOM_CAMERA_URL] = custom_url
 
-            if camera_mode == CAM_MODE_WEBRTC:
+            # A Custom source with an rtsp/rtmp/srt URL is ingested by go2rtc as
+            # well (camera.async_setup_entry -> _make_go2rtc_camera), so it needs
+            # the same settings. Popping them left that path unable to reach an
+            # external go2rtc at all, and silently dropped its RTSP port.
+            custom_uses_go2rtc = (
+                camera_mode == CAM_MODE_CUSTOM
+                and urlparse(self._working.get(CONF_CUSTOM_CAMERA_URL, "") or "")
+                    .scheme.lower() in GO2RTC_SOURCE_SCHEMES
+            )
+
+            if camera_mode == CAM_MODE_WEBRTC or custom_uses_go2rtc:
                 self._working[CONF_GO2RTC_URL] = (
                     str(user_input.get(CONF_GO2RTC_URL) or "").strip() or DEFAULT_GO2RTC_URL
                 )
@@ -321,7 +332,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         # 0 renders as "auto-detect" in the form.
         current_go2rtc_rtsp_port = self._working.get(CONF_GO2RTC_RTSP_PORT, 0)
         current_custom_url = self._working.get(CONF_CUSTOM_CAMERA_URL, "")
-        show_go2rtc = effective_mode in (CAM_MODE_WEBRTC, CAM_MODE_AUTO)
+        # Offered for Custom too once its URL is a go2rtc-ingested scheme, since
+        # that path builds a go2rtc camera. On a fresh Custom setup the URL is not
+        # staged yet, so the fields appear the next time the step is opened.
+        show_go2rtc = effective_mode in (CAM_MODE_WEBRTC, CAM_MODE_AUTO) or (
+            effective_mode == CAM_MODE_CUSTOM
+            and urlparse(current_custom_url or "").scheme.lower() in GO2RTC_SOURCE_SCHEMES
+        )
         show_custom_url = effective_mode == CAM_MODE_CUSTOM
 
         schema_dict: dict[str, Any] = {

@@ -362,6 +362,38 @@ def test_a_reachable_custom_go2rtc_keeps_its_override():
     assert _stream_source(cam) == "rtsp://10.0.0.5:9554/creality_k2_1_2_3_4"
 
 
+def test_custom_rtsp_sources_keep_their_go2rtc_settings():
+    """A Custom rtsp:// source is served by go2rtc, so it needs those settings.
+
+    The options flow dropped CONF_GO2RTC_URL/PORT/RTSP_PORT for every mode except
+    CAM_MODE_WEBRTC, but camera.async_setup_entry routes a non-http Custom URL
+    through _make_go2rtc_camera(), which reads exactly those options. The result
+    was a Custom RTSP camera that could not be pointed at an external go2rtc and
+    silently lost its RTSP port.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2] / "custom_components" / "ha_creality_ws"
+    flow = (root / "config_flow.py").read_text()
+
+    # The keep/drop decision must consider a go2rtc-ingested Custom URL.
+    assert "custom_uses_go2rtc" in flow
+    assert "if camera_mode == CAM_MODE_WEBRTC or custom_uses_go2rtc:" in flow, (
+        "go2rtc settings must survive a Custom source that go2rtc ingests"
+    )
+    # And the fields have to be offered for that case, not just WebRTC/Auto.
+    show = flow.split("show_go2rtc =", 1)[1].split("\n        show_custom_url", 1)[0]
+    assert "GO2RTC_SOURCE_SCHEMES" in show
+
+    # The schemes list is shared rather than duplicated per call site.
+    const = (root / "const.py").read_text()
+    assert 'GO2RTC_SOURCE_SCHEMES = ("rtsp", "rtmp", "srt")' in const
+    camera = (root / "camera.py").read_text()
+    assert "_make_go2rtc_camera(go2rtc_source=custom_url)" in camera, (
+        "the Custom non-http path still builds a go2rtc camera"
+    )
+
+
 def test_stream_source_is_none_for_direct_signaling():
     """Direct-signaling cameras never register a go2rtc stream, so no HLS."""
     import asyncio

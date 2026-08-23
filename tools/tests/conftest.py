@@ -79,14 +79,18 @@ sys.modules["homeassistant.helpers.update_coordinator"] = uc_mod
 # integration surfaces as a failure instead of silently passing. Tests that need
 # to observe a dispatch monkeypatch the name the module under test imported.
 dispatcher_mod = types.ModuleType("homeassistant.helpers.dispatcher")
-def async_dispatcher_send(hass, signal, *args):  # noqa: ANN001, ANN201
+
+def async_dispatcher_send(_hass, _signal, *_args) -> None:
     return None
-def async_dispatcher_connect(hass, signal, target):  # noqa: ANN001, ANN201
+
+def async_dispatcher_connect(_hass, _signal, _target):
+    """Return the unsubscribe callable HA hands back."""
     return lambda: None
-setattr(dispatcher_mod, "async_dispatcher_send", async_dispatcher_send)
-setattr(dispatcher_mod, "async_dispatcher_connect", async_dispatcher_connect)
+
+dispatcher_mod.async_dispatcher_send = async_dispatcher_send
+dispatcher_mod.async_dispatcher_connect = async_dispatcher_connect
 sys.modules["homeassistant.helpers.dispatcher"] = dispatcher_mod
-setattr(helpers_mod, "dispatcher", dispatcher_mod)
+helpers_mod.dispatcher = dispatcher_mod
 
 # --- MOCK aiohttp_client ---
 aiohttp_client_mod = types.ModuleType("homeassistant.helpers.aiohttp_client")

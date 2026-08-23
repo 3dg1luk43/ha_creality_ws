@@ -136,50 +136,68 @@ def test_test_server_prefers_h264_for_video():
     assert "keyint=" in source
 
 
+def _h264_timing():
+    """The simulator's timestamp helper, importable without aiortc/av."""
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "tools" / "h264_timing.py"
+    spec = importlib.util.spec_from_file_location("h264_timing", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class _FakePacket:
+    """Only what assign_clip_timestamps touches: size, pts, dts."""
+
+    def __init__(self, size):
+        self.size = size
+        self.pts = None
+        self.dts = None
+
+
 def test_h264_clip_timestamps_stay_monotonic_across_the_loop():
-    """The clip wraps forever, so pts must never go backwards at the seam.
+    """The clip loops forever, so pts must not go backwards at the seam.
 
-    Timestamps were derived from `enumerate(demux(...))` while the clip length was
-    derived from the *kept* packet count. A skipped zero-size packet made the
-    length shorter than the real span, so _pts_offset advanced by less than one
-    clip and the second loop's timestamps overlapped the first.
+    Timestamps used to be derived from `enumerate(demux(...))` while the clip
+    length came from the *kept* packet count. A skipped zero-size packet -- what
+    ffmpeg emits on a flush -- made the length shorter than the real span, so the
+    wrap advanced _pts_offset by less than one clip and the second loop's
+    timestamps overlapped the first.
     """
-    fps = 30
-    step = int(90000 / fps)
+    timing = _h264_timing()
+    step = timing.pts_step(30)
 
-    # Replay the demux loop exactly as _ensure_clip does, with a zero-size packet
-    # in the middle -- which is what ffmpeg emits for a flush.
-    class FakePacket:
-        def __init__(self, size):
-            self.size = size
-            self.pts = None
-            self.dts = None
-            self.time_base = None
+    # A zero-size packet in the middle is the case that used to desynchronise.
+    kept, clip_duration = timing.assign_clip_timestamps(
+        [_FakePacket(120), _FakePacket(0), _FakePacket(140), _FakePacket(90)], 30
+    )
 
-    demuxed = [FakePacket(120), FakePacket(0), FakePacket(140), FakePacket(90)]
-    packets = []
-    kept = 0
-    for packet in demuxed:
-        if packet.size == 0:
-            continue
-        packet.pts = kept * step
-        packet.dts = packet.pts
-        packets.append(packet)
-        kept += 1
-    clip_duration_pts = len(packets) * step
+    assert len(kept) == 3, "the zero-size packet is dropped"
+    assert [p.pts for p in kept] == [0, step, 2 * step], "contiguous, no gap"
+    assert [p.dts for p in kept] == [p.pts for p in kept]
+    # The seam invariant: the next loop's first pts is exactly one step past the
+    # previous loop's last.
+    assert kept[-1].pts + step == clip_duration
 
-    assert [p.pts for p in packets] == [0, step, 2 * step], "contiguous, no gap"
-    # The wrap invariant: the next loop's first pts must be exactly one step past
-    # the previous loop's last.
-    assert packets[-1].pts + step == clip_duration_pts
+    # Two full loops must be strictly increasing.
+    emitted = []
+    offset = 0
+    for _ in range(2):
+        emitted.extend(offset + p.pts for p in kept)
+        offset += clip_duration
+    assert emitted == sorted(set(emitted)), f"pts not strictly increasing: {emitted}"
 
-    # And the source must derive both from the kept count, not the demuxed one.
+
+def test_the_simulator_uses_the_shared_timestamp_helper():
+    """Pins the call site, since the bug was inline arithmetic."""
     source = _test_server_source()
     clip = source.split("async def _ensure_clip", 1)[1].split("\n    async def recv", 1)[0]
+    assert "assign_clip_timestamps(" in clip
     assert "enumerate(container.demux" not in clip, (
         "pts must not be indexed by demuxed position; zero-size packets are skipped"
     )
-    assert "kept += 1" in clip
 
 
 def test_test_server_does_not_close_healthy_webrtc_sessions_on_a_timer():

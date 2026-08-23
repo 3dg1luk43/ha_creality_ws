@@ -54,8 +54,12 @@ import numpy as np
 from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
 from aiortc.contrib.media import MediaBlackhole
+
 import av
 import shutil
+
+# Local: split out so it can be tested without aiortc/av.
+from h264_timing import assign_clip_timestamps
 
 logging.basicConfig(
     level=logging.INFO,
@@ -275,22 +279,14 @@ class H264PassthroughTrack(MediaStreamTrack):
             try:
                 stream = container.streams.video[0]
                 # Annex-B raw H.264 has no container timestamps; synthesise them.
-                step = int(90000 / self.fps)
-                # Counts kept packets, not demuxed ones: a skipped zero-size
-                # packet would leave the last pts at (demuxed-1)*step while
-                # _clip_duration_pts below is len(kept)*step. The wrap in recv()
-                # would then advance _pts_offset by less than the real clip span,
-                # so the second loop's timestamps overlap the first instead of
-                # increasing monotonically.
-                kept = 0
-                for packet in container.demux(stream):
-                    if packet.size == 0:
-                        continue
-                    packet.pts = kept * step
-                    packet.dts = packet.pts
+                # Timestamping lives in h264_timing so it can be tested without
+                # aiortc/av; see the note there on why kept-vs-demuxed matters.
+                kept, self._clip_duration_pts = assign_clip_timestamps(
+                    container.demux(stream), self.fps
+                )
+                for packet in kept:
                     packet.time_base = self._time_base
-                    self._packets.append(packet)
-                    kept += 1
+                self._packets.extend(kept)
             finally:
                 container.close()
         finally:
@@ -301,8 +297,6 @@ class H264PassthroughTrack(MediaStreamTrack):
 
         if not self._packets:
             raise RuntimeError("pre-encoded clip contained no packets")
-        step = int(90000 / self.fps)
-        self._clip_duration_pts = len(self._packets) * step
         LOGGER.info(
             "H.264 passthrough clip ready: %d packets, %.1fs, keyframe every %ds",
             len(self._packets), self.seconds, 1,
