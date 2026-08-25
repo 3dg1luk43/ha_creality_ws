@@ -2,11 +2,13 @@ import sys
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
+from conftest import install_stub_module, restore_stubs
+
 if "aiohttp" not in sys.modules:
-    sys.modules["aiohttp"] = MagicMock()
+    install_stub_module(__name__, "aiohttp", MagicMock())
 if "go2rtc_client" not in sys.modules:
-    sys.modules["go2rtc_client"] = MagicMock()
-    sys.modules["go2rtc_client.exceptions"] = MagicMock()
+    install_stub_module(__name__, "go2rtc_client", MagicMock())
+    install_stub_module(__name__, "go2rtc_client.exceptions", MagicMock())
 
 # Ensure exceptions module has the class
 class Go2RtcClientError(Exception):
@@ -84,3 +86,7 @@ def test_webrtc_recovery_on_error():
 
     # 3. Stream name reset
     assert camera._stream_name is None
+
+
+def teardown_module(_module):
+    restore_stubs(__name__)

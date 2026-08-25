@@ -27,6 +27,8 @@ from .const import (
     CAM_MODE_CUSTOM,
     CONF_GO2RTC_URL,
     CONF_GO2RTC_PORT,
+    CONF_GO2RTC_RTSP_PORT,
+    GO2RTC_SOURCE_SCHEMES,
     CONF_CUSTOM_CAMERA_URL,
     DEFAULT_GO2RTC_URL,
     DEFAULT_GO2RTC_PORT,
@@ -280,33 +282,80 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 parsed = urlparse(custom_url)
                 # Require a supported scheme and a host. http(s) -> MJPEG/snapshot;
                 # rtsp/rtmp/srt -> ingested via go2rtc (see camera.async_setup_entry).
-                if parsed.scheme.lower() not in ("http", "https", "rtsp", "rtmp", "srt") or not parsed.netloc:
+                if parsed.scheme.lower() not in ("http", "https") + GO2RTC_SOURCE_SCHEMES or not parsed.netloc:
                     errors[CONF_CUSTOM_CAMERA_URL] = "invalid_camera_url"
                     effective_mode = CAM_MODE_CUSTOM  # ensure the URL field is shown
                 else:
                     self._working[CONF_CUSTOM_CAMERA_URL] = custom_url
 
-            if camera_mode == CAM_MODE_WEBRTC:
-                self._working[CONF_GO2RTC_URL] = (
-                    str(user_input.get(CONF_GO2RTC_URL) or "").strip() or DEFAULT_GO2RTC_URL
-                )
-                port = user_input.get(CONF_GO2RTC_PORT)
-                try:
-                    self._working[CONF_GO2RTC_PORT] = int(port) if port is not None else DEFAULT_GO2RTC_PORT
-                except (ValueError, TypeError):
+            # A Custom source with an rtsp/rtmp/srt URL is ingested by go2rtc as
+            # well (camera.async_setup_entry -> _make_go2rtc_camera), so it needs
+            # the same settings. Popping them left that path unable to reach an
+            # external go2rtc at all, and silently dropped its RTSP port.
+            custom_uses_go2rtc = (
+                camera_mode == CAM_MODE_CUSTOM
+                and urlparse(self._working.get(CONF_CUSTOM_CAMERA_URL, "") or "")
+                    .scheme.lower() in GO2RTC_SOURCE_SCHEMES
+            )
+
+            if camera_mode == CAM_MODE_WEBRTC or custom_uses_go2rtc:
+                # Only fields the form actually rendered are applied. A submit can
+                # reach here without them: switching to Custom hides the go2rtc
+                # fields, and the Custom-uses-go2rtc branch then ran with no
+                # go2rtc keys in user_input, so `.get() or DEFAULT` silently
+                # replaced a configured external server with localhost:11984.
+                if CONF_GO2RTC_URL in user_input:
+                    self._working[CONF_GO2RTC_URL] = (
+                        str(user_input.get(CONF_GO2RTC_URL) or "").strip() or DEFAULT_GO2RTC_URL
+                    )
+                elif CONF_GO2RTC_URL not in self._working:
+                    self._working[CONF_GO2RTC_URL] = DEFAULT_GO2RTC_URL
+
+                if CONF_GO2RTC_PORT in user_input:
+                    port = user_input.get(CONF_GO2RTC_PORT)
+                    try:
+                        self._working[CONF_GO2RTC_PORT] = int(port) if port is not None else DEFAULT_GO2RTC_PORT
+                    except (ValueError, TypeError):
+                        self._working[CONF_GO2RTC_PORT] = DEFAULT_GO2RTC_PORT
+                elif CONF_GO2RTC_PORT not in self._working:
                     self._working[CONF_GO2RTC_PORT] = DEFAULT_GO2RTC_PORT
-            else:
+
+                # RTSP port is only needed for HA's HLS pipeline; blank/0 means
+                # "auto-detect" (18554 for HA-managed go2rtc, 8554 otherwise).
+                if CONF_GO2RTC_RTSP_PORT in user_input:
+                    rtsp_port = user_input.get(CONF_GO2RTC_RTSP_PORT)
+                    try:
+                        rtsp_port_int = int(rtsp_port) if rtsp_port is not None else 0
+                    except (ValueError, TypeError):
+                        rtsp_port_int = 0
+                    if rtsp_port_int > 0:
+                        self._working[CONF_GO2RTC_RTSP_PORT] = rtsp_port_int
+                    else:
+                        self._working.pop(CONF_GO2RTC_RTSP_PORT, None)
+            elif not errors:
                 # Drop go2rtc settings for non-go2rtc modes so they don't linger.
+                # Only once the submission is otherwise valid: an invalid Custom
+                # URL re-renders this step, and discarding the settings meanwhile
+                # lost them before the user could correct the URL.
                 self._working.pop(CONF_GO2RTC_URL, None)
                 self._working.pop(CONF_GO2RTC_PORT, None)
+                self._working.pop(CONF_GO2RTC_RTSP_PORT, None)
 
             if not errors:
                 return await self.async_step_init()
 
         current_go2rtc_url = self._working.get(CONF_GO2RTC_URL, DEFAULT_GO2RTC_URL)
         current_go2rtc_port = self._working.get(CONF_GO2RTC_PORT, DEFAULT_GO2RTC_PORT)
+        # 0 renders as "auto-detect" in the form.
+        current_go2rtc_rtsp_port = self._working.get(CONF_GO2RTC_RTSP_PORT, 0)
         current_custom_url = self._working.get(CONF_CUSTOM_CAMERA_URL, "")
-        show_go2rtc = effective_mode in (CAM_MODE_WEBRTC, CAM_MODE_AUTO)
+        # Offered for Custom too once its URL is a go2rtc-ingested scheme, since
+        # that path builds a go2rtc camera. On a fresh Custom setup the URL is not
+        # staged yet, so the fields appear the next time the step is opened.
+        show_go2rtc = effective_mode in (CAM_MODE_WEBRTC, CAM_MODE_AUTO) or (
+            effective_mode == CAM_MODE_CUSTOM
+            and urlparse(current_custom_url or "").scheme.lower() in GO2RTC_SOURCE_SCHEMES
+        )
         show_custom_url = effective_mode == CAM_MODE_CUSTOM
 
         schema_dict: dict[str, Any] = {
@@ -331,6 +380,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(CONF_GO2RTC_PORT, default=current_go2rtc_port): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=1, max=65535, mode=selector.NumberSelectorMode.BOX)
                 ),
+                vol.Optional(CONF_GO2RTC_RTSP_PORT, default=current_go2rtc_rtsp_port): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=65535, mode=selector.NumberSelectorMode.BOX)
+                ),
             })
         if show_custom_url:
             schema_dict.update({
@@ -354,6 +406,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     "(no go2rtc) — try it if the default does not work, e.g. on newer "
                     "K1C firmware. Custom lets you point at any http(s) MJPEG/snapshot "
                     "URL or an rtsp:// stream (served via go2rtc). "
+                    "Leave the go2rtc RTSP port at 0 unless HLS / camera.record "
+                    "needs a non-default port. "
                     "Submit returns to the menu; use Save and apply there to apply changes."
                 ),
             },

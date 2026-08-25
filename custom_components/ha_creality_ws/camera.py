@@ -15,6 +15,7 @@ import base64
 import json
 import logging
 from typing import Optional
+from urllib.parse import urlparse
 
 from aiohttp import ClientError, web  # type: ignore[assignment]
 from homeassistant.core import HomeAssistant, callback  # type: ignore[assignment]
@@ -59,6 +60,10 @@ from .const import (
     WEBRTC_CALL_ROOT_URL_TEMPLATE,
     CONF_GO2RTC_URL,
     CONF_GO2RTC_PORT,
+    CONF_GO2RTC_RTSP_PORT,
+    DEFAULT_GO2RTC_PORT,
+    DEFAULT_GO2RTC_RTSP_PORT,
+    HA_MANAGED_GO2RTC_RTSP_PORT,
     CONF_CUSTOM_CAMERA_URL,
     CAM_MODE_WEBRTC,
     CAM_MODE_WEBRTC_DIRECT,
@@ -347,6 +352,7 @@ class CrealityWebRTCCamera(_BaseCamera):
         go2rtc_port: int | None = None,
         direct_signaling: bool = False,
         go2rtc_source: str | None = None,
+        go2rtc_rtsp_port: int | None = None,
     ) -> None:
         """Initialize the WebRTC camera.
 
@@ -361,16 +367,21 @@ class CrealityWebRTCCamera(_BaseCamera):
             go2rtc_source: Explicit go2rtc source string (e.g. an rtsp:// URL). When
                 set it overrides the printer's Creality WebRTC source. Only used when
                 direct_signaling is False.
+            go2rtc_rtsp_port: RTSP port of the go2rtc instance, used to build the
+                `stream_source()` URL for HA's HLS pipeline. Auto-detected when unset.
         """
         super().__init__(coordinator, "camera")
         self._upstream_signaling_url = signaling_url
         self._use_proxy = use_proxy  # Deprecated, kept for compatibility
         self._custom_go2rtc_url = go2rtc_url
         self._custom_go2rtc_port = go2rtc_port
+        self._custom_go2rtc_rtsp_port = go2rtc_rtsp_port
         self._direct_signaling = direct_signaling
         self._go2rtc_source = go2rtc_source
         self._stream_name: str | None = None
         self._force_recreate_stream = False
+        # Guards stream creation/recreation; see _ensure_stream_configured.
+        self._stream_config_lock = asyncio.Lock()
         self._last_error: str | None = None
         # Frontend ICE candidates queued per session for the non-trickle direct POST.
         self._direct_sessions: dict[str, list] = {}
@@ -384,6 +395,15 @@ class CrealityWebRTCCamera(_BaseCamera):
         self._go2rtc_client: Go2RtcRestClient | None = None
         self._go2rtc_server_url: str | None = None
         self._go2rtc_version: str | None = None
+        # Whether initialization ended up on HA's own go2rtc. A custom instance
+        # can sit on localhost:11984 too, and only HA's build moves RTSP to
+        # 18554 -- so the RTSP port cannot be guessed from the URL alone.
+        self._go2rtc_is_ha_managed: bool = False
+        # Set only when a configured custom server failed and discovery fell back
+        # to HA's. Distinct from _go2rtc_is_ha_managed: a user can also point the
+        # integration at HA's go2rtc *and* give it a non-default RTSP port, and
+        # that override must still be honoured.
+        self._go2rtc_fell_back_from_custom: bool = False
         
         _LOGGER.info(
             "ha_creality_ws: WebRTC camera initialized for printer: %s",
@@ -439,33 +459,84 @@ class CrealityWebRTCCamera(_BaseCamera):
         """
         return not self._direct_signaling
 
-    @property
-    def stream_source(self) -> Optional[str]:
-        """Return the stream name for go2rtc.
+    def _go2rtc_host_and_api_port(self) -> tuple[str | None, int | None]:
+        """Split the resolved go2rtc server URL, tolerating a bare host:port."""
+        url = self._go2rtc_server_url
+        if not url:
+            return (None, None)
+        if "://" not in url:
+            url = f"http://{url}"
+        try:
+            parsed = urlparse(url)
+            return (parsed.hostname, parsed.port)
+        except ValueError:
+            return (None, None)
 
-        Returns the stream name that go2rtc uses to identify this camera's stream.
-        HA's go2rtc component will handle the actual WebRTC connection.
+    def _go2rtc_rtsp_endpoint(self) -> tuple[str, int]:
+        """Return the (host, port) of the go2rtc RTSP listener.
 
-        Returns:
-            str: Stream name, or None if not configured
+        go2rtc serves the same stream over RTSP as well as WebRTC, and RTSP is
+        what HA's `stream` component can ingest. The REST API port we talk to is
+        not the RTSP port, so it has to be derived:
+
+        * an explicit user override always wins;
+        * HA's own managed go2rtc binary listens on 127.0.0.1:18554, while its
+          REST API is on 11984 or a unix socket the client addresses as
+          localhost. Which instance we are talking to is recorded during
+          initialization, because a stand-alone go2rtc can occupy the same
+          host and port and still serve RTSP on the default;
+        * anything else is a stand-alone go2rtc, which defaults to 8554.
         """
-        if not self._uses_go2rtc_webrtc_bridge():
+        host, api_port = self._go2rtc_host_and_api_port()
+
+        # An explicit override always wins -- except when it was configured for a
+        # custom server we could not reach and discovery fell back to HA's
+        # go2rtc, in which case the port points at nothing.
+        override = None if self._go2rtc_fell_back_from_custom else self._custom_go2rtc_rtsp_port
+        if override:
+            try:
+                port = int(override)
+            except (TypeError, ValueError):
+                port = 0
+            if port > 0:
+                return (host or "127.0.0.1", port)
+
+        if (
+            self._go2rtc_is_ha_managed
+            and host in (None, "localhost", "127.0.0.1", "::1")
+            and api_port in (None, DEFAULT_GO2RTC_PORT)
+        ):
+            return ("127.0.0.1", HA_MANAGED_GO2RTC_RTSP_PORT)
+
+        return (host or "127.0.0.1", DEFAULT_GO2RTC_RTSP_PORT)
+
+    def _rtsp_stream_url(self) -> Optional[str]:
+        """Build the go2rtc RTSP URL for the already-configured stream."""
+        if not self._uses_go2rtc_webrtc_bridge() or not self._stream_name:
             return None
-        return self._stream_name
+        host, port = self._go2rtc_rtsp_endpoint()
+        # urlparse().hostname strips the brackets off an IPv6 literal, and
+        # "rtsp://::1:8554/x" is not a parseable URL -- put them back.
+        authority = f"[{host}]" if ":" in host else host
+        return f"rtsp://{authority}:{port}/{self._stream_name}"
 
-    async def async_get_stream_source(self) -> Optional[str]:
-        """Return the stream name for go2rtc.
+    async def stream_source(self) -> Optional[str]:
+        """Return an RTSP URL that HA's `stream` component can ingest.
 
-        Async version of stream_source property for compatibility with
-        Home Assistant's camera entity interface.
+        `Camera.stream_source` is an async method in HA core and is awaited by the
+        classic stream pipeline (the `camera/stream` WS command, HLS playback,
+        `camera.record`/`camera.play_stream`, casting). Defining it as a plain
+        property used to shadow that method, so `await self.stream_source()`
+        raised `TypeError: 'str' object is not callable` (issue #116).
 
-        Returns:
-            str: Stream name, or None if not configured
+        The go2rtc stream name is not a usable source on its own; the RTSP
+        endpoint of the same go2rtc instance is. Direct-signaling cameras never
+        register a go2rtc stream, so they have no HLS source at all.
         """
         if not self._uses_go2rtc_webrtc_bridge():
             return None
         await self._ensure_stream_configured()
-        return self._stream_name
+        return self._rtsp_stream_url()
 
     async def async_added_to_hass(self) -> None:
         """Configure go2rtc stream when camera is added to Home Assistant.
@@ -527,6 +598,8 @@ class CrealityWebRTCCamera(_BaseCamera):
                     
                 self._go2rtc_client = Go2RtcRestClient(session, url)
                 self._go2rtc_server_url = url
+                self._go2rtc_is_ha_managed = False
+                self._go2rtc_fell_back_from_custom = False
                 
                 # Validate server version
                 version = await self._go2rtc_client.validate_server_version()
@@ -547,6 +620,8 @@ class CrealityWebRTCCamera(_BaseCamera):
                 # Fall through to standard discovery logic
                 self._go2rtc_client = None
                 self._go2rtc_server_url = None
+                self._go2rtc_is_ha_managed = False
+                self._go2rtc_fell_back_from_custom = True
 
 
         # Get HA's go2rtc configuration
@@ -567,7 +642,8 @@ class CrealityWebRTCCamera(_BaseCamera):
                 go2rtc_data.url
             )
             self._go2rtc_server_url = go2rtc_data.url
-            
+            self._go2rtc_is_ha_managed = True
+
             # Validate server version
             version = await self._go2rtc_client.validate_server_version()
             self._go2rtc_version = str(version)
@@ -666,9 +742,26 @@ class CrealityWebRTCCamera(_BaseCamera):
 
 
     async def _ensure_stream_configured(self) -> None:
-        """Ensure the go2rtc stream is configured using HA's go2rtc client."""
+        """Ensure the go2rtc stream is configured using HA's go2rtc client.
+
+        Serialized: stream_source(), still-image capture and WebRTC offer
+        handling all call this, and HA can drive them concurrently. Before
+        _stream_name is set, two callers would each create (or delete and
+        recreate) the same go2rtc stream, and one failing would set
+        _force_recreate_stream while the other had just succeeded.
+        """
         if self._stream_name and not self._force_recreate_stream:
-            return  # Already configured
+            return  # Already configured, no lock needed for the common path
+
+        async with self._stream_config_lock:
+            # Re-check inside the lock: another caller may have finished while we
+            # were waiting for it.
+            if self._stream_name and not self._force_recreate_stream:
+                return
+            await self._configure_stream_locked()
+
+    async def _configure_stream_locked(self) -> None:
+        """Body of _ensure_stream_configured; caller holds _stream_config_lock."""
         
         # Initialize client if needed
         if not self._go2rtc_client:
@@ -889,19 +982,25 @@ class CrealityWebRTCCamera(_BaseCamera):
                 self._stream_name, go2rtc_err, exc_info=True
             )
 
-            # Attempt recovery by invalidating the stream to force reconfiguration next time
-            if self._stream_name:
-                _LOGGER.warning("ha_creality_ws: Invalidating stream '%s' due to go2rtc error", self._stream_name)
-                try:
-                    await self._go2rtc_client.streams.delete(self._stream_name)
-                    self._stream_name = None
-                    self._force_recreate_stream = False
-                except Exception as cleanup_exc:
-                    _LOGGER.debug(
-                        "ha_creality_ws: error deleting stream '%s' during cleanup: %s",
-                        self._stream_name, cleanup_exc,
-                    )
-                    self._force_recreate_stream = True
+            # Attempt recovery by invalidating the stream to force reconfiguration
+            # next time. Under the same lock as configuration: without it this
+            # could delete a stream another task had just created and then leave
+            # _stream_name pointing at it, so the fast path reported "already
+            # configured" for a stream that no longer existed in go2rtc.
+            async with self._stream_config_lock:
+                stale_name = self._stream_name
+                if stale_name:
+                    _LOGGER.warning("ha_creality_ws: Invalidating stream '%s' due to go2rtc error", stale_name)
+                    try:
+                        await self._go2rtc_client.streams.delete(stale_name)
+                        self._stream_name = None
+                        self._force_recreate_stream = False
+                    except Exception as cleanup_exc:
+                        _LOGGER.debug(
+                            "ha_creality_ws: error deleting stream '%s' during cleanup: %s",
+                            stale_name, cleanup_exc,
+                        )
+                        self._force_recreate_stream = True
 
             send_message(
                 self._wrap_send_message(
@@ -1263,7 +1362,8 @@ class CrealityWebRTCCamera(_BaseCamera):
             "go2rtc_stream_name": self._stream_name,
             "go2rtc_version": self._go2rtc_version,
             "upstream_signaling_url": self._upstream_signaling_url,
-            "stream_source": self.stream_source,
+            # Resolved lazily by stream_source(); None until a stream exists.
+            "stream_source": self._rtsp_stream_url(),
         }
         if self._last_error:
             attrs["error"] = self._last_error
@@ -1348,6 +1448,7 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities):
             go2rtc_url=entry.options.get(CONF_GO2RTC_URL),
             go2rtc_port=entry.options.get(CONF_GO2RTC_PORT),
             go2rtc_source=go2rtc_source,
+            go2rtc_rtsp_port=entry.options.get(CONF_GO2RTC_RTSP_PORT),
         )
 
     # Respect user-forced camera mode first

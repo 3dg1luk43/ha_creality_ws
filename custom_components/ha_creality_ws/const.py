@@ -52,12 +52,62 @@ PROBE_ON_SILENCE_SECS = 10.0
 DEFAULT_GO2RTC_URL = "localhost"
 DEFAULT_GO2RTC_PORT = 11984
 
+# go2rtc RTSP endpoint, used for HA's classic stream pipeline (HLS,
+# camera.record, camera.play_stream, casting). HA's own managed go2rtc binary
+# listens for RTSP on 127.0.0.1:18554 while its REST API is on 11984 (see
+# homeassistant/components/go2rtc/server.py); a stand-alone go2rtc defaults to
+# 8554. Users with a non-default RTSP port can override it in the options flow.
+CONF_GO2RTC_RTSP_PORT = "go2rtc_rtsp_port"
+# Custom-camera URL schemes that go2rtc ingests rather than Home Assistant
+# fetching directly. A Custom source using one of these ends up on the same
+# go2rtc camera as CAM_MODE_WEBRTC, so it needs the same settings.
+GO2RTC_SOURCE_SCHEMES = ("rtsp", "rtmp", "srt")
+
+HA_MANAGED_GO2RTC_RTSP_PORT = 18554
+DEFAULT_GO2RTC_RTSP_PORT = 8554
+
+# Telemetry fields that gate entity creation and can only arrive once the printer
+# is actually reachable. Platform setup does not wait for the printer (an offline
+# printer must not block the config entry), so an entity depending on one of
+# these would otherwise never be created until the next restart that happens to
+# race the right way. The first appearance of any of them fires a discovery pass.
+# targetBoxTemp is here because number.py gates the chamber control on it: a
+# printer that reports a chamber target but never a maximum (K2 Base) would
+# otherwise never fire a discovery pass, and the control would stay absent until
+# a restart happened to race the right way -- the very defect this list exists
+# to prevent.
+# Must stay in step with every gate that reads these from coord.data:
+# number.py promotes chamber *control* on targetBoxTemp/maxBoxTemp, and sensor.py
+# promotes the chamber *sensor* on boxTemp/targetBoxTemp/maxBoxTemp. A field that
+# gates an entity but does not appear here can never trigger the pass that would
+# create it.
+LATE_DISCOVERY_FIELDS: tuple[str, ...] = (
+    "boxsInfo",
+    "boxTemp",
+    "maxBoxTemp",
+    "targetBoxTemp",
+)
+
 # Notifications
 CONF_NOTIFY_DEVICE = "notify_device"
 CONF_NOTIFY_COMPLETED = "notify_completed"
 CONF_NOTIFY_ERROR = "notify_error"
 CONF_NOTIFY_MINUTES_TO_END = "notify_minutes_to_end"
 CONF_MINUTES_TO_END_VALUE = "minutes_to_end_value"
+
+# Grace window after a (re)start during which the printer's current state is only
+# captured as a baseline, never notified about. The printer keeps reporting the
+# last job's file name and 100% progress indefinitely, so without this every HA
+# restart fired a "print completed" notification (issue #112).
+NOTIFY_PRIME_GRACE_SECS = 10.0
+
+# Progress ceiling for re-arming the one-shot completion notification. The
+# printer rounds progress up to 100 a second before the job actually ends and
+# then reports 99 once more, so "progress fell below 100" on its own does not
+# mean a new job started -- treating it that way sent the completion
+# notification twice for every print. Only a drop clear of that jitter, or a
+# restart of the job clock, counts as a new cycle.
+NOTIFY_REARM_PROGRESS_MAX = 90
 
 CONF_POLLING_RATE = "polling_rate"
 DEFAULT_POLLING_RATE = 0  # Real-time

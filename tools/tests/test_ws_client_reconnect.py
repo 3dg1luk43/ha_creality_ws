@@ -7,11 +7,14 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import importlib.util
 import sys
 import types
 from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import patch
+
+from conftest import drop_stub_module, restore_stubs
 
 # ---------------------------------------------------------------------------
 # Bootstrap: make sure the real ws_client module is importable without HA
@@ -21,7 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # Remove the conftest stub so we load the real module
-sys.modules.pop("custom_components.ha_creality_ws.ws_client", None)
+drop_stub_module(__name__, "custom_components.ha_creality_ws.ws_client")
 
 # Provide minimal stubs for any HA imports the module might pull in
 for mod_name in [
@@ -34,8 +37,12 @@ for mod_name in [
     if mod_name not in sys.modules:
         sys.modules[mod_name] = types.ModuleType(mod_name)
 
-# Stub out websockets and its submodules so the real package isn't required
-if "websockets" not in sys.modules:
+# Stub out websockets and its submodules so the real package isn't required.
+# Only substitute when it is genuinely absent: the tests below patch via
+# patch.object, so they work against the real package too, and installing the
+# stub over a real install would break any other test that needs a working
+# client (test_cfs_simulator.py talks to the simulator over a real socket).
+if "websockets" not in sys.modules and importlib.util.find_spec("websockets") is None:
     _ws_stub = types.ModuleType("websockets")
     _ws_stub.connect = None  # will be patched per-test
 
@@ -224,3 +231,7 @@ def test_normal_loop_connects_when_power_on():
         )
 
     asyncio.run(run())
+
+
+def teardown_module(_module):
+    restore_stubs(__name__)

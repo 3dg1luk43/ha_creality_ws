@@ -1,14 +1,16 @@
 import sys
 from unittest.mock import MagicMock, AsyncMock, patch
 
+from conftest import install_stub_module, restore_stubs
+
 if "aiohttp" not in sys.modules:
-    sys.modules["aiohttp"] = MagicMock()
+    install_stub_module(__name__, "aiohttp", MagicMock())
 
 # Ensure go2rtc_client and aiohttp are mocked if not already
 if "go2rtc_client" not in sys.modules:
     g2_mod = MagicMock()
-    sys.modules["go2rtc_client"] = g2_mod
-    sys.modules["go2rtc_client.exceptions"] = MagicMock()
+    install_stub_module(__name__, "go2rtc_client", g2_mod)
+    install_stub_module(__name__, "go2rtc_client.exceptions", MagicMock())
 
 # Mock homeassistant.components.camera
 if "homeassistant.components" in sys.modules:
@@ -85,3 +87,7 @@ def test_webrtc_offer_500_error_repro():
         assert "go2rtc error" in msg["message"]
         mock_go2rtc_client.streams.delete.assert_awaited_once_with("test_stream")
         assert camera._stream_name is None
+
+
+def teardown_module(_module):
+    restore_stubs(__name__)

@@ -71,6 +71,27 @@ setattr(uc_mod, "CoordinatorEntity", CoordinatorEntity)
 setattr(helpers_mod, "update_coordinator", uc_mod)
 sys.modules["homeassistant.helpers.update_coordinator"] = uc_mod
 
+# --- MOCK helpers.dispatcher ---
+# Installed here rather than in each test module: four of them used to do
+# `if "homeassistant.helpers.dispatcher" not in sys.modules: ... MagicMock()`,
+# which made the module every later import saw depend on pytest's collection
+# order. Named no-ops rather than a blanket MagicMock, so a rename in the
+# integration surfaces as a failure instead of silently passing. Tests that need
+# to observe a dispatch monkeypatch the name the module under test imported.
+dispatcher_mod = types.ModuleType("homeassistant.helpers.dispatcher")
+
+def async_dispatcher_send(_hass, _signal, *_args) -> None:
+    return None
+
+def async_dispatcher_connect(_hass, _signal, _target):
+    """Return the unsubscribe callable HA hands back."""
+    return lambda: None
+
+dispatcher_mod.async_dispatcher_send = async_dispatcher_send
+dispatcher_mod.async_dispatcher_connect = async_dispatcher_connect
+sys.modules["homeassistant.helpers.dispatcher"] = dispatcher_mod
+helpers_mod.dispatcher = dispatcher_mod
+
 # --- MOCK aiohttp_client ---
 aiohttp_client_mod = types.ModuleType("homeassistant.helpers.aiohttp_client")
 def async_get_clientsession(hass):
@@ -78,6 +99,40 @@ def async_get_clientsession(hass):
 setattr(aiohttp_client_mod, "async_get_clientsession", async_get_clientsession)
 sys.modules["homeassistant.helpers.aiohttp_client"] = aiohttp_client_mod
 setattr(helpers_mod, "aiohttp_client", aiohttp_client_mod)
+
+# --- MOCK components.number + const + helpers.entity_registry ---
+# Needed by number.py, which test_late_discovery drives directly. Registered here
+# rather than inside that test module: these are process-wide, so a per-module
+# install leaks into whatever pytest collects next.
+number_mod = types.ModuleType("homeassistant.components.number")
+
+class NumberEntity:
+    pass
+
+number_mod.NumberEntity = NumberEntity
+number_mod.NumberMode = MagicMock()
+number_mod.NumberDeviceClass = MagicMock()
+sys.modules["homeassistant.components.number"] = number_mod
+components_mod.number = number_mod
+
+# A MagicMock rather than a real module: the integration imports a moving set of
+# unit constants from here (including an older-core fallback block), and every
+# `from homeassistant.const import X` has to resolve. Named attributes are pinned
+# where a test asserts on the value.
+const_mod = MagicMock()
+const_mod.PERCENTAGE = "%"
+const_mod.UnitOfTemperature.CELSIUS = "°C"
+sys.modules["homeassistant.const"] = const_mod
+ha_mod.const = const_mod
+
+entity_registry_mod = types.ModuleType("homeassistant.helpers.entity_registry")
+# Legacy fan numbers are only created for entities that already exist, so the
+# default "nothing registered" keeps a fresh setup to the modern entities.
+entity_registry_mod.async_get = MagicMock(
+    return_value=MagicMock(async_get_entity_id=MagicMock(return_value=None))
+)
+sys.modules["homeassistant.helpers.entity_registry"] = entity_registry_mod
+helpers_mod.entity_registry = entity_registry_mod
 
 # --- MOCK helpers.entity ---
 class DeviceInfo:
@@ -133,3 +188,33 @@ class KClient:  # type: ignore
 
 setattr(ws_client_mod, "KClient", KClient)
 sys.modules["custom_components.ha_creality_ws.ws_client"] = ws_client_mod
+
+
+# --- Shared stub bookkeeping for test modules ---------------------------------
+# sys.modules is process-wide, so a module that installs a stub at import time
+# leaks it into whatever pytest collects next and makes the suite order-dependent.
+# A module that needs its own stub registers it here and calls restore_stubs()
+# from its teardown_module.
+_ABSENT = object()
+_MODULE_STUBS: dict[str, list] = {}
+
+
+def install_stub_module(owner: str, name: str, module) -> None:
+    """Install `module` at `name`, remembering what `owner` displaced."""
+    _MODULE_STUBS.setdefault(owner, []).append((name, sys.modules.get(name, _ABSENT)))
+    sys.modules[name] = module
+
+
+def drop_stub_module(owner: str, name: str) -> None:
+    """Remove `name` from sys.modules, remembering it for restore_stubs."""
+    _MODULE_STUBS.setdefault(owner, []).append((name, sys.modules.get(name, _ABSENT)))
+    sys.modules.pop(name, None)
+
+
+def restore_stubs(owner: str) -> None:
+    """Put back everything `owner` installed or dropped, newest first."""
+    for name, old in reversed(_MODULE_STUBS.pop(owner, [])):
+        if old is _ABSENT:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = old

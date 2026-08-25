@@ -2,13 +2,22 @@ import sys
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
+from conftest import install_stub_module, restore_stubs
+
 if "aiohttp" not in sys.modules:
-    sys.modules["aiohttp"] = MagicMock()
+    install_stub_module(__name__, "aiohttp", MagicMock())
 
 # Mock go2rtc_client if needed
 if "go2rtc_client" not in sys.modules:
-    sys.modules["go2rtc_client"] = MagicMock()
-    sys.modules["go2rtc_client.exceptions"] = MagicMock()
+    install_stub_module(__name__, "go2rtc_client", MagicMock())
+    exceptions_mod = MagicMock()
+
+    class Go2RtcClientError(Exception):
+        """Real class, not a MagicMock: camera.py catches it, and `except` on a
+        non-exception raises TypeError instead of exercising the handler."""
+
+    exceptions_mod.Go2RtcClientError = Go2RtcClientError
+    install_stub_module(__name__, "go2rtc_client.exceptions", exceptions_mod)
 
 # Mock homeassistant.components.camera
 if "homeassistant.components" in sys.modules:
@@ -20,7 +29,7 @@ if "homeassistant.components" in sys.modules:
                 pass
         cam_mod.Camera = MockCamera
         cam_mod.CameraEntityFeature = MagicMock()
-        sys.modules["homeassistant.components.camera"] = cam_mod
+        install_stub_module(__name__, "homeassistant.components.camera", cam_mod)
         components_mod.camera = cam_mod
 else:
     # Fallback
@@ -38,6 +47,10 @@ else:
     sys.modules["homeassistant.components"].camera = cam_mod
 
 from custom_components.ha_creality_ws.camera import CrealityWebRTCCamera
+
+
+def teardown_module(_module):
+    restore_stubs(__name__)
 
 def test_ensure_stream_configured_uses_creality_format():
     import asyncio
@@ -159,3 +172,264 @@ def test_existing_stream_with_wrong_source_is_recreated():
     mock_go2rtc_client.streams.add.assert_called_once()
     added = mock_go2rtc_client.streams.add.call_args.kwargs["sources"]
     assert added == "webrtc:http://1.2.3.4:8000/call/webrtc_local#format=creality"
+
+
+def _camera(**kwargs):
+    """Build a go2rtc camera without touching the HA entity base class."""
+    mock_coordinator = MagicMock()
+    with patch("custom_components.ha_creality_ws.camera._BaseCamera.__init__"):
+        cam = CrealityWebRTCCamera(
+            mock_coordinator,
+            "http://1.2.3.4:8000/call/webrtc_local",
+            **kwargs,
+        )
+    cam.hass = MagicMock()
+    return cam
+
+
+def test_stream_source_is_an_awaitable_method_not_a_property():
+    """Regression test for issue #116.
+
+    HA core defines `Camera.stream_source` as an async method and the stream
+    pipeline does `source = await self.stream_source()`. Declaring it as a
+    property shadowed that method, so the attribute evaluated to a plain string
+    and calling it raised `TypeError: 'str' object is not callable`.
+    """
+    import inspect
+
+    assert not isinstance(
+        inspect.getattr_static(CrealityWebRTCCamera, "stream_source"), property
+    )
+    assert inspect.iscoroutinefunction(CrealityWebRTCCamera.stream_source)
+
+
+def test_stream_source_returns_rtsp_url_for_ha_managed_go2rtc():
+    """HA's bundled go2rtc serves RTSP on 127.0.0.1:18554, API on 11984."""
+    import asyncio
+
+    cam = _camera()
+    cam._go2rtc_server_url = "http://localhost:11984/"
+    cam._go2rtc_is_ha_managed = True
+
+    async def run():
+        with patch.object(cam, "_ensure_stream_configured", new_callable=AsyncMock):
+            cam._stream_name = "creality_k2_1_2_3_4"
+            return await cam.stream_source()
+
+    assert asyncio.run(run()) == "rtsp://127.0.0.1:18554/creality_k2_1_2_3_4"
+
+
+def test_stream_source_uses_default_rtsp_port_for_custom_loopback_go2rtc():
+    """A stand-alone go2rtc on localhost:11984 is not HA's, so RTSP is 8554.
+
+    The URL alone cannot tell the two apart, so the endpoint has to key off what
+    initialization actually connected to; guessing 18554 here pointed HLS at a
+    port nothing was listening on.
+    """
+    import asyncio
+
+    cam = _camera(go2rtc_url="http://127.0.0.1:11984")
+    cam._go2rtc_server_url = "http://127.0.0.1:11984/"
+    cam._go2rtc_is_ha_managed = False
+
+    async def run():
+        with patch.object(cam, "_ensure_stream_configured", new_callable=AsyncMock):
+            cam._stream_name = "creality_k2_1_2_3_4"
+            return await cam.stream_source()
+
+    assert asyncio.run(run()) == "rtsp://127.0.0.1:8554/creality_k2_1_2_3_4"
+
+
+def test_stream_source_uses_go2rtc_default_port_for_external_server():
+    """A stand-alone go2rtc listens for RTSP on its own host, port 8554."""
+    import asyncio
+
+    cam = _camera()
+    cam._go2rtc_server_url = "http://10.0.0.5:1984/"
+
+    async def run():
+        with patch.object(cam, "_ensure_stream_configured", new_callable=AsyncMock):
+            cam._stream_name = "creality_k2_1_2_3_4"
+            return await cam.stream_source()
+
+    assert asyncio.run(run()) == "rtsp://10.0.0.5:8554/creality_k2_1_2_3_4"
+
+
+def test_stream_source_brackets_an_ipv6_go2rtc_host():
+    """urlparse().hostname strips the brackets; rtsp://::1:8554/x is unparseable."""
+    import asyncio
+
+    cam = _camera(go2rtc_url="http://[::1]:11984")
+    cam._go2rtc_server_url = "http://[::1]:11984/"
+    cam._go2rtc_is_ha_managed = False
+
+    async def run():
+        with patch.object(cam, "_ensure_stream_configured", new_callable=AsyncMock):
+            cam._stream_name = "creality_k2_1_2_3_4"
+            return await cam.stream_source()
+
+    assert asyncio.run(run()) == "rtsp://[::1]:8554/creality_k2_1_2_3_4"
+
+
+def test_stream_source_honours_an_explicit_rtsp_port_override():
+    import asyncio
+
+    cam = _camera(go2rtc_rtsp_port=9554)
+    cam._go2rtc_server_url = "http://10.0.0.5:1984/"
+
+    async def run():
+        with patch.object(cam, "_ensure_stream_configured", new_callable=AsyncMock):
+            cam._stream_name = "creality_k2_1_2_3_4"
+            return await cam.stream_source()
+
+    assert asyncio.run(run()) == "rtsp://10.0.0.5:9554/creality_k2_1_2_3_4"
+
+
+def _run_initialize(cam, *, custom_ok, ha_url="http://localhost:11984/"):
+    """Drive the real _initialize_go2rtc_client() with a stubbed go2rtc client.
+
+    `custom_ok=False` makes the custom server's version check raise, which is the
+    branch that falls back to HA's go2rtc.
+    """
+    import asyncio
+    from custom_components.ha_creality_ws import camera as camera_mod
+
+    ha_data = MagicMock()
+    ha_data.url = ha_url
+    ha_data.session = MagicMock()
+    cam.hass.data = {camera_mod.GO2RTC_DOMAIN: ha_data}
+
+    made = []
+
+    def _client(_session, url):
+        client = MagicMock()
+        # The custom attempt is the one carrying the configured URL.
+        is_custom = cam._custom_go2rtc_url is not None and url != ha_url
+        if is_custom and not custom_ok:
+            client.validate_server_version = AsyncMock(side_effect=RuntimeError("refused"))
+        else:
+            client.validate_server_version = AsyncMock(return_value="1.9.4")
+        made.append(url)
+        return client
+
+    with patch.object(camera_mod, "Go2RtcRestClient", side_effect=_client), \
+            patch.object(camera_mod, "async_get_clientsession", return_value=MagicMock()), \
+            patch.object(camera_mod, "GO2RTC_CLIENT_AVAILABLE", True):
+        ok = asyncio.run(cam._initialize_go2rtc_client())
+    return ok, made
+
+
+def _stream_source(cam, name="creality_k2_1_2_3_4"):
+    import asyncio
+
+    async def run() -> "str | None":
+        with patch.object(cam, "_ensure_stream_configured", new_callable=AsyncMock):
+            cam._stream_name = name
+            return await cam.stream_source()
+
+    return asyncio.run(run())
+
+
+def test_a_failed_custom_go2rtc_does_not_keep_its_rtsp_override():
+    """Custom init fails, discovery falls back to HA's go2rtc.
+
+    The override was configured for a server we could not reach, so honouring it
+    aimed HLS at a port nothing is listening on. Drives the real initializer, so
+    this fails if the fallback branch stops recording that it fell back.
+    """
+    cam = _camera(go2rtc_url="http://10.0.0.5:1984", go2rtc_rtsp_port=9554)
+    ok, attempted = _run_initialize(cam, custom_ok=False)
+
+    assert ok is True, "the fallback must still produce a working client"
+    assert cam._go2rtc_fell_back_from_custom is True
+    assert cam._go2rtc_is_ha_managed is True
+    assert len(attempted) == 2, f"custom then HA-managed, got {attempted}"
+    assert _stream_source(cam) == "rtsp://127.0.0.1:18554/creality_k2_1_2_3_4"
+
+
+def test_an_ha_managed_instance_keeps_an_explicit_rtsp_override():
+    """The options flow stores an explicit RTSP port for any go2rtc mode.
+
+    Suppressing it for every HA-managed client -- rather than only after a
+    fallback -- sent HLS to 18554 for a user who had deliberately configured a
+    different port.
+    """
+    cam = _camera(go2rtc_rtsp_port=9554)
+    ok, _ = _run_initialize(cam, custom_ok=True)
+
+    assert ok is True
+    assert cam._go2rtc_is_ha_managed is True
+    assert cam._go2rtc_fell_back_from_custom is False, "no custom server was configured"
+    # Host comes from the resolved go2rtc URL, which for HA-managed is localhost.
+    assert _stream_source(cam) == "rtsp://localhost:9554/creality_k2_1_2_3_4"
+
+
+def test_a_reachable_custom_go2rtc_keeps_its_override():
+    """The ordinary custom case must be unaffected by the fallback handling."""
+    cam = _camera(go2rtc_url="http://10.0.0.5:1984", go2rtc_rtsp_port=9554)
+    ok, _ = _run_initialize(cam, custom_ok=True)
+
+    assert ok is True
+    assert cam._go2rtc_fell_back_from_custom is False
+    assert cam._go2rtc_is_ha_managed is False
+    assert _stream_source(cam) == "rtsp://10.0.0.5:9554/creality_k2_1_2_3_4"
+
+
+def test_concurrent_callers_configure_the_stream_once():
+    """stream_source, snapshots and WebRTC offers all call this, concurrently.
+
+    Without serialization each caller creates (or deletes and recreates) the same
+    go2rtc stream before _stream_name is set, and one failing sets
+    _force_recreate_stream while another has just succeeded.
+    """
+    import asyncio
+
+    cam = _camera()
+    cam._go2rtc_is_ha_managed = True
+    cam._go2rtc_server_url = "http://localhost:11984/"
+
+    client = MagicMock()
+    client.streams.list = AsyncMock(return_value={})
+
+    added = []
+
+    async def _add(name, **_kwargs):
+        added.append(name)
+        # Yield inside the critical section: without a lock the other callers
+        # get in here too.
+        await asyncio.sleep(0)
+
+    client.streams.add = AsyncMock(side_effect=_add)
+    cam._go2rtc_client = client
+
+    async def run():
+        await asyncio.gather(*(cam._ensure_stream_configured() for _ in range(5)))
+
+    asyncio.run(run())
+
+    assert len(added) == 1, f"stream configured {len(added)} times: {added}"
+    assert cam._stream_name, "the stream name must be recorded"
+    assert cam._force_recreate_stream is False
+
+
+def test_stream_source_is_none_for_direct_signaling():
+    """Direct-signaling cameras never register a go2rtc stream, so no HLS."""
+    import asyncio
+
+    cam = _camera(direct_signaling=True)
+    assert asyncio.run(cam.stream_source()) is None
+
+
+def test_stream_source_is_none_before_a_stream_exists():
+    import asyncio
+
+    cam = _camera()
+    cam._go2rtc_server_url = "http://localhost:11984/"
+    cam._go2rtc_is_ha_managed = True
+
+    async def run():
+        with patch.object(cam, "_ensure_stream_configured", new_callable=AsyncMock):
+            cam._stream_name = None
+            return await cam.stream_source()
+
+    assert asyncio.run(run()) is None

@@ -3,7 +3,14 @@ from __future__ import annotations
 import logging
 import json
 from typing import Any, Callable
-from .utils import parse_position as _parse_position, safe_float as _safe_float
+from .utils import (
+    build_spool_key as _build_spool_key,
+    derive_print_state as _derive_print_state,
+    format_filament_label as _format_filament_label,
+    normalize_color_hex as _normalize_color_hex,
+    parse_position as _parse_position,
+    safe_float as _safe_float,
+)
 
 from homeassistant.components.sensor import (  # type: ignore[import]
     SensorEntity,
@@ -332,48 +339,14 @@ class PrintStatusSensor(KEntity, SensorEntity):
 
     @property
     def native_value(self) -> str | None:
-        # HIGHEST PRIORITY: Check the power switch first.
-        if self.coordinator.power_is_off():
-            return "off"
-
-        # SECOND PRIORITY: Check for a lost WebSocket connection.
-        if not self.coordinator.available:
-            return "unknown"
-
-        # If we get here, the printer is ON and CONNECTED.
-        # Now, determine the operational state.
-        d = self.coordinator.data or {}
-
-        if d.get("err", {}).get("errcode", 0) != 0:
-            return "error"
-
-        if 1 <= d.get("withSelfTest", 0) <= 99:
-            return "self-testing"
-
-        st = d.get("state")
-        fname = d.get("printFileName") or ""
-        progress = d.get("printProgress") or d.get("dProgress")
-
-        # Ensure progress is a number before comparing
-        try:
-            progress = int(progress) if progress is not None else -1
-        except (ValueError, TypeError):
-            progress = -1
-
-        if fname:
-            if progress >= 100:
-                return "completed"
-            # THIS IS THE LINE THAT WAS BROKEN
-            if st == 5 or self.coordinator.paused_flag():
-                return "paused"
-            if st == 4:
-                return "stopped"
-            if st == 1:
-                return "printing"
-            if st == 0:
-                return "processing"
-
-        return "idle"
+        # The mapping lives in utils.derive_print_state so that services gating on
+        # "is the printer busy" use the same definition the dashboard shows.
+        return _derive_print_state(
+            self.coordinator.data or {},
+            power_off=self.coordinator.power_is_off(),
+            available=self.coordinator.available,
+            paused_flag=self.coordinator.paused_flag(),
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -626,6 +599,48 @@ class KCFSBoxSensor(KEntity, SensorEntity):
         return None
 
 
+def _cfs_slot_attributes(
+    data: dict[str, Any],
+    box_id: int | None = None,
+    slot_id: int | None = None,
+) -> dict[str, Any]:
+    """Build the shared attribute set for a CFS slot (box slot or external).
+
+    ``box_id``/``slot_id`` are the ids the *printer* uses, which the card needs to
+    address the right slot when writing material back via ``set_cfs_material``.
+    They are passed in because the raw slot dict only carries its own ``id``, not
+    the id of the box it belongs to.
+    """
+    raw_color = data.get("color")
+    return {
+        "vendor": data.get("vendor"),
+        "type": data.get("type"),
+        "name": data.get("name"),
+        "color_hex": _normalize_color_hex(raw_color),
+        # Kept so the printer's original value stays visible after the
+        # leading-pad-character fix (issue #113).
+        "color_hex_raw": raw_color,
+        "rfid": data.get("rfid"),
+        # Derived, stable per material+colour; see utils.build_spool_key (#117).
+        "spool_key": _build_spool_key(
+            rfid=data.get("rfid"),
+            vendor=data.get("vendor"),
+            material_type=data.get("type"),
+            name=data.get("name"),
+            color=raw_color,
+        ),
+        "state": data.get("state"),
+        "selected": data.get("selected"),
+        # Addressing + editable material settings, so the CFS card can target the
+        # right slot and prefill its edit dialog with the printer's current values.
+        "box_id": box_id,
+        "slot_id": slot_id,
+        "min_temp": _safe_float(data.get("minTemp")),
+        "max_temp": _safe_float(data.get("maxTemp")),
+        "pressure": _safe_float(data.get("pressure")),
+    }
+
+
 class KCFSSlotSensor(KEntity, SensorEntity):
     """Sensor for a CFS Slot (Filament type/color/percent)."""
 
@@ -666,30 +681,26 @@ class KCFSSlotSensor(KEntity, SensorEntity):
             return None
             
         if self._type == "filament":
-            # Combine vendor and name/type
-            vendor = data.get("vendor", "Generic")
-            name = data.get("name") or data.get("type", "Unknown")
-            return f"{vendor} {name}"
+            return _format_filament_label(
+                data.get("vendor"), data.get("name"), data.get("type")
+            )
         if self._type == "color":
-            return data.get("color")
+            return _normalize_color_hex(data.get("color"))
         if self._type == "percent":
             return data.get("percent")
         return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        # native_value already zeroes here; publishing the last-known material
+        # alongside a zeroed state is worse than publishing nothing, because the
+        # card builds its edit payload out of these attributes.
+        if self._should_zero():
+            return {}
         data = self._get_slot_data()
         if not data:
             return {}
-        return {
-            "vendor": data.get("vendor"),
-            "type": data.get("type"),
-            "name": data.get("name"),
-            "color_hex": data.get("color"),
-            "rfid": data.get("rfid"),
-            "state": data.get("state"),
-            "selected": data.get("selected"),
-        }
+        return _cfs_slot_attributes(data, self._box_id, self._slot_id)
 
 
 class KCFSExtSlotSensor(KEntity, SensorEntity):
@@ -737,29 +748,26 @@ class KCFSExtSlotSensor(KEntity, SensorEntity):
             return None
 
         if self._type == "filament":
-            vendor = data.get("vendor", "Generic")
-            name = data.get("name") or data.get("type", "Unknown")
-            return f"{vendor} {name}"
+            return _format_filament_label(
+                data.get("vendor"), data.get("name"), data.get("type")
+            )
         if self._type == "color":
-            return data.get("color")
+            return _normalize_color_hex(data.get("color"))
         if self._type == "percent":
             return data.get("percent")
         return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        if self._should_zero():
+            return {}
         data = self._get_slot_data()
         if not data:
             return {}
-        return {
-            "vendor": data.get("vendor"),
-            "type": data.get("type"),
-            "name": data.get("name"),
-            "color_hex": data.get("color"),
-            "rfid": data.get("rfid"),
-            "state": data.get("state"),
-            "selected": data.get("selected"),
-        }
+        # The external box's id is whatever the printer reports for the type==1
+        # box, so read it back rather than assuming 0.
+        box = self._get_external_box() or {}
+        return _cfs_slot_attributes(data, box.get("id"), data.get("id", self._slot_id))
 
 
 class KActiveFilamentSensor(KEntity, SensorEntity):
@@ -795,11 +803,11 @@ class KActiveFilamentSensor(KEntity, SensorEntity):
         for box in boxes:
             for slot in box.get("materials", []):
                 if slot.get("selected"):
-                    vendor = slot.get("vendor", "Generic")
-                    name = slot.get("name") or slot.get("type", "Unknown")
                     return {
-                        "filament": f"{vendor} {name}",
-                        "color": slot.get("color"),
+                        "filament": _format_filament_label(
+                            slot.get("vendor"), slot.get("name"), slot.get("type")
+                        ),
+                        "color": _normalize_color_hex(slot.get("color")),
                         "percent": slot.get("percent"),
                     }
         return {}
@@ -893,18 +901,79 @@ async def async_setup_entry(hass, entry, async_add_entities):
         return new_ents
 
 
+    # `call_soon` cannot be cancelled, and disconnecting the dispatcher does not
+    # unschedule a callback that is already queued. Without this flag the
+    # deferred `async_add_entities` could run against an unloaded entry.
+    platform_live = True
+
+    def _mark_unloaded() -> None:
+        nonlocal platform_live
+        platform_live = False
+
+    entry.async_on_unload(_mark_unloaded)
+
+    def _add_if_live(new_ents: list[SensorEntity]) -> None:
+        if platform_live:
+            async_add_entities(new_ents)
+
+    added_chamber_uids: set[str] = set()
+
+    def add_chamber_entities() -> list[SensorEntity]:
+        """Chamber sensors not yet created, re-evaluated on every call.
+
+        Capability is read fresh rather than captured at setup: a printer that was
+        off during setup reports boxTemp/maxBoxTemp later, and the discovery
+        signal is what brings us back here. Returning [] and never being asked
+        again left the sensors missing for the whole session.
+        """
+        has_chamber = entry.data.get(
+            "_cached_has_chamber_sensor", entry.data.get("_cached_has_box_sensor", False)
+        )
+        live = coord.data or {}
+        if not has_chamber and any(
+            k in live for k in ("boxTemp", "targetBoxTemp", "maxBoxTemp")
+        ):
+            has_chamber = True
+        if not has_chamber:
+            return []
+
+        out: list[SensorEntity] = []
+        if "box_temperature" not in added_chamber_uids:
+            for spec in SPECS:
+                if spec.get("uid") == "box_temperature":
+                    added_chamber_uids.add("box_temperature")
+                    out.append(KSimpleFieldSensor(coord, spec))
+                    break
+
+        if "max_box_temp" not in added_chamber_uids:
+            max_box = entry.data.get(
+                "_cached_max_chamber_temp", entry.data.get("_cached_max_box_temp")
+            )
+            if max_box is None:
+                max_box = live.get("maxBoxTemp")
+            if max_box is not None:
+                added_chamber_uids.add("max_box_temp")
+                out.append(
+                    KMaxTempSensor(
+                        coord, uid="max_box_temp", key="max_box_temp",
+                        translation_key="max_chamber_temp",
+                    )
+                )
+        return out
+
     # Dynamic CFS entity handler
-    def _on_new_entities():
+    def _on_new_entities() -> None:
         """Handle signal for new entities (e.g. late CFS discovery)."""
         _LOGGER.debug("Dynamic entity signal received, checking for new CFS entities...")
-        new_ents = add_cfs_entities()
+        new_ents = add_cfs_entities() + add_chamber_entities()
         if new_ents:
-            _LOGGER.info("Adding %d dynamic CFS entities", len(new_ents))
-            # Ensure we run on the main loop if we are in a thread
-            from asyncio import run_coroutine_threadsafe
-            async def _schedule_add():
-                await async_add_entities(new_ents)
-            run_coroutine_threadsafe(_schedule_add(), hass.loop)
+            _LOGGER.debug("Adding %d dynamic entities", len(new_ents))
+            # Must not be called inline from the dispatcher: async_add_entities
+            # eager-starts a task on the config entry, and doing that from inside
+            # the dispatch chain leaves it unreferenced ("Task was destroyed but
+            # it is pending"), so no entities get added. Deferring to the next
+            # loop iteration schedules it in a normal context.
+            hass.loop.call_soon(_add_if_live, new_ents)
     
     # Listen for the signal fired by coordinator
     entry.async_on_unload(
@@ -945,19 +1014,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
     ))
 
 
-    # Add chamber temperature if supported by model. Also allow live-telemetry fallback if cache missing.
-    has_box_sensor = entry.data.get("_cached_has_chamber_sensor", entry.data.get("_cached_has_box_sensor", False))
-    live = coord.data or {}
-    if not has_box_sensor:
-        # Heuristics: if boxTemp or targetBoxTemp appears, expose the sensor.
-        if any(k in live for k in ("boxTemp", "targetBoxTemp", "maxBoxTemp")):
-            has_box_sensor = True
-    
+    # Chamber sensors come from add_chamber_entities() so the late-discovery pass
+    # applies the identical gate; everything else is unconditional.
     for spec in SPECS:
-        if spec.get("uid") == "box_temperature":
-            if has_box_sensor:
-                ents.append(KSimpleFieldSensor(coord, spec))
-        else:
+        if spec.get("uid") != "box_temperature":
             ents.append(KSimpleFieldSensor(coord, spec))
 
     # Mapped sensors
@@ -994,21 +1054,23 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     max_noz = _cached_or_live("max_nozzle_temp")
     max_bed = _cached_or_live("max_bed_temp")
-    max_box = _cached_or_live("max_box_temp")
 
     if max_noz is not None:
         ents.append(KMaxTempSensor(coord, uid="max_nozzle_temp", key="max_nozzle_temp", translation_key="max_nozzle_temp"))
     if max_bed is not None:
         ents.append(KMaxTempSensor(coord, uid="max_bed_temp", key="max_bed_temp", translation_key="max_bed_temp"))
-    # Only expose chamber max if model supports chamber sensor/control or we detect a value
-    if has_box_sensor and max_box is not None:
-        ents.append(KMaxTempSensor(coord, uid="max_box_temp", key="max_box_temp", translation_key="max_chamber_temp"))
+    # Chamber max is gated with the chamber temperature sensor, in one place.
+    ents.extend(add_chamber_entities())
 
     # Register static entities immediately
     try:
         async_add_entities(ents)
     except Exception as err:  # pylint: disable=broad-except
         _LOGGER.error("Failed to add static sensors: %s", err)
+        # add_chamber_entities marked its uids before handing them over, so a
+        # failure here would otherwise make every later discovery pass return []
+        # and the chamber sensors would stay missing for the whole session.
+        added_chamber_uids.clear()
 
     # --- CFS Entities (Dynamic Initial Load) ---
     try:
