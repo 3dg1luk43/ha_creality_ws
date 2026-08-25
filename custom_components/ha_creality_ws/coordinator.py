@@ -19,6 +19,7 @@ from .const import (
     CONF_MINUTES_TO_END_VALUE,
     LATE_DISCOVERY_FIELDS,
     NOTIFY_PRIME_GRACE_SECS,
+    NOTIFY_REARM_PROGRESS_MAX,
     CONF_POLLING_RATE,
     DEFAULT_POLLING_RATE,
     MR_PORT,
@@ -62,6 +63,10 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._notified_minutes_to_end = False
         self._last_error_code = 0
         self._last_mr_poll = 0.0
+        # Seconds the current job has been running, as last reported. Only ever
+        # goes backwards when the printer starts a new job, which is what tells a
+        # reprint of the same file apart from end-of-print progress jitter.
+        self._last_job_time: float | None = None
 
         # Notifications are suppressed until the printer's current state has been
         # captured as a baseline, so a job that already finished before Home
@@ -461,6 +466,8 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             left_s is not None and 0 < (left_s / 60.0) <= self._minutes_to_end_value
         )
 
+        self._last_job_time = safe_float(d.get("printJobTime"))
+
         _LOGGER.debug(
             "Notification baseline captured: file=%s progress=%s completed=%s "
             "err=%s runout=%s near_end=%s",
@@ -504,6 +511,20 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except (ValueError, TypeError):
             prog_val = 0
 
+        # `printJobTime` counts up for as long as one job runs, so it only ever
+        # goes backwards when the printer starts another one. That is the one
+        # unambiguous new-cycle signal in this telemetry: the file name stays the
+        # same on a reprint, and progress dips below 100 for reasons that have
+        # nothing to do with a new job (see the completion re-arm below).
+        job_time = safe_float(d.get("printJobTime"))
+        job_restarted = (
+            job_time is not None
+            and self._last_job_time is not None
+            and job_time < self._last_job_time
+        )
+        if job_time is not None:
+            self._last_job_time = job_time
+
         # Check if we started a new print (filename changed)
         # Store last filename in instance to compare
         if getattr(self, "_last_filename", None) != fname:
@@ -528,7 +549,16 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # it reprints the same file (in which case the file name never changes and
         # the reset above never fires). Without this the completion notification
         # only ever arrives once per file name.
-        if prog_val < 100 and self._notified_completed:
+        #
+        # It has to be a real drop, though. The printer rounds progress up to 100
+        # a second before the job ends (with minutes still on the clock), reports
+        # 99 once more, and only then finishes -- so re-arming on any dip below
+        # 100 sent the completion notification twice for every print, once per
+        # crossing. A drop that stays within the jitter band is only a new cycle
+        # if the job clock restarted too.
+        if self._notified_completed and prog_val < 100 and (
+            prog_val <= NOTIFY_REARM_PROGRESS_MAX or job_restarted
+        ):
             _LOGGER.debug("Progress back at %s%%; re-arming completion notification", prog_val)
             self._notified_completed = False
 

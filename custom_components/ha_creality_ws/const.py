@@ -101,6 +101,14 @@ CONF_MINUTES_TO_END_VALUE = "minutes_to_end_value"
 # restart fired a "print completed" notification (issue #112).
 NOTIFY_PRIME_GRACE_SECS = 10.0
 
+# Progress ceiling for re-arming the one-shot completion notification. The
+# printer rounds progress up to 100 a second before the job actually ends and
+# then reports 99 once more, so "progress fell below 100" on its own does not
+# mean a new job started -- treating it that way sent the completion
+# notification twice for every print. Only a drop clear of that jitter, or a
+# restart of the job clock, counts as a new cycle.
+NOTIFY_REARM_PROGRESS_MAX = 90
+
 CONF_POLLING_RATE = "polling_rate"
 DEFAULT_POLLING_RATE = 0  # Real-time
 

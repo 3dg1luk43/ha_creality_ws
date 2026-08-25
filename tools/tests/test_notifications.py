@@ -295,3 +295,80 @@ def test_reprint_after_a_stale_startup_completion_notifies(monkeypatch):
     coord.data = {"printFileName": "demo.gcode", "printProgress": 100}
     _run(coord._check_notifications({}))
     assert sent == ["Print 'demo.gcode' completed successfully!"]
+
+
+def test_end_of_print_progress_jitter_notifies_once(monkeypatch):
+    """The printer crosses 100% twice, and each crossing used to notify.
+
+    Recorded off a K1C finishing a job (progress/printJobTime/printLeftTime):
+    100 arrives a second early with 108s still on the clock, then 99 comes back
+    while the job clock keeps running forward, then the real 100 lands with the
+    clock at zero. Re-arming on that dip sent "completed" twice per print.
+    """
+    coord, sent = _coordinator(monkeypatch)
+
+    def frame(progress, job_time, left):
+        return {
+            "printFileName": "tower.gcode",
+            "printProgress": progress,
+            "printJobTime": job_time,
+            "printLeftTime": left,
+        }
+
+    coord.data = frame(99, 1026, 109)
+    _run(coord._check_notifications({}))  # baseline
+    assert sent == []
+
+    for progress, job_time, left in (
+        (100, 1027, 108),  # rounded up early
+        (99, 1028, 108),   # back below, job clock still counting up
+        (99, 1028, 107),
+        (100, 1028, 0),    # the actual finish
+    ):
+        coord.data = frame(progress, job_time, left)
+        _run(coord._check_notifications({}))
+
+    assert sent == ["Print 'tower.gcode' completed successfully!"]
+
+
+def test_a_restarted_job_clock_re_arms_completion(monkeypatch):
+    """A new cycle inside the jitter band still has to notify.
+
+    The progress ceiling alone would suppress a re-arm at 95%, so the job clock
+    going backwards has to be enough on its own.
+    """
+    coord, sent = _coordinator(monkeypatch)
+
+    coord.data = {"printFileName": "job.gcode", "printProgress": 100, "printJobTime": 1200}
+    _run(coord._check_notifications({}))  # baseline: already complete
+
+    coord.data = {"printFileName": "job.gcode", "printProgress": 95, "printJobTime": 4}
+    _run(coord._check_notifications({}))
+    assert coord._notified_completed is False, "a restarted job clock is a new cycle"
+
+    coord.data = {"printFileName": "job.gcode", "printProgress": 100, "printJobTime": 900}
+    _run(coord._check_notifications({}))
+    assert sent == ["Print 'job.gcode' completed successfully!"]
+
+
+def test_reprinting_the_same_file_notifies_again_with_a_job_clock(monkeypatch):
+    """The reprint path has to keep working now that it consults the clock."""
+    coord, sent = _coordinator(monkeypatch)
+
+    coord.data = {"printFileName": "job.gcode", "printProgress": 40, "printJobTime": 400}
+    _run(coord._check_notifications({}))  # baseline
+
+    coord.data = {"printFileName": "job.gcode", "printProgress": 100, "printJobTime": 1000}
+    _run(coord._check_notifications({}))
+    assert len(sent) == 1
+
+    # Same file again: the printer restarts the clock and progress from scratch.
+    for progress, job_time in ((0, 0), (3, 30), (100, 1000)):
+        coord.data = {
+            "printFileName": "job.gcode",
+            "printProgress": progress,
+            "printJobTime": job_time,
+        }
+        _run(coord._check_notifications({}))
+
+    assert len(sent) == 2
