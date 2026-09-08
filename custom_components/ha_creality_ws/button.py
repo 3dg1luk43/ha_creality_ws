@@ -43,8 +43,9 @@ class KHomeAllButton(KEntity, ButtonEntity):
             await self.coordinator.client.send_set_retry(autohome="Z")
 
     async def _wait_until_idle_or_timeout(self, timeout: float) -> None:
-        end = asyncio.get_event_loop().time() + timeout
-        while asyncio.get_event_loop().time() < end:
+        loop = asyncio.get_running_loop()
+        end = loop.time() + timeout
+        while loop.time() < end:
             if (self.coordinator.data or {}).get("deviceState") != 7:
                 return
             await asyncio.sleep(0.25)

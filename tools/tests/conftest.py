@@ -37,6 +37,14 @@ def callback(func):
     return func
 core_mod.callback = callback
 
+
+class ServiceCall:  # pragma: no cover - a type only
+    def __init__(self, *args, **kwargs):
+        self.data = kwargs.get("data", {})
+
+
+core_mod.ServiceCall = ServiceCall
+
 setattr(ha_mod, "core", core_mod)
 setattr(ha_mod, "helpers", helpers_mod)
 setattr(ha_mod, "components", components_mod)
@@ -125,6 +133,7 @@ const_mod.PERCENTAGE = "%"
 # MagicMocks and int() on one raises, silently taking the "version unknown" path.
 const_mod.MAJOR_VERSION = 2026
 const_mod.MINOR_VERSION = 7
+const_mod.__version__ = "2026.7.0"
 const_mod.UnitOfTemperature.CELSIUS = "°C"
 sys.modules["homeassistant.const"] = const_mod
 ha_mod.const = const_mod
@@ -170,6 +179,139 @@ entity_registry_mod.async_get = MagicMock(
 )
 sys.modules["homeassistant.helpers.entity_registry"] = entity_registry_mod
 helpers_mod.entity_registry = entity_registry_mod
+
+# --- MOCK util.dt ---
+# Home Assistant's timezone-aware clock helpers. The integration uses
+# dt_util.utcnow() rather than the naive, deprecated datetime.utcnow().
+util_mod = types.ModuleType("homeassistant.util")
+dt_mod = types.ModuleType("homeassistant.util.dt")
+
+
+def _dt_utcnow():
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc)
+
+
+dt_mod.utcnow = _dt_utcnow
+util_mod.dt = dt_mod
+sys.modules["homeassistant.util"] = util_mod
+sys.modules["homeassistant.util.dt"] = dt_mod
+ha_mod.util = util_mod
+
+# --- MOCK exceptions / helpers.event / components.persistent_notification ---
+# Everything the integration package imports at module scope. Registered here so
+# importing it never depends on which test module happened to run first: that
+# chain existed only by accident, and deleting an unrelated test module was
+# enough to break a later one. Modules needing richer behaviour still install
+# and restore their own.
+exceptions_mod = types.ModuleType("homeassistant.exceptions")
+
+
+class HomeAssistantError(Exception):
+    """Base HA error; the integration derives its own from this."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args)
+        self.translation_domain = kwargs.get("translation_domain")
+        self.translation_key = kwargs.get("translation_key")
+        self.translation_placeholders = kwargs.get("translation_placeholders")
+
+
+class ConfigEntryNotReady(HomeAssistantError):
+    pass
+
+
+class ConfigEntryError(HomeAssistantError):
+    pass
+
+
+class ServiceValidationError(HomeAssistantError):
+    pass
+
+
+for _name, _cls in (
+    ("HomeAssistantError", HomeAssistantError),
+    ("ConfigEntryNotReady", ConfigEntryNotReady),
+    ("ConfigEntryError", ConfigEntryError),
+    ("ServiceValidationError", ServiceValidationError),
+):
+    setattr(exceptions_mod, _name, _cls)
+sys.modules["homeassistant.exceptions"] = exceptions_mod
+
+cv_mod = types.ModuleType("homeassistant.helpers.config_validation")
+cv_mod.config_entry_only_config_schema = lambda *a, **k: None
+cv_mod.string = str
+cv_mod.slug = str
+sys.modules["homeassistant.helpers.config_validation"] = cv_mod
+helpers_mod.config_validation = cv_mod
+
+event_mod = types.ModuleType("homeassistant.helpers.event")
+event_mod.async_track_time_interval = lambda *a, **k: (lambda: None)
+event_mod.async_track_state_change_event = lambda *a, **k: (lambda: None)
+sys.modules["homeassistant.helpers.event"] = event_mod
+helpers_mod.event = event_mod
+
+pn_mod = types.ModuleType("homeassistant.components.persistent_notification")
+pn_mod.async_create = lambda *a, **k: None
+pn_mod.async_dismiss = lambda *a, **k: None
+sys.modules["homeassistant.components.persistent_notification"] = pn_mod
+components_mod.persistent_notification = pn_mod
+
+# --- MOCK config_entries ---
+# The integration package imports this at module scope, so whichever test module
+# happens to trigger that import first needs it present. Providing it here keeps
+# the suite independent of collection order -- deleting an unrelated test module
+# used to be enough to break a later one, because the first importer had been
+# supplying the stub by accident. Modules needing a richer version still install
+# and restore their own.
+config_entries_mod = types.ModuleType("homeassistant.config_entries")
+
+
+class _ConfigEntry:  # pragma: no cover - a type only
+    pass
+
+
+class _OperationNotAllowed(Exception):
+    pass
+
+
+config_entries_mod.ConfigEntry = _ConfigEntry
+config_entries_mod.OperationNotAllowed = _OperationNotAllowed
+config_entries_mod.ConfigFlowResult = dict
+sys.modules["homeassistant.config_entries"] = config_entries_mod
+
+# --- MOCK components.http ---
+# frontend.py imports StaticPathConfig at module level, which anything importing
+# the integration package now pulls in. `http` is a manifest dependency, so in a
+# real Home Assistant it is always present.
+http_mod = types.ModuleType("homeassistant.components.http")
+
+
+class _StaticPathConfig:
+    def __init__(self, url_path, path, cache_headers=True):
+        self.url_path = url_path
+        self.path = path
+        self.cache_headers = cache_headers
+
+
+http_mod.StaticPathConfig = _StaticPathConfig
+sys.modules["homeassistant.components.http"] = http_mod
+components_mod.http = http_mod
+
+# --- MOCK helpers.device_registry ---
+# DeviceInfo's canonical home. helpers.entity only re-exports it transitively,
+# so the integration imports it from here.
+device_registry_mod = types.ModuleType("homeassistant.helpers.device_registry")
+
+
+class _DeviceInfo(dict):
+    """DeviceInfo is a TypedDict in Home Assistant, i.e. a plain dict."""
+
+
+device_registry_mod.DeviceInfo = _DeviceInfo
+sys.modules["homeassistant.helpers.device_registry"] = device_registry_mod
+helpers_mod.device_registry = device_registry_mod
 
 # --- MOCK helpers.entity ---
 class DeviceInfo:

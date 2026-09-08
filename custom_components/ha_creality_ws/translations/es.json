@@ -200,10 +200,7 @@
       "print_tuning_pct": { "name": "Ajuste de impresión" },
       "nozzle_target": { "name": "Objetivo de la boquilla" },
       "bed_target": { "name": "Objetivo de la cama" },
-      "chamber_target": { "name": "Objetivo de la cámara" },
-      "model_fan_pct": { "name": "Ventilador del modelo" },
-      "case_fan_pct": { "name": "Ventilador de la carcasa" },
-      "side_fan_pct": { "name": "Ventilador lateral" }
+      "chamber_target": { "name": "Objetivo de la cámara" }
     },
     "fan": {
       "model_fan": { "name": "Ventilador del modelo" },
@@ -211,9 +208,6 @@
       "side_fan": { "name": "Ventilador lateral" }
     },
     "light": {
-      "light": { "name": "Luz" }
-    },
-    "switch": {
       "light": { "name": "Luz" }
     },
     "camera": {

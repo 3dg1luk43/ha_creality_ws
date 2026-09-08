@@ -9,7 +9,6 @@ __all__ = [
     "parse_model_version",
     "parse_position",
     "safe_float",
-    "extract_host_from_zeroconf",
     "normalize_color_hex",
     "format_filament_label",
     "build_spool_key",
@@ -86,13 +85,6 @@ def safe_float(v: Any) -> float | None:
         return float(v)
     except (TypeError, ValueError):
         return None
-
-
-def extract_host_from_zeroconf(info: Any) -> Optional[str]:
-    """Compatibility wrapper for extract_info_from_zeroconf returning only host."""
-    host, _ = extract_info_from_zeroconf(info)
-    return host
-
 def extract_info_from_zeroconf(info: Any) -> tuple[Optional[str], Optional[str]]:
     """Extract host/IP and optional MAC from zeroconf discovery info.
     

@@ -95,10 +95,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._config_entry_id: str | None = config_entry_id  # Will be set after entry is created
         
         # Notification & Performance
-        # _notify_device is the pre-multi-target option, kept as a derived
-        # value for one release so nothing reading it breaks silently.
         self._notify_targets: list[str] = []
-        self._notify_device = None
         self._notify_live = False
         self._notify_actions = False
         self._notify_preview_image = True
@@ -119,7 +116,6 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_update_ts = 0.0
         
         # Notification state tracking
-        self._last_print_state = None
         self._last_filename = None
         self._notified_completed = False
         self._notified_minutes_to_end = False
@@ -165,7 +161,6 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             
         options = entry.options
         self._notify_targets = coerce_targets(options)
-        self._notify_device = self._notify_targets[0] if self._notify_targets else None
         self._notify_live = bool(options.get(CONF_NOTIFY_LIVE, False))
         self._notify_actions = bool(options.get(CONF_NOTIFY_ACTIONS, False))
         self._notify_preview_image = bool(options.get(CONF_NOTIFY_PREVIEW_IMAGE, True))
@@ -187,28 +182,6 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._polling_rate,
             len(self._notify_targets),
         )
-
-    def set_power_switch(self, entity_id: str | None) -> None:
-        """Accept updates from options; make it thread-safe to notify."""
-        old_entity = self._power_switch_entity
-        self._power_switch_entity = (entity_id or "").strip() or None
-        
-        # Enable or disable power detection based on new config
-        if self._power_switch_entity and not old_entity:
-            # Power switch was just configured
-            # pylint: disable=protected-access
-            self.client._check_power_status = self.power_is_off
-            self._last_power_off = self.power_is_off()
-            _LOGGER.info("Power switch enabled: %s", self._power_switch_entity)
-        elif not self._power_switch_entity and old_entity:
-            # Power switch was just removed
-            # pylint: disable=protected-access
-            self.client._check_power_status = None
-            self._last_power_off = False
-            _LOGGER.info("Power switch disabled; connection will retry continuously")
-        
-        self._notify_listeners_threadsafe()
-        
     def power_is_off(self) -> bool:
         """Check if the power switch is off."""
         # If we are actively connected via WebSocket, trust the connection over the switch state.

@@ -487,12 +487,6 @@ class KClient:
     async def request_boxs_info(self) -> None:
         """Ask the printer to send boxsInfo now."""
         await self._send_json({"method": "get", "params": {"boxsInfo": 1}})
-
-    async def send_set(self, **params: Any) -> None:
-
-        """Single-attempt sender (kept for internal use)."""
-        await self._send_json({"method": "set", "params": params})
-
     async def send_set_retry(self, *, wait_reconnect: float = 6.0, **params: Any) -> None:
         """
         Robust sender for user actions: try once; if the link recycled,

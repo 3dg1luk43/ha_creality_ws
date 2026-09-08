@@ -1,5 +1,5 @@
 from __future__ import annotations
-from homeassistant.helpers.entity import DeviceInfo #type: ignore[import]
+from homeassistant.helpers.device_registry import DeviceInfo #type: ignore[import]
 from homeassistant.helpers.update_coordinator import CoordinatorEntity #type: ignore[import]
 
 from .const import DOMAIN, MFR, MODEL

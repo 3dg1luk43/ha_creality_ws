@@ -32,32 +32,17 @@ except ImportError:
     GO2RTC_CLIENT_AVAILABLE = False
     _LOGGER.warning("go2rtc-client library not available, WebRTC cameras will not work")
 
-# Import HA's go2rtc component
-try:
-    from homeassistant.components.go2rtc import DOMAIN as GO2RTC_DOMAIN
-    GO2RTC_COMPONENT_AVAILABLE = True
-except ImportError:
-    GO2RTC_DOMAIN = "go2rtc"
-    GO2RTC_COMPONENT_AVAILABLE = False
+from homeassistant.components.camera import Camera, CameraEntityFeature
 
-# Import camera components with compatibility for older Home Assistant versions
-try:
-    from homeassistant.components.camera import (
-        Camera,
-        CameraEntityFeature,  # type: ignore[attr-defined]
-    )
-except ImportError:  # compatibility with older cores
-    from homeassistant.components.camera import Camera  # type: ignore[assignment]
-    try:
-        from homeassistant.components.camera import CameraEntityFeature  # type: ignore[misc]
-    except ImportError:  # very old cores
-        CameraEntityFeature = None  # type: ignore[assignment]
+# The go2rtc component's domain, as a literal rather than imported from it.
+# go2rtc is only an `after_dependencies` entry, so importing the component to
+# read one string would be an undeclared cross-component import for no gain.
+GO2RTC_DOMAIN = "go2rtc"
 
 from .const import (
     DOMAIN,
     MJPEG_URL_TEMPLATE,
     WEBRTC_URL_TEMPLATE,
-    WEBRTC_CALL_ROOT_URL_TEMPLATE,
     CONF_GO2RTC_URL,
     CONF_GO2RTC_PORT,
     CONF_GO2RTC_RTSP_PORT,
@@ -72,19 +57,6 @@ from .const import (
 )
 from .entity import KEntity
 
-
-
-class _FeatureMask(int):
-    """Custom feature mask that supports the 'in' operator.
-    
-    This class extends int to provide compatibility with Home Assistant's
-    camera feature detection system while supporting the 'in' operator
-    for feature checking.
-    """
-    
-    def __contains__(self, feature):
-        """Check if a feature is supported by this camera."""
-        return bool(self & feature)
 
 
 class _BaseCamera(KEntity, Camera):
@@ -367,7 +339,6 @@ class CrealityWebRTCCamera(_BaseCamera):
         self,
         coordinator,
         signaling_url: str | None,
-        use_proxy: bool = False,
         go2rtc_url: str | None = None,
         go2rtc_port: int | None = None,
         direct_signaling: bool = False,
@@ -379,7 +350,6 @@ class CrealityWebRTCCamera(_BaseCamera):
         Args:
             coordinator: The printer coordinator
             signaling_url: WebRTC signaling URL from the printer (None for custom go2rtc sources)
-            use_proxy: Whether to use proxy (deprecated, kept for compatibility)
             go2rtc_url: Custom go2rtc server URL (optional)
             go2rtc_port: Custom go2rtc server port (optional)
             direct_signaling: When True, signal the printer directly (HA <-> printer)
@@ -392,7 +362,6 @@ class CrealityWebRTCCamera(_BaseCamera):
         """
         super().__init__(coordinator, "camera")
         self._upstream_signaling_url = signaling_url
-        self._use_proxy = use_proxy  # Deprecated, kept for compatibility
         self._custom_go2rtc_url = go2rtc_url
         self._custom_go2rtc_port = go2rtc_port
         self._custom_go2rtc_rtsp_port = go2rtc_rtsp_port
@@ -442,34 +411,12 @@ class CrealityWebRTCCamera(_BaseCamera):
         Home Assistant's camera entity requirements. WebRTC cameras need
         the STREAM feature and must implement specific WebRTC methods.
         """
-        mask = 0
-
-        if "CameraEntityFeature" in globals() and CameraEntityFeature is not None:
-            # For WebRTC cameras, we need the STREAM feature
-            # According to HA docs: "Requires CameraEntityFeature.STREAM and the integration
-            # must implement the two following methods to support native WebRTC"
-            stream_val = getattr(CameraEntityFeature, "STREAM", None)
-            if stream_val is not None:
-                try:
-                    mask |= int(stream_val)
-                except Exception:
-                    pass
-
-            # Include ON_DEMAND for static image capability
-            ond_val = getattr(CameraEntityFeature, "ON_DEMAND", None)
-            if ond_val is not None:
-                try:
-                    mask |= int(ond_val)
-                except Exception:
-                    pass
-
-        self._attr_supported_features = _FeatureMask(mask)
-        _LOGGER.info(
-            "ha_creality_ws: WebRTC camera features: STREAM=%s, ON_DEMAND=%s, mask=%d",
-            bool(mask & 2),  # STREAM is bit 1 (2)
-            bool(mask & 1),  # ON_DEMAND is bit 0 (1)
-            mask,
-        )
+        # STREAM is what native WebRTC requires. The enum's only other member is
+        # ON_OFF, which does not apply to a printer camera -- the previous code
+        # also OR'd in a non-existent ON_DEMAND and then logged ON_OFF's bit
+        # under that name, so it always reported False. Assigned as the IntFlag
+        # rather than an int so `feature in supported_features` works.
+        self._attr_supported_features = CameraEntityFeature.STREAM
 
     def _uses_go2rtc_webrtc_bridge(self) -> bool:
         """Return True when this camera streams through go2rtc.
@@ -1467,7 +1414,6 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities):
     """
     coord = hass.data[DOMAIN][entry.entry_id]
     host = entry.data["host"]
-    use_proxy = False  # No longer needed with go2rtc approach
 
     _LOGGER.debug("ha_creality_ws: setting up camera for printer at %s", host)
 
@@ -1475,7 +1421,6 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities):
         return CrealityWebRTCCamera(
             coord,
             WEBRTC_URL_TEMPLATE.format(host=host),
-            use_proxy=use_proxy,
             go2rtc_url=entry.options.get(CONF_GO2RTC_URL),
             go2rtc_port=entry.options.get(CONF_GO2RTC_PORT),
             go2rtc_source=go2rtc_source,
@@ -1494,7 +1439,6 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities):
             CrealityWebRTCCamera(
                 coord,
                 WEBRTC_URL_TEMPLATE.format(host=host),
-                use_proxy=use_proxy,
                 direct_signaling=True,
             )
         ])

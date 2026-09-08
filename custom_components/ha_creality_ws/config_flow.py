@@ -1,13 +1,12 @@
 from __future__ import annotations
 import asyncio
 import logging
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
-from .utils import extract_host_from_zeroconf as util_extract_host_from_zeroconf
 from .notification_rules import coerce_targets
 import voluptuous as vol
 from homeassistant import config_entries #type: ignore[import]
-from homeassistant.data_entry_flow import FlowResult #type: ignore[import]
+from homeassistant.config_entries import ConfigFlowResult #type: ignore[import]
 from homeassistant.helpers import selector #type: ignore[import]
 from homeassistant.helpers.aiohttp_client import async_get_clientsession #type: ignore[import]
 from .const import (
@@ -94,22 +93,14 @@ async def _has_webrtc_signaling(hass, host: str) -> bool:
         if await _probe_webrtc_signaling(hass, url, timeout=2.0):
             return True
     return False
-
-
-def _extract_host_from_zeroconf(info: Any) -> Optional[str]:
-    # Use shared helper for testability
-    return util_extract_host_from_zeroconf(info)
-
-
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 3
 
     @staticmethod
-    @config_entries.HANDLERS.register("options")
     def async_get_options_flow(config_entry: config_entries.ConfigEntry):
         return OptionsFlowHandler(config_entry)
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
             host = user_input[CONF_HOST].strip()
@@ -133,7 +124,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={"name": DEFAULT_NAME}
         )
 
-    async def async_step_zeroconf(self, discovery_info: Any) -> FlowResult:
+    async def async_step_zeroconf(self, discovery_info: Any) -> ConfigFlowResult:
         from .utils import extract_info_from_zeroconf
         host, mac = extract_info_from_zeroconf(discovery_info)
         
@@ -227,7 +218,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         _LOGGER.debug("ha_creality_ws: defaulting to MJPEG")
         return CAM_MODE_MJPEG
 
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Top-level options menu (the hub each section returns to).
 
         Each settings group is its own step so its form is rebuilt fresh from the
@@ -251,7 +242,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             },
         )
 
-    async def async_step_save(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_save(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Persist all staged changes (single reload)."""
         self._ensure_working()
         assert self._working is not None
@@ -265,7 +256,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             )
         return self.async_create_entry(title="", data=self._working)
 
-    async def async_step_camera(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_camera(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Camera settings. Conditional fields follow the selected mode."""
         self._ensure_working()
         assert self._working is not None
@@ -425,7 +416,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         try:
             candidates.extend(self.hass.states.async_entity_ids("notify"))
         except Exception:  # pylint: disable=broad-except
-            # Older cores, or a stub in tests -- the service list alone is fine.
+            # A stub in tests, where states is not backed by a registry.
+            # The service list alone is enough to render the step.
             pass
         candidates.extend(current)
         return [
@@ -433,7 +425,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             for value in sorted(set(candidates))
         ]
 
-    async def async_step_notifications(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_notifications(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Notification settings."""
         self._ensure_working()
         assert self._working is not None
@@ -495,7 +487,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             data_schema=vol.Schema(schema_dict),
         )
 
-    async def async_step_power(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_power(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Power switch detection settings."""
         self._ensure_working()
         assert self._working is not None
@@ -539,7 +531,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             data_schema=vol.Schema(schema_dict),
         )
 
-    async def async_step_connection(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_connection(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Connection (IP) and performance (polling) settings."""
         self._ensure_working()
         assert self._working is not None

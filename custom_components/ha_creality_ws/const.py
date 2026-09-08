@@ -2,7 +2,6 @@ DOMAIN = "ha_creality_ws"
 
 CONF_HOST = "host"
 CONF_NAME = "name"
-CONF_DISCOVERY_SCAN_CIDR = "scan_cidr"
 CONF_POWER_SWITCH = "power_switch"
 CONF_POWER_SWITCH_ENABLED = "power_switch_enabled"
 CONF_CAMERA_MODE = "camera_mode"
@@ -20,7 +19,6 @@ MINIMUM_HA_VERSION = (2026, 7)
 
 WS_PORT = 9999
 MJPEG_PORT = 8080
-HTTP_PORT = 80
 
 WS_URL_TEMPLATE = "ws://{host}:" + str(WS_PORT)
 # Subprotocol advertised by the printer's own web UI on the WebSocket handshake.
@@ -126,8 +124,6 @@ CONF_NOTIFY_ACTIONS = "notify_actions"
 CONF_NOTIFY_PREVIEW_IMAGE = "notify_preview_image"
 CONF_NOTIFY_CAMERA_SNAPSHOT = "notify_camera_snapshot"
 CONF_NOTIFY_TAP_PATH = "notify_tap_path"
-CONF_NOTIFY_PREVIEW_ENTITY = "notify_preview_entity"
-CONF_NOTIFY_CAMERA_ENTITY = "notify_camera_entity"
 
 # Sentinel message that dismisses a notification (and ends a Live Activity)
 # carrying the same tag. It is only meaningful to the companion app: any other

@@ -1,9 +1,8 @@
 from pathlib import Path
-import json, re
+import re
 
 ROOT = Path(__file__).resolve().parents[2]
 
-const_path = ROOT / "custom_components" / "ha_creality_ws" / "const.py"
 init_path = ROOT / "custom_components" / "ha_creality_ws" / "__init__.py"
 
 ALLOWED_HOST_SUBSTRINGS = ["localhost", "http://", "ws://"]

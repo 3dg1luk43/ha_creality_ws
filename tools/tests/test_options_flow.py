@@ -57,6 +57,12 @@ def _install_stubs():
     config_entries.OptionsFlow = _Flow
     config_entries.OptionsFlowWithConfigEntry = _Flow
     config_entries.CONN_CLASS_LOCAL_PUSH = "local_push"
+    config_entries.ConfigFlowResult = dict
+    # Carried over from the conftest stub this one replaces. pytest imports every
+    # test module during collection, so this stub is still installed while later
+    # modules are being imported -- dropping an attribute here breaks them, and
+    # teardown_module runs far too late to help.
+    config_entries.OperationNotAllowed = Exception
     config_entries.HANDLERS = MagicMock()
     _stub("homeassistant.config_entries", config_entries)
 

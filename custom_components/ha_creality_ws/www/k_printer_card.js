@@ -131,10 +131,27 @@ function fmtTimeLeft(seconds) {
   if (m > 0) return `${m}:${String(sec).padStart(2, "0")}`;
   return `${sec}s`;
 }
+// Every state utils.derive_print_state can return. Mirrored here so a state
+// added on the Python side cannot silently fall through to a default, and so
+// impossible states cannot creep back in -- test_printer_card_layout.py
+// cross-checks this list against derive_print_state.
+const PRINT_STATES = new Set([
+  "off",
+  "unknown",
+  "error",
+  "self-testing",
+  "completed",
+  "paused",
+  "stopped",
+  "printing",
+  "processing",
+  "idle",
+]);
+
 function computeIcon(status) {
   const st = normStr(status);
   if (["off", "unknown", "stopped"].includes(st)) return mdi("printer-3d-off");
-  if (["printing", "resuming", "pausing", "paused"].includes(st)) return mdi("printer-3d-nozzle");
+  if (["printing", "paused"].includes(st)) return mdi("printer-3d-nozzle");
   if (st === "error") return mdi("close-octagon");
   if (st === "self-testing") return mdi("cogs");
   return mdi("printer-3d");
@@ -142,9 +159,9 @@ function computeIcon(status) {
 function computeColor(status) {
   const st = normStr(status);
   if (["off", "unknown", "stopped"].includes(st)) return "var(--secondary-text-color)";
-  if (["paused", "pausing"].includes(st)) return "#fc6d09";
+  if (st === "paused") return "#fc6d09";
   if (st === "error") return "var(--error-color)";
-  if (["printing", "resuming", "processing"].includes(st)) return "var(--primary-color)";
+  if (["printing", "processing"].includes(st)) return "var(--primary-color)";
   if (["idle", "completed"].includes(st)) return "var(--success-color, #4caf50)";
   if (st === "self-testing") return "var(--info-color, #2196f3)";
   return "var(--secondary-text-color)";
@@ -472,7 +489,7 @@ class KPrinterCard extends HTMLElement {
         // so an accidental tap can't kill a running job.
         if (this._hass?.states?.[eid]?.state === "on") {
           const st = normStr(this._hass?.states?.[this._cfg.status]?.state);
-          const printing = ["printing", "resuming", "pausing", "paused"].includes(st);
+          const printing = ["printing", "paused"].includes(st);
           const msg = printing ? this._t("confirm_power_off_printing") : this._t("confirm_power_off");
           if (!confirm(msg)) return;
         }
@@ -712,7 +729,7 @@ class KPrinterCard extends HTMLElement {
     const powerState = g(resolvedPower);
 
     const st = normStr(status);
-    const isPrinting = ["printing", "resuming", "pausing"].includes(st);
+    const isPrinting = st === "printing";
     const isPaused = st === "paused";
     const showStop = isPrinting || isPaused || st === "self-testing";
     // Show Light chip only when the light entity exists in HA state and power (if configured) is not OFF

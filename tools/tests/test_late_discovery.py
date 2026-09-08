@@ -324,7 +324,7 @@ def test_no_platform_writes_a_gating_field_directly(monkeypatch):
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[2] / "custom_components" / "ha_creality_ws"
-    for name in ("number.py", "sensor.py", "fan.py", "switch.py", "light.py", "button.py"):
+    for name in ("number.py", "sensor.py", "fan.py", "light.py", "button.py"):
         path = root / name
         if not path.exists():
             continue

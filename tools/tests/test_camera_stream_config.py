@@ -1,5 +1,4 @@
 import sys
-import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
 from conftest import install_stub_module, restore_stubs

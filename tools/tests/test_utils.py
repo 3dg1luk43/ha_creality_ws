@@ -20,7 +20,7 @@ core_version_supported = utils.core_version_supported
 parse_model_version = utils.parse_model_version
 parse_position = utils.parse_position
 safe_float = utils.safe_float
-extract_host_from_zeroconf = utils.extract_host_from_zeroconf
+extract_info_from_zeroconf = utils.extract_info_from_zeroconf
 
 
 def test_coerce_numbers():
@@ -58,15 +58,20 @@ def test_safe_float():
     assert safe_float(None) is None
 
 
-def test_extract_host_from_zeroconf_dicts():
-    info = {"host": "192.168.1.5"}
-    assert extract_host_from_zeroconf(info) == "192.168.1.5"
+def test_extract_info_from_zeroconf_dicts():
+    """Covers the host-resolution order config_flow.async_step_zeroconf depends on.
 
-    info2 = {"addresses": ["fe80::1", "10.0.0.2"]}
-    assert extract_host_from_zeroconf(info2) == "10.0.0.2"
+    Note the link-local address is skipped in favour of the routable one, and
+    the trailing dot is stripped from an mDNS hostname.
+    """
+    host, _mac = extract_info_from_zeroconf({"host": "192.168.1.5"})
+    assert host == "192.168.1.5"
 
-    info3 = {"hostname": "printer.local."}
-    assert extract_host_from_zeroconf(info3) == "printer.local"
+    host, _mac = extract_info_from_zeroconf({"addresses": ["fe80::1", "10.0.0.2"]})
+    assert host == "10.0.0.2"
+
+    host, _mac = extract_info_from_zeroconf({"hostname": "printer.local."})
+    assert host == "printer.local"
 
 
 # --------------------------------------------------------------------------- #

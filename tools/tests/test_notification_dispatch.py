@@ -377,8 +377,6 @@ def _load(options):
 def test_a_legacy_single_device_still_notifies_after_upgrade():
     coord = _load({"notify_device": "notify.mobile_app_pixel", "notify_completed": True})
     assert coord._notify_targets == ["notify.mobile_app_pixel"]
-    # Kept derived for one release so nothing reading it breaks silently.
-    assert coord._notify_device == "notify.mobile_app_pixel"
 
 
 def test_the_new_key_wins_and_an_emptied_list_stays_empty():
@@ -387,7 +385,6 @@ def test_the_new_key_wins_and_an_emptied_list_stays_empty():
 
     coord = _load({"notify_device": "notify.old", "notify_targets": []})
     assert coord._notify_targets == []
-    assert coord._notify_device is None
 
 
 def test_the_filename_in_a_message_is_basenamed():

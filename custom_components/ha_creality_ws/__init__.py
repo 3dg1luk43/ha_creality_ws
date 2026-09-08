@@ -4,7 +4,7 @@ import asyncio
 import json
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 import re
 from urllib.parse import urljoin, urlparse
 from typing import Callable, List, Optional, Any
@@ -13,6 +13,8 @@ from typing import Callable, List, Optional, Any
 
 from homeassistant.config_entries import ConfigEntry, OperationNotAllowed # type: ignore[import]
 from homeassistant.core import HomeAssistant, ServiceCall # type: ignore[import]
+from homeassistant.const import __version__ as HA_VERSION  # type: ignore[import]
+from homeassistant.util import dt as dt_util  # type: ignore[import]
 from homeassistant.exceptions import ConfigEntryNotReady  # type: ignore[import]
 try:
     from homeassistant.exceptions import ConfigEntryError  # type: ignore[import]
@@ -25,13 +27,6 @@ except ImportError:  # pragma: no cover - older cores
 from homeassistant.helpers.event import (  # type: ignore[import]
     async_track_time_interval,
     async_track_state_change_event,
-)
-from homeassistant.helpers.typing import ConfigType  # type: ignore[import]
-from homeassistant.const import (  # type: ignore[import]
-    CONF_HOST,
-    CONF_PORT,
-    EVENT_HOMEASSISTANT_STOP,
-    Platform,
 )
 import voluptuous as vol  # type: ignore[import]
 from homeassistant.helpers import config_validation as cv, entity_registry as er, device_registry as dr # type: ignore[import]
@@ -73,7 +68,7 @@ from .utils import (
 
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS: list[str] = ["sensor", "switch", "camera", "button", "number", "fan", "light", "image"]
+PLATFORMS: list[str] = ["sensor", "camera", "button", "number", "fan", "light", "image"]
 
 # Import integration version from manifest
 
@@ -233,13 +228,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         new_data["_last_ip"] = host
         hass.config_entries.async_update_entry(entry, data=new_data)
         
-    # Attempt to cache MAC address if not present
-    if not entry.data.get("_cached_mac") and not coord.power_is_off():
-        # In a real scenario, we might query M115 or check network info from the printer
-        # For now, we will rely on upcoming zeroconf updates to populate this if the printer exposes it.
-        # OR: If the coordinator captured it from initial handshake/data?
-        # Creality printers are notoriously shy about their MAC in the JSON payload.
-        pass
+    # No MAC caching here: Creality printers do not report one in the JSON
+    # payload. _cached_mac comes from zeroconf discovery instead.
          
     # Also re-cache if max temperature values are missing (migration from older versions)
     should_re_cache = should_re_cache or (
@@ -286,8 +276,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 if "maxBoxTemp" not in coord.data:
                     # Give a tiny storage for these lazier fields to arrive
                     await coord.wait_for_fields(["maxBoxTemp", "targetBoxTemp"], timeout=2.0)
-            else:
-                got_fields = False
             
             # Always update cache if we have data, even if wait timed out partially
             if (ok and coord.data):
@@ -334,7 +322,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 new_data["_cached_max_box_temp"] = new_data["_cached_max_chamber_temp"]
                 
                 # Re-detect camera type only if missing (not on every update)
-                cached_camera_type = entry.data.get("_cached_camera_type")
                 cached_camera_type = entry.data.get("_cached_camera_type")
                 if not cached_camera_type:
                     new_data["_cached_camera_type"] = "webrtc" if (printermodel.is_k2_family or printermodel.supports_webrtc) else (
@@ -433,8 +420,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # so a printer that goes silent mid-print would leave a card counting
         # down on the phone forever. Reuses this interval; no new timer.
         coord.notifier_tick()
-        # Do not force listener updates here; rely on coordinator's internal logic (throttled)
-        # hass.loop.call_soon_threadsafe(coord.async_update_listeners)
+        # Listener updates are left to the coordinator, which throttles them.
     
     cancel_interval = async_track_time_interval(
         hass, _interval_check, timedelta(seconds=max(5, STALE_AFTER_SECS // 3))
@@ -475,10 +461,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
-    # Register diagnostic service (only once per integration)
-    if not hasattr(hass.data[DOMAIN], '_diagnostic_service_registered'):
+    # Asking the service registry, the same way _register_custom_services does,
+    # rather than keeping a flag: hass.data[DOMAIN] is keyed by entry id and a
+    # sentinel in there is indistinguishable from a coordinator.
+    if not hass.services.has_service(DOMAIN, "diagnostic_dump"):
         await _register_diagnostic_service(hass)
-        hass.data[DOMAIN]['_diagnostic_service_registered'] = True
 
     # Register custom services
     await _register_custom_services(hass)
@@ -745,8 +732,8 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
             
             # Create diagnostic data structure
             diagnostic_data = {
-                "timestamp": datetime.now().isoformat(),
-                "home_assistant_version": getattr(hass.config, 'version', 'unknown'),
+                "timestamp": dt_util.utcnow().isoformat(),
+                "home_assistant_version": HA_VERSION,
                 "integration_version": await _get_integration_version(hass),
                 "printers": {}
             }
@@ -925,8 +912,6 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
                 
         except Exception as exc:
             _LOGGER.exception("Failed to create diagnostic dump: %s", exc)
-            if hasattr(call, 'response'):
-                call.response = {"error": str(exc)}
     
     # Register the service
     schema = vol.Schema({
@@ -941,45 +926,6 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
     )
     
     _LOGGER.info("Diagnostic service registered: ha_creality_ws.diagnostic_dump")
-
-async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Update options."""
-    await hass.config_entries.async_reload(entry.entry_id)
-
-async def async_monitor_zeroconf_update(hass: HomeAssistant, entry: ConfigEntry, info: Any) -> None:
-    """Handle triggered Zeroconf update."""
-    from .utils import extract_info_from_zeroconf
-    host, mac = extract_info_from_zeroconf(info)
-    
-    if not host:
-        return
-
-    # If we have a MAC address, we can do a robust match
-    if mac:
-        # Check if the current entry matches this MAC
-        cached_mac = entry.data.get("_cached_mac")
-        
-        # Scenario 1: We already know our MAC and it matches the discovery
-        if cached_mac and cached_mac.upper() == mac.upper():
-            current_host = entry.data.get("host")
-            if host != current_host:
-                _LOGGER.warning(
-                    "Robust IP Update: MAC match (%s) but IP changed from %s to %s. Updating...",
-                    mac, current_host, host
-                )
-                hass.config_entries.async_update_entry(entry, data={**entry.data, "host": host, "_last_ip": host})
-                await hass.config_entries.async_reload(entry.entry_id)
-            return
-
-        # Scenario 2: We don't know our MAC yet, but this update is targeting *us* by IP (initial discovery phase?)
-        # Or more likely, HA matched the zeroconf flow to this entry for some reason.
-        # If we don't have a cached MAC, and the IP matches, let's CACHE this MAC!
-        current_host = entry.data.get("host")
-        if host == current_host and not cached_mac:
-            _LOGGER.info("Caching MAC address found via Zeroconf: %s", mac)
-            hass.config_entries.async_update_entry(entry, data={**entry.data, "_cached_mac": mac})
-            return
-
     # Fallback to simple name/IP matching logic or legacy checks
     # If users rely on hostname, IP-based recovery without MAC is dangerous (DHCP shuffle).
 
@@ -1013,16 +959,6 @@ async def options_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> No
         except Exception as exc:
             _LOGGER.error("Unexpected error during reload: %s", exc)
             return
-
-
-async def _retry_reload_later(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    try:
-        await asyncio.sleep(1.0)
-        await hass.config_entries.async_reload(entry.entry_id)
-    except Exception:
-        pass
-
-
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     coord: KCoordinator = hass.data[DOMAIN][entry.entry_id]
@@ -1033,11 +969,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
 
-    # If this is the last instance of the integration, unregister the card
-    if not hass.data[DOMAIN]:
-        card_register = CrealityCardRegistration(hass)
-        await card_register.async_unregister()
-
+    # The Lovelace resources and the static paths are deliberately left in
+    # place. Removing a resource would break any dashboard still referencing the
+    # card while the integration is merely reloading, and HA has no way to
+    # unregister a static path anyway.
     return unload_ok
 
 

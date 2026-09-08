@@ -26,7 +26,6 @@ from custom_components.ha_creality_ws.notification_rules import (
     PHASE_START,
     EVENT_COMPLETED,
     EVENT_SOON,
-    EVENT_STOPPED,
     LiveCardState,
     LiveSnapshot,
     NotifyLinks,
@@ -58,11 +57,6 @@ STRINGS = json.loads(
 )["common"]  # notification strings; see test_translations.py for why "common"
 
 CHANNEL = STRINGS["channel_live"]
-_LABELS = {
-    "pause": STRINGS["action_pause"],
-    "resume": STRINGS["action_resume"],
-    "stop": STRINGS["action_stop"],
-}
 
 
 # --------------------------------------------------------------------------- #
@@ -638,13 +632,6 @@ def test_terminal_payload_must_actually_alert():
     assert data["push"]["interruption-level"] == "time-sensitive"
 
 
-def test_stopped_payload_reports_where_it_stopped():
-    data = build_event_payload(
-        tag="t", title="K1C", message="stopped", kind=EVENT_STOPPED, progress=42,
-        channel=STRINGS["channel_finished"],
-    )["data"]
-    assert data["progress"] == 42
-    assert data["notification_icon"] == "mdi:stop-circle"
 
 
 @pytest.mark.parametrize(
@@ -686,7 +673,6 @@ def test_every_builder_emits_a_legal_tag_even_from_a_dotted_host():
     "kind,icon",
     [
         (EVENT_COMPLETED, "mdi:check-circle"),
-        (EVENT_STOPPED, "mdi:stop-circle"),
         (EVENT_SOON, "mdi:clock-fast"),
     ],
 )

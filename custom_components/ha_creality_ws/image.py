@@ -1,15 +1,15 @@
 from __future__ import annotations
 import logging
 from typing import Any, Optional
-from datetime import datetime
 import base64
 import time
 
 from homeassistant.components.image import ImageEntity  # type: ignore[import]
 from homeassistant.core import HomeAssistant  # type: ignore[import]
 from homeassistant.config_entries import ConfigEntry  # type: ignore[import]
-from homeassistant.helpers.entity_platform import AddEntitiesCallback  # type: ignore[import]
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback  # type: ignore[import]
 from homeassistant.helpers.aiohttp_client import async_get_clientsession  # type: ignore[import]
+from homeassistant.util import dt as dt_util  # type: ignore[import]
 import aiohttp  # type: ignore[import]
 
 from .const import DOMAIN
@@ -23,7 +23,7 @@ _PNG_PLACEHOLDER = base64.b64decode(
 )
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback) -> None:
     coord = hass.data[DOMAIN][entry.entry_id]
     ent: list[ImageEntity] = []
 
@@ -132,7 +132,7 @@ class CurrentPrintPreviewImage(KEntity, ImageEntity):
                         if data:
                             self._last_image = data
                             self._last_source_url = url
-                            self._attr_image_last_updated = datetime.utcnow()
+                            self._attr_image_last_updated = dt_util.utcnow()
                             self._last_reason = "ok"
                             self._last_fetch_ts = now
                             return data

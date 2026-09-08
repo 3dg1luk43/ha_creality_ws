@@ -4,14 +4,13 @@ import logging
 
 from homeassistant.components.number import NumberEntity, NumberMode, NumberDeviceClass
 
-# unit compat across HA versions
-try:
-    from homeassistant.const import UnitOfTemperature, PERCENTAGE as UNIT_PERCENT
-    UNIT_CELSIUS = UnitOfTemperature.CELSIUS
-except Exception:  # older cores
-    from homeassistant.const import TEMP_CELSIUS as UNIT_CELSIUS, PERCENTAGE as UNIT_PERCENT
+from homeassistant.const import (  # type: ignore[import]
+    PERCENTAGE as UNIT_PERCENT,
+    UnitOfTemperature,
+)
 
-from homeassistant.helpers import entity_registry as er  # type: ignore[import]
+UNIT_CELSIUS = UnitOfTemperature.CELSIUS
+
 from homeassistant.helpers.dispatcher import async_dispatcher_connect  # type: ignore[import]
 from .const import DOMAIN
 from .entity import KEntity
@@ -102,20 +101,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
             _on_new_entities,
         )
     )
-
-    # Fan controls (legacy). Only create if entity already exists to avoid duplicates with native fan platform.
-    reg = er.async_get(hass)
-    host = coord.client._host
-    legacy_uids = [
-        ("model_fan_pct", "modelFanPct", "Model Fan %", 0, "model_fan_pct"),
-        ("case_fan_pct", "caseFanPct", "Case Fan %", 1, "case_fan_pct"),
-        ("side_fan_pct", "auxiliaryFanPct", "Side Fan %", 2, "side_fan_pct"),
-    ]
-    for uid, field, name, ch, tk in legacy_uids:
-        unique = f"{host}-{uid}"
-        existing = reg.async_get_entity_id("number", DOMAIN, unique)
-        if existing:
-            ents.append(_FanPctNumber(coord, name, field, uid, channel=ch, translation_key=tk))
 
     async_add_entities(ents)
 
@@ -290,35 +275,3 @@ class BoxTargetNumber(KEntity, NumberEntity):
         self.coordinator.async_update_listeners()
 
         await self.coordinator.client.send_set_retry(boxTempControl=v)
-
-
-# ---------- Fan percent via M106 (0%→off) ----------
-class _FanPctNumber(KEntity, NumberEntity):
-    # Legacy fan controls; native fan platform replaces these. Keep disabled by default for new setups.
-    _attr_entity_registry_enabled_default = False
-    _attr_native_unit_of_measurement = UNIT_PERCENT
-    _attr_mode = NumberMode.SLIDER
-    _attr_native_min_value = 0.0
-    _attr_native_max_value = 100.0
-    _attr_native_step = 1.0
-
-    def __init__(self, coordinator, name: str, read_field: str, uid: str, channel: int, translation_key: str | None = None) -> None:
-        super().__init__(coordinator, name, uid, translation_key=translation_key)
-        self._read_field = read_field
-        self._channel = int(channel)
-
-    @property
-    def native_value(self) -> float | None:
-        if self._should_zero():
-            return None
-        v = self.coordinator.data.get(self._read_field)
-        try:
-            return float(v) if v is not None else None
-        except (TypeError, ValueError):
-            return None
-
-    async def async_set_native_value(self, value: float) -> None:
-        pct = max(0, min(100, int(round(value))))
-        s_val = int(round(255 * (pct / 100.0)))
-        cmd = f"M106 P{self._channel} S{s_val}"  # 0 → fan off
-        await self.coordinator.client.send_set_retry(gcodeCmd=cmd)

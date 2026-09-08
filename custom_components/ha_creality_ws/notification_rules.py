@@ -393,7 +393,6 @@ class LiveCardState:
 # Lifecycle and alert flavours. Kept as constants so a typo is an ImportError
 # rather than a silently wrong icon.
 EVENT_COMPLETED = "completed"
-EVENT_STOPPED = "stopped"
 EVENT_SOON = "soon"
 ALERT_ERROR = "error"
 ALERT_RUNOUT = "runout"
@@ -401,7 +400,6 @@ ALERT_RUNOUT = "runout"
 # Icon and colour per lifecycle flavour.
 _EVENT_STYLE = {
     EVENT_COMPLETED: ("mdi:check-circle", NOTIFY_COLOR_DONE),
-    EVENT_STOPPED: ("mdi:stop-circle", NOTIFY_COLOR_PAUSED),
     EVENT_SOON: ("mdi:clock-fast", NOTIFY_COLOR_PRINTING),
 }
 

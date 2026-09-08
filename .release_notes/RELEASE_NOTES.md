@@ -59,6 +59,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The diagnostic service was re-registered on every printer setup**, and the Home Assistant version in a diagnostic dump always read `unknown`. Both were `hasattr` checks against objects that never had the attribute — one against a dict, one against `hass.config` — so neither guard ever fired. The dump now reports the real version, with a UTC timestamp instead of a naive local one.
+- **The legacy light switch and the legacy fan percentage controls could never be created.** The migration that removes those entities from the registry runs *before* platform setup, and both platforms only created an entity if the registry already had one — so `switch.py` produced nothing at all. The dead platform and controls are gone; the migration that cleans up the old entities stays.
+- **The camera advertised a feature flag that does not exist.** `CameraEntityFeature` has only `ON_OFF` and `STREAM`; the code also OR'd in a non-existent `ON_DEMAND` and then logged `ON_OFF`'s bit under that name, so the log line always said `ON_DEMAND=False`. It now declares `STREAM`, which is what native WebRTC actually needs.
+- **The printer card had branches for `resuming` and `pausing`**, neither of which the integration can ever report — so the paused colour and two icon choices keyed on states that never arrive. The card now mirrors the real state list, and a test cross-checks it against the integration the way the CFS card already did.
+- **A failure to serve the dashboard cards was logged at debug level**, meaning the cards would 404 with nothing in the log to say why. It is a warning now.
+
 - **A notify target that could not be routed failed silently** — no error, no log, no notification. Since the field accepts free text, a typo simply did nothing. It now logs a warning.
 - **Notification state stopped tracking when no target was configured**, so switching notifications on in the middle of a print could immediately fire a spurious "completed".
 - **The camera snapshot is skipped where it cannot work.** K2-family cameras using direct WebRTC signalling have no snapshot endpoint and serve a 1x1 placeholder; the same check applies to the G-code preview, which serves a transparent 1x1 when the printer has no preview. Either would have rendered as an empty grey box.
@@ -84,6 +90,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Completion notification only ever arrived once per file name**: the "already notified" flag was only cleared when the print file name changed, so reprinting the same file never notified again. It is now also re-armed whenever progress falls back below 100%. Found while verifying #112 against a live printer.
 
 ### Internal
+
+- **Removed the backwards-compatibility code that the 2026.7 minimum makes unreachable**: six `try/except ImportError` unit- and feature-detection blocks, the pre-2024.7 static-path API, the pre-dataclass Lovelace resources access, and the positional-argument handling in `fan.turn_on`. The two shims that remain are deliberate — they run at import time, before the version check, so an ancient core still gets the friendly "update Home Assistant" message rather than an `ImportError`.
+- **Deleted code nothing called**: six unused functions, a write-only `use_proxy` parameter, four unused constants, a duplicated statement, a no-op `if` body, and a test that asserted `"logistics" not in manifest.json`.
+- **Modernised deprecated APIs**: `FlowResult` → `ConfigFlowResult`, `AddEntitiesCallback` → `AddConfigEntryEntitiesCallback`, `DeviceInfo` and `EntityCategory` from their canonical modules, `datetime.utcnow()` → the timezone-aware `dt_util.utcnow()`, and `asyncio.get_event_loop()` → `get_running_loop()`.
+- **The test suite no longer depends on collection order.** Home Assistant stubs the integration needs at import time now live in `conftest.py`. Previously the first test module to import the package supplied them by accident, so deleting an unrelated test file was enough to break a later one — and no test module could be run on its own. All of them can now.
 
 - `LATE_DISCOVERY_FIELDS` in `const.py` lists the telemetry fields that gate entity creation (`boxsInfo`, `maxBoxTemp`); the coordinator fires a single discovery signal the first time each appears, replacing the CFS-only trigger. Platforms subscribe and re-check idempotently.
 - New shared CFS helpers in `utils.py` — `normalize_color_hex`, `format_filament_label`, `build_spool_key` — replacing the duplicated inline logic in `KCFSSlotSensor`, `KCFSExtSlotSensor` and `KActiveFilamentSensor`, whose attribute dicts now come from one `_cfs_slot_attributes` builder.

@@ -200,10 +200,7 @@
       "print_tuning_pct": { "name": "Print Tuning" },
       "nozzle_target": { "name": "Nozzle Target" },
       "bed_target": { "name": "Bed Target" },
-      "chamber_target": { "name": "Chamber Target" },
-      "model_fan_pct": { "name": "Model Fan" },
-      "case_fan_pct": { "name": "Case Fan" },
-      "side_fan_pct": { "name": "Side Fan" }
+      "chamber_target": { "name": "Chamber Target" }
     },
     "fan": {
       "model_fan": { "name": "Model Fan" },
@@ -211,9 +208,6 @@
       "side_fan": { "name": "Side Fan" }
     },
     "light": {
-      "light": { "name": "Light" }
-    },
-    "switch": {
       "light": { "name": "Light" }
     },
     "camera": {

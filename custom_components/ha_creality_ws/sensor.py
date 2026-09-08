@@ -17,7 +17,13 @@ from homeassistant.components.sensor import (  # type: ignore[import]
     SensorDeviceClass,
     SensorStateClass,
 )
-from homeassistant.helpers.entity import EntityCategory  # type: ignore[import]
+from homeassistant.const import (  # type: ignore[import]
+    PERCENTAGE as U_PERCENT,
+    EntityCategory,
+    UnitOfLength,
+    UnitOfTemperature,
+    UnitOfTime,
+)
 from homeassistant.helpers.dispatcher import async_dispatcher_connect # type: ignore[import]
 from .entity import KEntity
 from .const import DOMAIN
@@ -27,30 +33,10 @@ _LOGGER = logging.getLogger(__name__)
 
 
 
-# Unit compatibility across HA versions
-try:
-    from homeassistant.const import ( #type: ignore[import]
-        UnitOfTemperature as UTemp,
-        UnitOfLength as ULen,
-        PERCENTAGE as U_PERCENT,
-        UnitOfTime as UTime,
-    )
-    U_C = UTemp.CELSIUS
-    U_MM = ULen.MILLIMETERS
-    U_CM = ULen.CENTIMETERS
-    U_S = UTime.SECONDS
-except ImportError:  # older cores fallback (keep compat with older HA constants)
-    from homeassistant.const import ( #type: ignore[import]
-        TEMP_CELSIUS as U_C,
-        LENGTH_MILLIMETERS as U_MM,
-        LENGTH_CENTIMETERS as U_CM,
-        PERCENTAGE as U_PERCENT,
-        TIME_SECONDS as U_S,
-    )
-    U_RPM = "rpm"
-
-
-# (imports duplicated above; keep only one set)
+U_C = UnitOfTemperature.CELSIUS
+U_MM = UnitOfLength.MILLIMETERS
+U_CM = UnitOfLength.CENTIMETERS
+U_S = UnitOfTime.SECONDS
 
 
 # ----------------- helpers -----------------
@@ -1095,14 +1081,7 @@ class KMaxTempSensor(KEntity, SensorEntity):
     def __init__(self, coordinator, uid: str, key: str, translation_key: str):
         super().__init__(coordinator, "", uid, translation_key=translation_key)
         self._key = key  # one of: max_nozzle_temp, max_bed_temp, max_box_temp
-        # Use Celsius unit
-        try:
-            # Prefer UnitOfTemperature if available
-            from homeassistant.const import UnitOfTemperature  # type: ignore[import]
-            self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
-        except Exception:  # pylint: disable=broad-except
-            from homeassistant.const import TEMP_CELSIUS  # type: ignore[import] # pylint: disable=import-outside-toplevel
-            self._attr_native_unit_of_measurement = TEMP_CELSIUS
+        self._attr_native_unit_of_measurement = U_C
 
     @property
     def available(self) -> bool:

@@ -47,7 +47,6 @@ import time
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import Any, Dict, Optional
-import contextlib
 import sys
 
 import numpy as np
@@ -115,14 +114,14 @@ class SyntheticVideoTrack(MediaStreamTrack):
         self.height = height
         self.fps = fps
         self._frame_dur = 1 / fps
-        self._t0 = asyncio.get_event_loop().time()
+        self._t0 = time.monotonic()
         self._video_pts = 0
         self._video_time_base = Fraction(1, fps)
 
     async def recv(self):
         # Maintain nominal frame pacing without blocking the event loop
         await asyncio.sleep(self._frame_dur)
-        t = asyncio.get_event_loop().time() - self._t0
+        t = time.monotonic() - self._t0
         # Offload heavy numpy work to a background thread so Ctrl+C remains responsive
         img = await asyncio.to_thread(self._bars, self.width, self.height, t)
         frame = av.VideoFrame.from_ndarray(img, format="rgb24")
@@ -1223,7 +1222,6 @@ class HttpServer:
         #  - base64(JSON{"type":"offer","sdp":"v=0..."})   [go2rtc creality client]
         #  - JSON {"type":"offer","sdp":"v=0..."}
         #  - base64("v=0...") or plain "v=0..." (raw SDP)
-        response_mode = "base64_json"
         try:
             raw = await request.read()
             ctype = (request.headers.get("Content-Type") or "").lower()

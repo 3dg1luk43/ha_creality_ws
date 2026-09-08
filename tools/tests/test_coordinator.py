@@ -1,5 +1,4 @@
 import asyncio
-import sys
 from unittest.mock import MagicMock
 from types import SimpleNamespace
 

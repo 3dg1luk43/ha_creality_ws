@@ -1,6 +1,7 @@
 import logging
 import time
 from pathlib import Path
+from homeassistant.components.http import StaticPathConfig  # type: ignore[import]
 from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
@@ -21,42 +22,32 @@ _VERSION = str(int(time.time()))
 
 
 def _register_static_path(hass: HomeAssistant, url_path: str, path: str) -> None:
-    """Register a static path with the HA HTTP component, compatible with multiple HA versions.
+    """Serve a file or directory straight out of the integration package.
 
-    We intentionally register the card from the integration `frontend/` folder so the
-    file is served from the integration package (no copying to /config/www).
+    Deliberately served from the integration's own `www/` folder rather than
+    copied into /config/www, so an update cannot leave a stale copy behind.
+
+    Registration is done in a task with its own error handling: aiohttp raises
+    when the same method and path are already registered, which happens on a
+    config-entry reload, and an unretrieved task exception would otherwise
+    surface as a noisy traceback in the log.
     """
-    try:
-        # HA 2024.7+ supports async_register_static_paths/StaticPathConfig; prefer that
-        from homeassistant.components.http import StaticPathConfig
 
-        # Use async API when available. Run inside a guarded async task so any
-        # exceptions (duplicate routes, etc.) are handled and don't generate
-        # un-retrieved task exceptions which show as noisy errors in the log.
-        if hasattr(hass.http, "async_register_static_paths"):
-            async def _safe_register():
-                try:
-                    await hass.http.async_register_static_paths(
-                        [StaticPathConfig(url_path, path, True)]
-                    )
-                except Exception as exc:
-                    # Duplicate route registrations raise RuntimeError in aiohttp
-                    # when the same method/path is already present. Handle it
-                    # gracefully and log at debug level.
-                    _LOGGER.debug("Failed to async register static path %s -> %s: %s", url_path, path, exc)
+    async def _register() -> None:
+        try:
+            await hass.http.async_register_static_paths(
+                [StaticPathConfig(url_path, path, True)]
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            # Warning, not debug: if this fails the Lovelace cards 404 on every
+            # dashboard, and at debug level nothing would say why. A duplicate
+            # route on reload is the benign case and reads the same, which is
+            # the price of not being silent about the real one.
+            _LOGGER.warning(
+                "Could not serve %s from %s: %s", url_path, path, exc
+            )
 
-            hass.async_create_task(_safe_register())
-            return
-    except Exception:
-        # Fall through to sync API below
-        pass
-
-    # Fallback for older HA
-    try:
-        hass.http.register_static_path(url_path, path, cache_headers=True)
-    except Exception:
-        # If registration fails, log and continue; we won't attempt to copy files.
-        _LOGGER.debug("Failed to register static path %s -> %s", url_path, path)
+    hass.async_create_task(_register())
 
 
 async def _init_resource(hass: HomeAssistant, url: str, ver: str) -> bool:
@@ -82,7 +73,7 @@ async def _init_resource(hass: HomeAssistant, url: str, ver: str) -> bool:
         return False
 
     resources: ResourceStorageCollection = (
-        lovelace.resources if hasattr(lovelace, "resources") else lovelace["resources"]
+        lovelace.resources
     )
 
     await resources.async_get_info()
@@ -133,7 +124,7 @@ async def _migrate_local_resources(
         return 0
 
     resources: ResourceStorageCollection = (
-        lovelace.resources if hasattr(lovelace, "resources") else lovelace["resources"]
+        lovelace.resources
     )
 
     await resources.async_get_info()
@@ -177,10 +168,6 @@ class CrealityCardRegistration:
     def __init__(self, hass: HomeAssistant) -> None:
         self.hass = hass
 
-    def _src_path(self, card_name: str) -> Path:
-        # card bundled inside the integration
-        return Path(__file__).parent / "frontend" / card_name
-
     async def async_register(self) -> None:
         """Register a static path that serves the card from the integration package.
 
@@ -189,15 +176,7 @@ class CrealityCardRegistration:
         """
         for card_name in CARDS:
             integration_url = f"{INTEGRATION_URL_BASE}{card_name}"
-            src = self._src_path(card_name)
-            # integration-local serving uses the 'www' folder name like other integrations
-            # (file lives in integration/frontend or integration/www depending on packaging)
-            www_path = Path(__file__).parent / "www" / card_name
-            if www_path.exists():
-                serve_path = str(www_path)
-            else:
-                # fall back to original frontend location when 'www' is not present
-                serve_path = str(src)
+            serve_path = str(Path(__file__).parent / "www" / card_name)
 
             _register_static_path(self.hass, integration_url, serve_path)
 
@@ -259,11 +238,6 @@ class CrealityCardRegistration:
             INTEGRATION_URL_BASE,
         )
 
-    async def async_unregister(self) -> None:
-        """No-op: leave Lovelace resources and HTTP registrations alone on unload."""
-        return
-
-
 async def _expand_base_resource(hass: HomeAssistant, base: str, card_names: list[str]) -> int:
     """Expand any resources that point to `base` (with no filename) into per-card URLs.
 
@@ -280,7 +254,7 @@ async def _expand_base_resource(hass: HomeAssistant, base: str, card_names: list
         return 0
 
     resources: ResourceStorageCollection = (
-        lovelace.resources if hasattr(lovelace, "resources") else lovelace["resources"]
+        lovelace.resources
     )
 
     await resources.async_get_info()
