@@ -30,7 +30,9 @@ This custom [Home Assistant](https://www.home-assistant.io/) integration provide
 
 > **Requires Home Assistant 2026.7.0 or newer.** The live print notifications
 > depend on the companion app's Live Activity support, which arrived in that
-> release. If you are on an older core, stay on 0.9.7.
+> release. HACS will not offer this version to an older core, and installing it
+> by hand anyway makes setup fail with a message saying so. If you cannot update
+> Home Assistant, stay on 0.9.7.
 
 ### HACS (recommended)
 

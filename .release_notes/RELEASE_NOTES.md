@@ -10,8 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)
 
 > **This release raises the minimum Home Assistant version to 2026.7.0.** HACS
-> will not offer it to older cores. The live print card depends on the companion
-> app's Live Activity support, which landed in 2026.7.
+> will not offer it to older cores, and on an older core setup now fails with an
+> explicit message rather than a live print card that quietly never appears —
+> a manual or git install never goes through HACS. Stay on 0.9.7 if you cannot
+> update Home Assistant. The live print card depends on the companion app's Live
+> Activity support, which landed in 2026.7.
 
 ### Added
 

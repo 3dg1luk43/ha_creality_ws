@@ -12,6 +12,12 @@ CONF_CUSTOM_CAMERA_URL = "custom_camera_url"
 
 DEFAULT_NAME = "Creality Printer (WS)"
 
+# The live print card needs the companion app's Live Activity support, which
+# arrived in this core release. Declared to HACS in hacs.json, and enforced at
+# runtime as well: a manual or git install never goes through HACS, and would
+# otherwise get a card that silently does not work.
+MINIMUM_HA_VERSION = (2026, 7)
+
 WS_PORT = 9999
 MJPEG_PORT = 8080
 HTTP_PORT = 80

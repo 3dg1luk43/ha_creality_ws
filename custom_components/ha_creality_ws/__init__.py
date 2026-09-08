@@ -14,6 +14,10 @@ from typing import Callable, List, Optional, Any
 from homeassistant.config_entries import ConfigEntry, OperationNotAllowed # type: ignore[import]
 from homeassistant.core import HomeAssistant, ServiceCall # type: ignore[import]
 from homeassistant.exceptions import ConfigEntryNotReady  # type: ignore[import]
+try:
+    from homeassistant.exceptions import ConfigEntryError  # type: ignore[import]
+except ImportError:  # pragma: no cover - older cores, which is what we reject
+    from homeassistant.exceptions import HomeAssistantError as ConfigEntryError  # type: ignore[import]
 try:  # HA 2023.10+
     from homeassistant.exceptions import ServiceValidationError  # type: ignore[import]
 except ImportError:  # pragma: no cover - older cores
@@ -38,6 +42,7 @@ from homeassistant.components.persistent_notification import (  # type: ignore[i
 )
 
 from .const import (
+    MINIMUM_HA_VERSION,
     DOMAIN, 
     STALE_AFTER_SECS, 
     CONF_POWER_SWITCH,
@@ -57,6 +62,7 @@ from .const import (
 from .coordinator import KCoordinator
 from .frontend import CrealityCardRegistration
 from .utils import (
+    core_version_supported,
     BUSY_PRINT_STATES,
     ModelDetection,
     build_modify_material_payload,
@@ -146,8 +152,42 @@ def _migrate_go2rtc_settings(hass: HomeAssistant, entry: ConfigEntry) -> None:
         hass.config_entries.async_update_entry(entry, options=current_options)
         _LOGGER.info("Migration complete for entry options")
 
+def _core_version() -> tuple[int, int] | None:
+    """The running Home Assistant version, or None if it cannot be read.
+
+    MAJOR/MINOR are ints; PATCH_VERSION is a string that can read "0b3" on a
+    beta, so it is deliberately ignored.
+    """
+    try:
+        from homeassistant.const import (  # type: ignore[import]
+            MAJOR_VERSION,
+            MINOR_VERSION,
+        )
+
+        return (int(MAJOR_VERSION), int(MINOR_VERSION))
+    except Exception:  # pylint: disable=broad-except
+        _LOGGER.debug("Could not determine the Home Assistant version")
+        return None
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the Creality integration from a config entry."""
+    # HACS refuses to install this version on an older core, but a manual or git
+    # install bypasses that entirely -- and the failure would otherwise be a live
+    # print card that quietly never appears. Fail with something actionable
+    # instead. ConfigEntryError rather than ConfigEntryNotReady: retrying cannot
+    # make the core newer.
+    running = _core_version()
+    if not core_version_supported(running, MINIMUM_HA_VERSION):
+        raise ConfigEntryError(
+            translation_domain=DOMAIN,
+            translation_key="unsupported_ha_version",
+            translation_placeholders={
+                "minimum": ".".join(str(part) for part in MINIMUM_HA_VERSION),
+                "running": ".".join(str(part) for part in running or ()),
+            },
+        )
+
     # Run migrations first
     _migrate_go2rtc_settings(hass, entry)
     

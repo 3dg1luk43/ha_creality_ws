@@ -48,6 +48,11 @@
     "filament_runout": "Filament runout detected during {filename}",
     "finishing_soon": "Print {filename} finishing in {minutes} minutes."
   },
+  "exceptions": {
+    "unsupported_ha_version": {
+      "message": "This version of the Creality WebSocket integration needs Home Assistant {minimum} or newer, but this system is running {running}. Update Home Assistant, or install integration version 0.9.7 instead."
+    }
+  },
   "selector": {
     "camera_mode": {
       "options": {

@@ -625,3 +625,21 @@ def normalize_material_color(value: Any) -> str:
     if not _MATERIAL_COLOR_RE.match(text):
         raise ValueError(f"colour must be six hex digits, got {text!r}")
     return f"#{text.lstrip('#').lower()}"
+
+
+def core_version_supported(
+    version: tuple[int, int] | None, minimum: tuple[int, int]
+) -> bool:
+    """Whether the running Home Assistant core is new enough.
+
+    Compared as a tuple of ints, never as a string: "2026.10" sorts *before*
+    "2026.7" lexicographically, so a string compare would reject exactly the
+    newer cores it is supposed to allow.
+
+    An unreadable version passes. Not being able to determine the version is our
+    problem, and refusing to start over it would be worse than whatever we were
+    trying to guard against.
+    """
+    if version is None:
+        return True
+    return version >= minimum

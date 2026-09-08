@@ -121,6 +121,10 @@ components_mod.number = number_mod
 # where a test asserts on the value.
 const_mod = MagicMock()
 const_mod.PERCENTAGE = "%"
+# Pinned so the minimum-core check is exercisable: MAJOR/MINOR would otherwise be
+# MagicMocks and int() on one raises, silently taking the "version unknown" path.
+const_mod.MAJOR_VERSION = 2026
+const_mod.MINOR_VERSION = 7
 const_mod.UnitOfTemperature.CELSIUS = "°C"
 sys.modules["homeassistant.const"] = const_mod
 ha_mod.const = const_mod
