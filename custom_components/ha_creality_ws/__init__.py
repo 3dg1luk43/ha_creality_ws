@@ -451,6 +451,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ("number", f"{host}-model_fan_pct"),
             ("number", f"{host}-case_fan_pct"),
             ("number", f"{host}-side_fan_pct"),
+            # A byte-identical duplicate of sensor "model_info": same field,
+            # same attributes. Removed rather than left orphaned.
+            ("sensor", f"{host}-system"),
         ]
         for domain_name, unique in legacy:
             ent_id = reg.async_get_entity_id(domain_name, DOMAIN, unique)

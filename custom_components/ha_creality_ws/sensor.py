@@ -181,21 +181,6 @@ SPECS: list[dict[str, Any]] = [
         "attrs": lambda d: {},
         "state_class": SensorStateClass.MEASUREMENT,
     },
-
-    # System summary
-    {
-        "uid": "system",
-        "name": "System",
-        "translation_key": "system",
-        "field": "model",
-        "device_class": None,
-        "unit": None,
-        "attrs": lambda d: _attr_dict(
-            ("hostname", d.get("hostname")),
-            ("modelVersion", d.get("modelVersion")),
-        ),
-        "state_class": None,
-    },
 ]
 
 # ----------------- dynamic "mapped" sensors -----------------
@@ -981,7 +966,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
     ents.append(ObjectCountSensor(coord))
     ents.append(KPrintControlSensor(coord))
     
-    # Static model/host sensor
+    # The printer's identity. Deliberately not a SPECS row: SPECS is for
+    # telemetry fields, and this is static. A second, byte-identical copy of
+    # this sensor used to live there under the uid "system"; it was retired
+    # in favour of this one, whose name says what the value is.
     ents.append(KSimpleFieldSensor(
         coord,
         {

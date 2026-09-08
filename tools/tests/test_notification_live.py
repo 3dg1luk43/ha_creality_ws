@@ -43,6 +43,10 @@ class HassStub:
         self.tasks: list = []
         self.config_entries = SimpleNamespace(async_get_entry=lambda _id: None)
         self.config = SimpleNamespace(language="en")
+        self.events: list = []
+        self.bus = SimpleNamespace(
+            async_fire=lambda event, data=None: self.events.append((event, data))
+        )
 
     async def _async_call(self, domain, service, data, **_kw):
         self.calls.append((domain, service, data))
@@ -561,3 +565,81 @@ def test_a_pause_clears_the_countdown_deadline():
     # Long past the old deadline, and still nothing to say.
     coord.hass.loop.advance(600)
     assert _live(_frame(coord, hass, **_printing(42, state=5, printLeftTime=60))) == []
+
+
+# --------------------------------------------------------------------------- #
+# Stopped / cancelled
+# --------------------------------------------------------------------------- #
+
+
+def test_a_stopped_print_says_so_instead_of_the_card_just_vanishing():
+    """The live card is cleared when a job stops, and used to be all that
+    happened -- from the user's side a notification silently disappeared with no
+    explanation of whether the print finished or died."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(30))
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+
+    payloads = _frame(coord, hass, **_printing(30, state=4))
+    assert len(_clears(payloads)) == 1, "the card is still dismissed"
+
+    events = _events(payloads)
+    assert len(events) == 1
+    assert "stopped at 30%" in events[0]["message"]
+    assert "3DBenchy.gcode" in events[0]["message"]
+    assert events[0]["data"]["notification_icon"] == "mdi:stop-circle"
+    # It has to alert, like the completion banner.
+    assert "alert_once" not in events[0]["data"]
+
+
+def test_a_stopped_print_is_announced_once():
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(30))
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    _frame(coord, hass, **_printing(30, state=4))
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    assert _events(_frame(coord, hass, **_printing(30, state=4))) == []
+
+
+def test_completion_wins_when_a_finished_job_also_reports_stopped():
+    """The printer settles on state 4 after a successful print too, so ranking
+    matters: progress >= 100 is "completed", not "stopped"."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(50))
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    payloads = _events(_frame(coord, hass, **_printing(100, state=4, printLeftTime=0)))
+    assert len(payloads) == 1
+    assert "completed" in payloads[0]["message"]
+    assert coord._notified_stopped is False
+
+
+def test_a_print_already_stopped_at_startup_is_not_announced():
+    """Priming adopts whatever the printer is reporting; the printer holds state
+    4 indefinitely, so a restart must not announce last week's cancellation."""
+    hass = HassStub()
+    coord = KCoordinator(hass, host="1.2.3.4", config_entry_id="abc123")
+    coord._notify_targets = ["notify.mobile_app_pixel"]
+    coord._notify_completed = True
+    coord._notify_live = True
+
+    assert _frame(coord, hass, **_printing(30, state=4)) == []
+    assert coord._notified_stopped is True
+    coord.hass.loop.advance(1)
+    assert _events(_frame(coord, hass, **_printing(30, state=4))) == []
+
+
+def test_stopping_then_reprinting_announces_the_next_stop_too():
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(30))
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    _frame(coord, hass, **_printing(30, state=4))
+
+    # New job on the same file: the job clock restarting is the new-cycle signal.
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    _frame(coord, hass, **_printing(2, printJobTime=5))
+    assert coord._notified_stopped is False
+
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    events = _events(_frame(coord, hass, **_printing(2, printJobTime=6, state=4)))
+    assert len(events) == 1
+    assert "stopped at 2%" in events[0]["message"]

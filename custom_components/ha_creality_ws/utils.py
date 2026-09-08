@@ -457,6 +457,11 @@ def build_spool_key(
 BUSY_PRINT_STATES = frozenset({"printing", "paused", "processing", "self-testing"})
 
 
+# States in which a print exists and therefore has a G-code preview worth
+# showing: everything busy, plus a finished job whose model is still on the bed.
+PREVIEW_PRINT_STATES = frozenset(BUSY_PRINT_STATES | {"completed"})
+
+
 def derive_print_state(
     data: dict[str, Any],
     *,
@@ -503,6 +508,38 @@ def derive_print_state(
             return "processing"
 
     return "idle"
+
+
+def derive_activity_state(
+    data: dict[str, Any],
+    *,
+    power_off: bool = False,
+    available: bool = True,
+    paused_flag: bool = False,
+) -> str:
+    """``derive_print_state`` with a *stale* error collapsed back to the job.
+
+    ``derive_print_state`` reports ``"error"`` for any non-zero ``err.errcode``,
+    including a code the printer never clears. Callers that want to know what
+    the job is *doing* -- a live notification card, or whether a G-code preview
+    exists -- must not be pinned to "error" for an entire print by a code that
+    is never reset.
+
+    Re-derives with the error blanked rather than re-implementing the mapping,
+    so there is still exactly one place the state table lives. Anything that
+    should react to a *new* fault keys on the error code changing instead.
+    """
+    state = derive_print_state(
+        data, power_off=power_off, available=available, paused_flag=paused_flag
+    )
+    if state != "error":
+        return state
+    return derive_print_state(
+        dict(data, err={}),
+        power_off=power_off,
+        available=available,
+        paused_flag=paused_flag,
+    )
 
 
 # --------------------------------------------------------------------------- #

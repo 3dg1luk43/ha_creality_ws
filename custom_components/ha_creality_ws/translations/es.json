@@ -43,6 +43,7 @@
     "duration_seconds": "{seconds} s",
     "filament_length": "{metres} m",
     "completed": "¡La impresión de {filename} se ha completado correctamente!",
+    "stopped": "La impresión de {filename} se ha detenido al {progress}%",
     "completed_detailed": "La impresión de {filename} se ha completado en {duration} y ha usado {filament} de filamento",
     "error": "Error {code} de la impresora (clave: {key}) durante la impresión de {filename}",
     "filament_runout": "Se ha agotado el filamento durante la impresión de {filename}",
@@ -94,7 +95,7 @@
         "data": {
           "notify_targets": "Destinos de notificación",
           "notify_live": "Tarjeta de impresión en vivo",
-          "notify_completed": "Notificar cuando se complete",
+          "notify_completed": "Notificar al terminar la impresión",
           "notify_error": "Notificar en caso de error",
           "notify_minutes_to_end": "Notificar antes de que termine",
           "minutes_to_end_value": "Minutos de antelación",
@@ -137,7 +138,6 @@
       "position_z": { "name": "Posición Z" },
       "feedrate_pct": { "name": "Velocidad de impresión" },
       "flowrate_pct": { "name": "Tasa de flujo" },
-      "system": { "name": "Sistema" },
       "model_info": { "name": "Modelo" },
       "filament_status": {
         "name": "Estado del filamento",

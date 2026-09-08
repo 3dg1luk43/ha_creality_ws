@@ -13,6 +13,7 @@ from homeassistant.util import dt as dt_util  # type: ignore[import]
 import aiohttp  # type: ignore[import]
 
 from .const import DOMAIN
+from .utils import PREVIEW_PRINT_STATES, derive_activity_state
 from .entity import KEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -58,23 +59,29 @@ class CurrentPrintPreviewImage(KEntity, ImageEntity):
         self._min_fetch_interval: float = 5.0  # seconds
 
     def _status_allows_preview(self) -> bool:
-        d = self.coordinator.data or {}
+        """Whether there is a print whose preview is worth fetching.
+
+        Routed through the shared state derivation rather than re-deriving the
+        state/progress/withSelfTest combination locally, which was a third
+        independent copy of the same mapping -- and one the notification layer
+        depends on transitively, since it reads `preview_reason` to decide
+        whether to attach the preview at all.
+
+        `derive_activity_state` rather than `derive_print_state`, so a stale
+        error code the printer never clears does not hide the preview for the
+        rest of the print. Paused and processing jobs now qualify too: the model
+        is still on the bed, and the old `state == 1` test made the preview
+        vanish for the duration of a pause.
+        """
         if self._should_zero():
             return False
-        st = d.get("state")
-        fname = (d.get("printFileName") or "").strip()
-        if not fname:
+        d = self.coordinator.data or {}
+        if not (d.get("printFileName") or "").strip():
             return False
-        prog = d.get("printProgress", d.get("dProgress"))
-        try:
-            prog = int(prog) if prog is not None else -1
-        except Exception:
-            prog = -1
-        if prog >= 100:
-            return True
-        if d.get("withSelfTest"):
-            return True
-        return st == 1
+        return (
+            derive_activity_state(d, paused_flag=self.coordinator._paused_flag)
+            in PREVIEW_PRINT_STATES
+        )
 
     @property
     def available(self) -> bool:

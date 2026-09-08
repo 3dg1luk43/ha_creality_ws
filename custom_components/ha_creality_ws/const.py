@@ -186,6 +186,7 @@ PREVIEW_REASONS_UNUSABLE = ("not_printing", "fetch_failed")
 # with your own conditions.
 BUS_EVENT_PRINT_STARTED = "ha_creality_ws_print_started"
 BUS_EVENT_PRINT_FINISHED = "ha_creality_ws_print_finished"
+BUS_EVENT_PRINT_STOPPED = "ha_creality_ws_print_stopped"
 BUS_EVENT_PRINT_ERROR = "ha_creality_ws_print_error"
 
 CONF_POLLING_RATE = "polling_rate"

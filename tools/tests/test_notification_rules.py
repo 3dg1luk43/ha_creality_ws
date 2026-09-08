@@ -196,25 +196,61 @@ def test_sanitize_tag_bounds_and_fallback():
 
 
 @pytest.mark.parametrize(
-    "prog,job_restarted,notified,expected",
+    "prog,job_restarted,expected",
     [
-        # Nothing to re-arm yet.
-        (50, False, False, False),
         # A real drop clear of the jitter band.
-        (0, False, True, True),
-        (90, False, True, True),
+        (0, False, True),
+        (90, False, True),
         # Inside the jitter band: the printer rounds to 100 early, reports 99,
         # then finishes. Re-arming here sent completion twice per print.
-        (99, False, True, False),
-        (91, False, True, False),
+        (99, False, False),
+        (91, False, False),
         # ...unless the job clock also restarted, which is unambiguous.
-        (99, True, True, True),
-        # Still at 100: not a new cycle.
-        (100, True, True, False),
+        (99, True, True),
+        # Still at 100: the first frame of a new job usually still carries the
+        # old one's 100, and re-arming there re-announces the completion.
+        (100, True, False),
     ],
 )
-def test_is_new_job_cycle(prog, job_restarted, notified, expected):
-    assert is_new_job_cycle(prog, job_restarted, notified) is expected
+def test_is_new_job_cycle_after_a_completion(prog, job_restarted, expected):
+    assert (
+        is_new_job_cycle(prog, job_restarted, ended_at_completion=True) is expected
+    )
+
+
+def test_nothing_re_arms_before_the_job_has_ended():
+    """Otherwise every mid-print frame below the jitter band looks like a new job."""
+    for prog in (0, 50, 90, 99):
+        assert (
+            is_new_job_cycle(prog, False, ended_at_completion=False, ended_early=False)
+            is False
+        )
+        assert (
+            is_new_job_cycle(prog, True, ended_at_completion=False, ended_early=False)
+            is False
+        )
+
+
+@pytest.mark.parametrize(
+    "prog,job_restarted,expected",
+    [
+        # The job clock restarting is the only signal available after an early
+        # stop -- a print stopped at 30% never leaves the jitter band, so a
+        # progress test would re-arm on the very next frame and announce the
+        # stop again.
+        (2, True, True),
+        (30, False, False),
+        (0, False, False),
+        (90, False, False),
+    ],
+)
+def test_is_new_job_cycle_after_an_early_stop(prog, job_restarted, expected):
+    assert (
+        is_new_job_cycle(
+            prog, job_restarted, ended_at_completion=False, ended_early=True
+        )
+        is expected
+    )
 
 
 # --------------------------------------------------------------------------- #

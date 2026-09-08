@@ -44,3 +44,44 @@ def test_sensor_specs_uids_unique_and_contains_box():
     filtered = [u for u in uids if u and not u.startswith('lambda')]
     assert 'box_temperature' in filtered, 'box_temperature uid missing'
     assert len(filtered) == len(set(filtered)), 'Duplicate sensor uid detected'
+
+
+def test_no_two_sensors_read_the_same_telemetry_field():
+    """Two sensors on one field are almost always an accidental duplicate.
+
+    `sensor.system` and `sensor.model_info` were byte-identical for several
+    releases -- same field, same attributes, different name -- and the uid
+    uniqueness check above could not see it because the uids differed. Every
+    user got both. If a genuine second view of one field is ever wanted, add it
+    to the allowlist below with a reason.
+    """
+    import ast
+
+    allowed_duplicate_fields: dict[str, str] = {
+        # field: why two sensors legitimately read it
+    }
+
+    tree = ast.parse(text)
+    seen: dict[str, list[str]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        entry = {
+            k.value: v
+            for k, v in zip(node.keys, node.values)
+            if isinstance(k, ast.Constant) and isinstance(k.value, str)
+        }
+        if "uid" not in entry or "field" not in entry:
+            continue
+        uid, field = entry["uid"], entry["field"]
+        if not (isinstance(uid, ast.Constant) and isinstance(field, ast.Constant)):
+            continue
+        seen.setdefault(field.value, []).append(uid.value)
+
+    assert seen, "found no sensor definitions to check"
+    duplicates = {
+        field: uids
+        for field, uids in seen.items()
+        if len(uids) > 1 and field not in allowed_duplicate_fields
+    }
+    assert not duplicates, f"more than one sensor per field: {duplicates}"

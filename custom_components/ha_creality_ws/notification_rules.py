@@ -202,23 +202,43 @@ def sanitize_tag(raw: Any) -> str:
 
 
 def is_new_job_cycle(
-    prog_val: int, job_restarted: bool, notified_completed: bool
+    prog_val: int,
+    job_restarted: bool,
+    *,
+    ended_at_completion: bool,
+    ended_early: bool = False,
 ) -> bool:
-    """Whether progress falling below 100 means a genuinely new job started.
+    """Whether a genuinely new job has begun since the last one ended.
 
-    The single home for this predicate. The printer rounds progress up to 100 a
-    second before a job ends, reports 99 once more, and only then finishes, so
-    "progress dipped below 100" on its own is not a new cycle -- treating it as
-    one sent the completion notification twice for every print. A drop clear of
-    that jitter band, or a restart of the job clock, is.
+    The single home for this predicate; the terminal re-arm and the live-card
+    reset both call it. They used to be separate expressions of the same idea,
+    which is exactly the drift the comment in ``_prime_notification_state``
+    warns about.
 
-    Both the completion re-arm and the live-card reset call this. They used to be
-    separate expressions of the same idea, which is exactly the drift the comment
-    in ``_prime_notification_state`` warns about.
+    Nothing counts until an ending has been observed, or every mid-print frame
+    would look like a fresh cycle. After that there are two signals, and they
+    are not interchangeable:
+
+    * The **job clock restarting** is unambiguous and works for any ending. It
+      is the only signal available for a job that was stopped part-way, which is
+      why ``ended_early`` requires it.
+    * A **progress drop** only means anything for a job that ended *at* 100%.
+      The printer rounds progress up to 100 a second before a job ends, reports
+      99 once more, and only then finishes -- so the drop has to clear that
+      jitter band, or the completion notification fires twice for every print.
+      Applying the same test to a job stopped at 30% would re-arm on the very
+      next frame, because 30 never leaves the band.
     """
-    return notified_completed and prog_val < 100 and (
-        prog_val <= NOTIFY_REARM_PROGRESS_MAX or job_restarted
-    )
+    if not (ended_at_completion or ended_early):
+        return False
+    if prog_val >= 100:
+        # Telemetry lags: the frame that first shows a new job usually still
+        # carries the previous one's 100. Re-arming here would announce that
+        # completion a second time, immediately.
+        return False
+    if job_restarted:
+        return True
+    return ended_at_completion and prog_val <= NOTIFY_REARM_PROGRESS_MAX
 
 
 def _milestone_of(progress: Any) -> int:
@@ -393,6 +413,7 @@ class LiveCardState:
 # Lifecycle and alert flavours. Kept as constants so a typo is an ImportError
 # rather than a silently wrong icon.
 EVENT_COMPLETED = "completed"
+EVENT_STOPPED = "stopped"
 EVENT_SOON = "soon"
 ALERT_ERROR = "error"
 ALERT_RUNOUT = "runout"
@@ -400,6 +421,7 @@ ALERT_RUNOUT = "runout"
 # Icon and colour per lifecycle flavour.
 _EVENT_STYLE = {
     EVENT_COMPLETED: ("mdi:check-circle", NOTIFY_COLOR_DONE),
+    EVENT_STOPPED: ("mdi:stop-circle", NOTIFY_COLOR_PAUSED),
     EVENT_SOON: ("mdi:clock-fast", NOTIFY_COLOR_PRINTING),
 }
 

@@ -43,6 +43,7 @@
     "duration_seconds": "{seconds}s",
     "filament_length": "{metres} m",
     "completed": "Print {filename} completed successfully!",
+    "stopped": "Print {filename} was stopped at {progress}%",
     "completed_detailed": "Print {filename} completed in {duration}, using {filament} of filament",
     "error": "Printer Error {code} (Key: {key}) occurred during {filename}",
     "filament_runout": "Filament runout detected during {filename}",
@@ -94,7 +95,7 @@
         "data": {
           "notify_targets": "Notification targets",
           "notify_live": "Live print card",
-          "notify_completed": "Notify when Completed",
+          "notify_completed": "Notify when a print ends",
           "notify_error": "Notify on Error",
           "notify_minutes_to_end": "Notify before Completion",
           "minutes_to_end_value": "Minutes before Completion",
@@ -137,7 +138,6 @@
       "position_z": { "name": "Position Z" },
       "feedrate_pct": { "name": "Print Speed" },
       "flowrate_pct": { "name": "Flow Rate" },
-      "system": { "name": "System" },
       "model_info": { "name": "Model" },
       "filament_status": {
         "name": "Filament Status",

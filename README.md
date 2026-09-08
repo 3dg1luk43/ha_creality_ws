@@ -229,7 +229,9 @@ Enable **Live print card**. During a print you get one card that updates in plac
 - the **G‑code preview** as the notification icon
 - **Pause / Resume / Stop** buttons, if you enable them
 
-It ends by itself when the print finishes, and is replaced by a completion notification carrying a **camera snapshot** of the bed.
+It ends by itself when the print finishes, and is replaced by a completion notification carrying a **camera snapshot** of the bed. A print that is cancelled or aborted gets its own notification saying where it stopped, rather than the card simply vanishing.
+
+**Notify when a print ends** covers both outcomes — finished *and* stopped. Being told a print completed is only half the story if you are not also told when it didn't.
 
 **Requirements:** Home Assistant **2026.7.0 or newer** (this is the integration's minimum), plus **iOS 17.2+** or **Android 16+**. On older phones the same notification still arrives and still replaces itself in place — you lose the timer and the bar, not the notification.
 
@@ -269,6 +271,7 @@ The integration fires plain bus events whether or not you configure a notify tar
 |---|---|
 | `ha_creality_ws_print_started` | a new job appears |
 | `ha_creality_ws_print_finished` | progress reaches 100% |
+| `ha_creality_ws_print_stopped` | a job ends without finishing — cancelled, or aborted by the printer |
 | `ha_creality_ws_print_error` | the printer reports a new error code |
 
 Each carries `entry_id`, `host`, `device_name`, `filename`, `progress`, `layer`, `total_layers`, `left_seconds` and `err_code`.

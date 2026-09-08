@@ -11,12 +11,18 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send  # type: igno
 from homeassistant.helpers import entity_registry as er  # type: ignore[import]
 from homeassistant.helpers.translation import async_get_translations  # type: ignore[import]
 from .ws_client import KClient
-from .utils import BUSY_PRINT_STATES, ModelDetection, derive_print_state, safe_float
+from .utils import (
+    BUSY_PRINT_STATES,
+    ModelDetection,
+    derive_activity_state,
+    safe_float,
+)
 from .notification_rules import (
     ALERT_ERROR,
     ALERT_RUNOUT,
     EVENT_COMPLETED,
     EVENT_SOON,
+    EVENT_STOPPED,
     PHASE_PAUSED,
     PHASE_PRINTING,
     PHASE_START,
@@ -60,6 +66,7 @@ from .const import (
     BUS_EVENT_PRINT_ERROR,
     BUS_EVENT_PRINT_FINISHED,
     BUS_EVENT_PRINT_STARTED,
+    BUS_EVENT_PRINT_STOPPED,
     NOTIFY_BODY_SEPARATOR,
     NOTIFY_CHANNEL_KEY_ALERT,
     NOTIFY_CHANNEL_KEY_DONE,
@@ -136,6 +143,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Extended status tracking
         self._notified_filament_runout = False
         self._notified_started = False
+        self._notified_stopped = False
         
         # Caches
         self._is_k2_base: bool | None = None
@@ -320,16 +328,27 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Check if printer is homing."""
         return (self.data or {}).get("deviceState") == 7
 
-    def _has_active_job(self) -> bool:
-        """Check if a print job is active."""
-        d = self.data or {}
-        fname = (d.get("printFileName") or "").strip()
-        prog = d.get("printProgress", d.get("dProgress"))
-        return bool(fname) and prog is not None
+    def _job_state(self) -> str:
+        """What the current job is doing, from the one place the mapping lives.
 
-    def _is_printing(self) -> bool:
-        """Check if printer is actively printing (has job, not paused, not homing)."""
-        return self._has_active_job() and not self._paused_flag and not self._is_busy_homing()
+        There used to be a second definition here -- a job counted as
+        "printing" if it merely had a file name and a progress value -- which
+        called a finished job (progress >= 100) and a stopped one (state 4)
+        printing, and ignored self-test entirely. A pause request at the end of
+        a print was therefore sent to a printer that had already stopped.
+
+        Deliberately the *activity* state, not the display state: a non-zero
+        `err.errcode` the printer never clears would otherwise report "error"
+        for the rest of the print and make the job impossible to pause. The
+        status sensor still shows "error" -- that is what a user wants to see;
+        it just should not decide whether a pause can be sent.
+        """
+        return derive_activity_state(
+            self.data or {},
+            power_off=self.power_is_off(),
+            available=self.available,
+            paused_flag=self._paused_flag,
+        )
 
     def _recompute_paused_from_telemetry(self) -> None:
         """Update paused state from telemetry data."""
@@ -341,34 +360,82 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     # -------- Queued actions --------
     async def request_pause(self) -> None:
-        """Pause now if printable; otherwise queue until printable."""
-        if self._is_printing():
+        """Pause now if the printer is printing, or queue it if it is about to be.
+
+        Only queued while the job is still busy. Queuing a pause for a finished,
+        stopped or idle printer would leave it armed until the *next* print,
+        which would then pause itself the moment it started.
+        """
+        state = self._job_state()
+
+        if state == "paused":
+            _LOGGER.debug("Pause ignored: the printer is already paused")
+            return
+
+        # Homing moves are excluded deliberately: the printer is mid-gcode and a
+        # pause sent then is at best ignored.
+        if state == "printing" and not self._is_busy_homing():
             try:
                 await self.client.send_set_retry(pause=1)
                 _LOGGER.debug("Pause sent immediately")
-            except Exception as exc:
+            except Exception as exc:  # pylint: disable=broad-except
                 self._pending_pause = True
                 _LOGGER.warning("Pause send failed; queued. Error: %s", exc)
-        else:
+            return
+
+        if state in BUSY_PRINT_STATES:
             self._pending_pause = True
-            _LOGGER.debug("Pause queued (not in printable state)")
+            _LOGGER.debug("Pause queued: printer is %s, not printing yet", state)
+            return
+
+        _LOGGER.warning("Pause ignored: the printer is %s, not printing", state)
 
     async def request_resume(self) -> None:
-        """Resume now if telemetry shows paused; otherwise queue until paused shows up."""
-        if self._paused_flag:
+        """Resume now if the printer reports paused, or queue until it does.
+
+        Queued only while the job is busy, for the same reason as the pause
+        above: telemetry lags a pause the user just requested, but a resume left
+        armed past the end of a job would fire into the next one.
+        """
+        state = self._job_state()
+
+        if state == "paused":
             try:
                 await self.client.send_set_retry(pause=0)
                 _LOGGER.debug("Resume sent immediately")
-            except Exception as exc:
+            except Exception as exc:  # pylint: disable=broad-except
                 self._pending_resume = True
                 _LOGGER.warning("Resume send failed; queued. Error: %s", exc)
-        else:
-            self._pending_resume = True
-            _LOGGER.debug("Resume queued (not in paused state)")
+            return
 
-    async def _flush_pending(self) -> None:
-        """Attempt to execute any queued actions when state allows (called on every telemetry frame)."""
-        if self._pending_pause and self._is_printing():
+        if state in BUSY_PRINT_STATES:
+            self._pending_resume = True
+            _LOGGER.debug("Resume queued: printer is %s, not paused yet", state)
+            return
+
+        _LOGGER.warning("Resume ignored: the printer is %s, not paused", state)
+
+    async def _flush_pending(self, state: str | None = None) -> None:
+        """Run any queued pause/resume once the state allows.
+
+        Called on every telemetry frame. `state` is passed in by the frame
+        handler so it is derived once rather than per consumer.
+        """
+        if state is None:
+            state = self._job_state()
+
+        # A queued action outlives the job it was meant for otherwise, and would
+        # fire as soon as the next print started.
+        if (self._pending_pause or self._pending_resume) and state not in BUSY_PRINT_STATES:
+            _LOGGER.debug(
+                "Dropping queued pause/resume: the printer is %s and the job is over",
+                state,
+            )
+            self._pending_pause = False
+            self._pending_resume = False
+            return
+
+        if self._pending_pause and state == "printing":
             try:
                 await self.client.send_set_retry(pause=1)
                 self._pending_pause = False
@@ -376,7 +443,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as exc:
                 _LOGGER.warning("Queued pause failed; will retry. Error: %s", exc)
 
-        if self._pending_resume and self._paused_flag:
+        if self._pending_resume and state == "paused":
             try:
                 await self.client.send_set_retry(pause=0)
                 self._pending_resume = False
@@ -432,9 +499,12 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self._recompute_paused_from_telemetry()
         
+        # Derived once per frame and handed to both consumers below.
+        job_state = self._job_state()
+
         # Try queued actions if state allows
         try:
-            await self._flush_pending()
+            await self._flush_pending(job_state)
         except Exception:  # pylint: disable=broad-except
             _LOGGER.exception("flush_pending failed")
 
@@ -451,7 +521,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # --- Conditional Throttling (printing only) ---
         # Always update immediately when NOT printing; throttle entity updates only when printing
         now = self.hass.loop.time()
-        if self._polling_rate > 0 and self._is_printing():
+        if self._polling_rate > 0 and job_state in BUSY_PRINT_STATES:
             if (now - self._last_update_ts) < self._polling_rate:
                 return  # Skip listener update to reduce CPU usage while printing
         
@@ -515,8 +585,18 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_job_time = safe_float(d.get("printJobTime"))
 
         # Adopting a job that was already running is not the same event as one
-        # beginning, so the started latch is closed rather than armed.
+        # beginning, so the started latch is closed rather than armed. Same
+        # for a job the printer is still reporting as stopped.
         self._notified_started = True
+        self._notified_stopped = (
+            derive_activity_state(
+                d,
+                power_off=self.power_is_off(),
+                available=self.available,
+                paused_flag=self._paused_flag,
+            )
+            == "stopped"
+        )
 
         # The card is baselined too, or a restart would push a live activity for
         # a print that finished last week -- issue #112 reincarnated as a push.
@@ -636,7 +716,12 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # 100 sent the completion notification twice for every print, once per
         # crossing. A drop that stays within the jitter band is only a new cycle
         # if the job clock restarted too.
-        if is_new_job_cycle(prog_val, job_restarted, self._notified_completed):
+        if is_new_job_cycle(
+            prog_val,
+            job_restarted,
+            ended_at_completion=self._notified_completed,
+            ended_early=self._notified_stopped,
+        ):
             _LOGGER.debug("Progress back at %s%%; re-arming completion notification", prog_val)
             self._notified_completed = False
             # Same predicate, so the card and the completion notification can
@@ -667,6 +752,20 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             self._fire_print_event(BUS_EVENT_PRINT_FINISHED, d, job)
             self._notified_completed = True
+
+        # 1b) Stopped or cancelled. Shares the completion toggle: someone who
+        # wants to be told a print finished wants to be told when it did not,
+        # and a card that simply vanishes explains nothing. Completion wins when
+        # both apply, because derive_print_state ranks progress >= 100 above
+        # state 4.
+        if self._job_state() == "stopped" and not self._notified_stopped:
+            if self._notify_completed and deliver:
+                await self._notify_event(
+                    self._t("stopped", filename=job, progress=prog_val),
+                    kind=EVENT_STOPPED,
+                )
+            self._fire_print_event(BUS_EVENT_PRINT_STOPPED, d, job)
+            self._notified_stopped = True
 
         # 2) Error
         code = self._error_code(d)
@@ -731,6 +830,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._clear_live_card()
         self._live_card.reset_for_new_job(progress=prog_val)
         self._notified_started = False
+        self._notified_stopped = False
 
     def _resolve_entity_id(self, platform: str, unique_suffix: str) -> str | None:
         """Entity id of one of our own entities, via the unique id we minted.
@@ -829,13 +929,12 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _live_snapshot(self) -> LiveSnapshot:
         """The subset of telemetry the live card reacts to."""
         d = self.data or {}
-        print_state = derive_print_state(
+        activity_state = derive_activity_state(
             d,
             power_off=self.power_is_off(),
             available=self.available,
             paused_flag=self._paused_flag,
         )
-        activity_state = self._activity_state(d, print_state)
         return LiveSnapshot(
             activity_state=activity_state,
             job_active=activity_state in BUSY_PRINT_STATES,
@@ -844,25 +943,6 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             layer=self._int_or_none(d.get("layer")),
             total_layers=self._int_or_none(d.get("TotalLayer")),
             seconds_left=self._print_seconds_left(d),
-        )
-
-    def _activity_state(self, d: dict[str, Any], print_state: str) -> str:
-        """`print_state` with a *stale* error collapsed back to what the job is doing.
-
-        `derive_print_state` reports "error" for any non-zero `err.errcode`,
-        including a code the printer never clears -- which would pin the live
-        card to "error" for an entire print. Re-deriving with the error blanked
-        keeps that single source of truth rather than re-implementing the
-        mapping here. The one-shot error notification is unaffected: it keys on
-        the code *changing*, not on this.
-        """
-        if print_state != "error":
-            return print_state
-        return derive_print_state(
-            dict(d, err={}),
-            power_off=self.power_is_off(),
-            available=self.available,
-            paused_flag=self._paused_flag,
         )
 
     @staticmethod
