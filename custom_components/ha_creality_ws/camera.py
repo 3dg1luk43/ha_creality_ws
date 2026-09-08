@@ -121,6 +121,26 @@ class _BaseCamera(KEntity, Camera):
         """
         return self._last_frame or self._TINY_JPEG
 
+    @property
+    def snapshot_supported(self) -> bool:
+        """Whether this camera can ever produce a real still image.
+
+        Published as a state attribute so consumers can decide *before* asking
+        for one. `_fallback_image()` hands back a 1x1 white JPEG when a snapshot
+        is impossible, and anything that attached that -- a notification, say --
+        would render a blank square rather than a picture of the bed.
+
+        True here because both the MJPEG cameras and the go2rtc-bridged WebRTC
+        cameras can grab a frame on demand. Only direct WebRTC signalling
+        cannot; that override lives on CrealityWebRTCCamera.
+        """
+        return True
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Return extra state attributes shared by every camera flavour."""
+        return {"snapshot_supported": self.snapshot_supported}
+
 
 class CrealityMjpegCamera(_BaseCamera):
     """MJPEG camera for Creality K1 family printers.
@@ -458,6 +478,16 @@ class CrealityWebRTCCamera(_BaseCamera):
         and never register a go2rtc stream.
         """
         return not self._direct_signaling
+
+    @property
+    def snapshot_supported(self) -> bool:
+        """Direct signalling has no snapshot endpoint at all.
+
+        `async_camera_image` returns `_fallback_image()` unconditionally on that
+        path and never populates `_last_frame`, so a still is not merely stale
+        there -- it is permanently unavailable.
+        """
+        return self._uses_go2rtc_webrtc_bridge()
 
     def _go2rtc_host_and_api_port(self) -> tuple[str | None, int | None]:
         """Split the resolved go2rtc server URL, tolerating a bare host:port."""
@@ -1359,6 +1389,7 @@ class CrealityWebRTCCamera(_BaseCamera):
             dict: Dictionary of extra state attributes
         """
         attrs = {
+            "snapshot_supported": self.snapshot_supported,
             "go2rtc_stream_name": self._stream_name,
             "go2rtc_version": self._go2rtc_version,
             "upstream_signaling_url": self._upstream_signaling_url,

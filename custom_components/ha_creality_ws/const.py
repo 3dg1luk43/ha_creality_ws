@@ -109,6 +109,77 @@ NOTIFY_PRIME_GRACE_SECS = 10.0
 # restart of the job clock, counts as a new cycle.
 NOTIFY_REARM_PROGRESS_MAX = 90
 
+# --- Multi-target delivery -------------------------------------------------- #
+# CONF_NOTIFY_DEVICE above held a single service name. It is still read, and is
+# never deleted, so that rolling back to an earlier release keeps a user's
+# target. coerce_targets() in notification_rules.py is the only thing that
+# should look at it.
+CONF_NOTIFY_TARGETS = "notify_targets"
+CONF_NOTIFY_LIVE = "notify_live"
+CONF_NOTIFY_ACTIONS = "notify_actions"
+CONF_NOTIFY_PREVIEW_IMAGE = "notify_preview_image"
+CONF_NOTIFY_CAMERA_SNAPSHOT = "notify_camera_snapshot"
+CONF_NOTIFY_TAP_PATH = "notify_tap_path"
+CONF_NOTIFY_PREVIEW_ENTITY = "notify_preview_entity"
+CONF_NOTIFY_CAMERA_ENTITY = "notify_camera_entity"
+
+# Sentinel message that dismisses a notification (and ends a Live Activity)
+# carrying the same tag. It is only meaningful to the companion app: any other
+# notify platform would render it as visible body text, so it must never be
+# delivered to one.
+CLEAR_NOTIFICATION_MARKER = "clear_notification"
+
+# --- Live print card -------------------------------------------------------- #
+# Progress here is authoritative 0-100, not an estimate, so pushes are driven by
+# a monotonic milestone latch rather than a cap derived from the expected
+# duration. A print then costs at most 100/STEP progress pushes whether it runs
+# twenty minutes or forty hours, and the end-of-print 99->100->99->100 jitter
+# (see NOTIFY_REARM_PROGRESS_MAX) cannot produce a second push.
+NOTIFY_LIVE_MILESTONE_STEP = 5
+# iOS throttles frequent Live Activity updates and eventually drops them, so
+# this floor applies regardless of what changed.
+NOTIFY_LIVE_MIN_INTERVAL_SECS = 30.0
+# Pause/resume has to show up immediately, so it bypasses the interval above --
+# but not completely, or telemetry that flaps between two states would spam.
+NOTIFY_LIVE_TRANSITION_FLOOR_SECS = 5.0
+# Defensive only: the milestone latch already bounds pushes per job.
+NOTIFY_LIVE_MAX_PUSHES_PER_JOB = 60
+# Apple hard-expires a Live Activity after eight hours. Past this the live-only
+# keys are dropped and the card degrades to a plain tagged notification, which
+# still updates in place. Android 16 progress notifications do not expire, so
+# this is an iOS-shaped limit we accept rather than work around -- restarting
+# the activity would burn a push-to-start slot and show a visibly new card.
+NOTIFY_LIVE_IOS_EXPIRY_SECS = 28800.0
+# No telemetry for this long means the printer is gone; clear the card.
+NOTIFY_LIVE_STALE_CLEAR_SECS = 90.0
+
+# Card colours by phase.
+NOTIFY_COLOR_PRINTING = "#03a9f4"
+NOTIFY_COLOR_PAUSED = "#ffa726"
+NOTIFY_COLOR_DONE = "#43a047"
+NOTIFY_COLOR_ERROR = "#e53935"
+
+# Android notification channels. Splitting the terminal and alert channels from
+# the live one lets a user silence progress without silencing failures.
+NOTIFY_CHANNEL_LIVE = "3D Print"
+NOTIFY_CHANNEL_DONE = "3D Print Finished"
+NOTIFY_CHANNEL_ALERT = "3D Print Alerts"
+
+# `preview_reason` values that mean the image entity would serve its 1x1
+# placeholder. Anything else -- including an unset value, which just means
+# nothing has asked the entity for bytes yet -- is worth attaching.
+PREVIEW_REASONS_UNUSABLE = ("not_printing", "fetch_failed")
+
+# --- Bus events ------------------------------------------------------------- #
+# Language-neutral, and fired whether or not any notify target is configured.
+# Notification bodies are composed in Python and therefore follow the *server*
+# language -- an integration is never told which user a notify call is for --
+# so these are the supported way to build your own text, in your own language,
+# with your own conditions.
+BUS_EVENT_PRINT_STARTED = "ha_creality_ws_print_started"
+BUS_EVENT_PRINT_FINISHED = "ha_creality_ws_print_finished"
+BUS_EVENT_PRINT_ERROR = "ha_creality_ws_print_error"
+
 CONF_POLLING_RATE = "polling_rate"
 DEFAULT_POLLING_RATE = 0  # Real-time
 

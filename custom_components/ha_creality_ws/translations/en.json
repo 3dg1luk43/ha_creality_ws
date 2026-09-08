@@ -47,12 +47,18 @@
       },
       "notifications": {
         "title": "Notifications",
+        "description": "Pick one or more notify targets. Only Home Assistant companion app targets can show the live print card, the G-code preview or the action buttons; other notify platforms receive plain text. The live card needs Home Assistant 2026.7 or newer plus iOS 17.2+ or Android 16+, and iOS ends it after 8 hours on very long prints. Tapping opens the printer camera on Android; set a dashboard path (e.g. /lovelace/printer) to control where a tap goes, which is also the only way iOS can deep-link.",
         "data": {
-          "notify_device": "Notification Device",
+          "notify_targets": "Notification targets",
+          "notify_live": "Live print card",
           "notify_completed": "Notify when Completed",
           "notify_error": "Notify on Error",
           "notify_minutes_to_end": "Notify before Completion",
-          "minutes_to_end_value": "Minutes before Completion"
+          "minutes_to_end_value": "Minutes before Completion",
+          "notify_actions": "Show Pause/Resume/Stop buttons",
+          "notify_preview_image": "Use the G-code preview as the icon",
+          "notify_camera_snapshot": "Attach a camera snapshot when a print ends",
+          "notify_tap_path": "Dashboard path to open on tap"
         }
       },
       "power": {

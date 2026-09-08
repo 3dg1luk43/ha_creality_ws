@@ -47,12 +47,18 @@
       },
       "notifications": {
         "title": "Notificaciones",
+        "description": "Elige uno o varios destinos de notificación. Solo los destinos de la aplicación complementaria de Home Assistant pueden mostrar la tarjeta de impresión en vivo, la vista previa del G-code o los botones de acción; el resto de plataformas reciben texto sin formato. La tarjeta en vivo requiere Home Assistant 2026.7 o posterior y iOS 17.2+ o Android 16+, y en iOS termina a las 8 horas en impresiones muy largas. Al pulsar se abre la cámara de la impresora en Android; indica una ruta del panel (por ejemplo /lovelace/printer) para elegir a dónde lleva la pulsación, que además es la única forma de que iOS abra una vista concreta.",
         "data": {
-          "notify_device": "Dispositivo de notificación",
+          "notify_targets": "Destinos de notificación",
+          "notify_live": "Tarjeta de impresión en vivo",
           "notify_completed": "Notificar al finalizar",
           "notify_error": "Notificar en caso de error",
           "notify_minutes_to_end": "Notificar antes de finalizar",
-          "minutes_to_end_value": "Minutos antes de finalizar"
+          "minutes_to_end_value": "Minutos antes de finalizar",
+          "notify_actions": "Mostrar botones de pausar/reanudar/detener",
+          "notify_preview_image": "Usar la vista previa del G-code como icono",
+          "notify_camera_snapshot": "Adjuntar una captura de la cámara al terminar",
+          "notify_tap_path": "Ruta del panel que se abre al pulsar"
         }
       },
       "power": {

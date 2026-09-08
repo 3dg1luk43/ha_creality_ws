@@ -4,6 +4,7 @@ import logging
 from typing import Any, Optional
 from urllib.parse import urlparse
 from .utils import extract_host_from_zeroconf as util_extract_host_from_zeroconf
+from .notification_rules import coerce_targets
 import voluptuous as vol
 from homeassistant import config_entries #type: ignore[import]
 from homeassistant.data_entry_flow import FlowResult #type: ignore[import]
@@ -32,7 +33,12 @@ from .const import (
     CONF_CUSTOM_CAMERA_URL,
     DEFAULT_GO2RTC_URL,
     DEFAULT_GO2RTC_PORT,
-    CONF_NOTIFY_DEVICE,
+    CONF_NOTIFY_TARGETS,
+    CONF_NOTIFY_LIVE,
+    CONF_NOTIFY_ACTIONS,
+    CONF_NOTIFY_PREVIEW_IMAGE,
+    CONF_NOTIFY_CAMERA_SNAPSHOT,
+    CONF_NOTIFY_TAP_PATH,
     CONF_NOTIFY_COMPLETED,
     CONF_NOTIFY_ERROR,
     CONF_NOTIFY_MINUTES_TO_END,
@@ -413,44 +419,90 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             },
         )
 
+    def _notify_target_options(self, current: list[str]) -> list[Any]:
+        """Every notify target we can offer, plus whatever is already stored.
+
+        Covers both dialects: legacy `notify.<service>` services and modern
+        notify *entities*. Anything already configured is kept in the list even
+        if its integration is not loaded right now, so opening this step while a
+        phone's integration is down does not quietly drop it on save.
+        """
+        candidates: list[str] = [
+            f"notify.{name}"
+            for name in self.hass.services.async_services().get("notify", {})
+        ]
+        try:
+            candidates.extend(self.hass.states.async_entity_ids("notify"))
+        except Exception:  # pylint: disable=broad-except
+            # Older cores, or a stub in tests -- the service list alone is fine.
+            pass
+        candidates.extend(current)
+        return [
+            selector.SelectOptionDict(value=value, label=value)
+            for value in sorted(set(candidates))
+        ]
+
     async def async_step_notifications(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Notification settings."""
         self._ensure_working()
         assert self._working is not None
         if user_input is not None:
-            self._working.update(user_input)
+            # Never persist None. `options.get(key, DEFAULT)` returns the stored
+            # None rather than the default, and the int()/float() casts at setup
+            # then fail for good -- a cleared field would brick the entry.
+            cleaned = {k: v for k, v in user_input.items() if v is not None}
+            cleaned[CONF_NOTIFY_TARGETS] = [
+                t.strip()
+                for t in (cleaned.get(CONF_NOTIFY_TARGETS) or [])
+                if isinstance(t, str) and t.strip()
+            ]
+            self._working.update(cleaned)
             return await self.async_step_init()
 
-        notify_device = self._working.get(CONF_NOTIFY_DEVICE)
+        # Seeded through the same coercion the coordinator uses, so a user
+        # upgrading from the single-device option sees it pre-selected here and
+        # the first save persists the new shape.
+        current_targets = coerce_targets(self._working)
         notify_completed = self._working.get(CONF_NOTIFY_COMPLETED, False)
         notify_error = self._working.get(CONF_NOTIFY_ERROR, False)
         notify_minutes_to_end = self._working.get(CONF_NOTIFY_MINUTES_TO_END, False)
         minutes_to_end_value = self._working.get(CONF_MINUTES_TO_END_VALUE, 5)
-
-        notify_services = self.hass.services.async_services().get("notify", {})
-        notify_service_options = [
-            selector.SelectOptionDict(value=f"notify.{name}", label=name)
-            for name in notify_services.keys()
-        ]
-        if notify_device and notify_device not in [o["value"] for o in notify_service_options]:
-            notify_service_options.append(selector.SelectOptionDict(value=notify_device, label=notify_device))
+        notify_live = self._working.get(CONF_NOTIFY_LIVE, False)
+        notify_actions = self._working.get(CONF_NOTIFY_ACTIONS, False)
+        notify_preview = self._working.get(CONF_NOTIFY_PREVIEW_IMAGE, True)
+        notify_snapshot = self._working.get(CONF_NOTIFY_CAMERA_SNAPSHOT, True)
+        notify_tap_path = self._working.get(CONF_NOTIFY_TAP_PATH, "")
 
         schema_dict: dict[str, Any] = {
-            vol.Optional(CONF_NOTIFY_DEVICE, default=notify_device or vol.UNDEFINED): selector.SelectSelector(
+            vol.Optional(CONF_NOTIFY_TARGETS, default=current_targets): selector.SelectSelector(
                 selector.SelectSelectorConfig(
-                    options=notify_service_options,
+                    options=self._notify_target_options(current_targets),
                     mode=selector.SelectSelectorMode.DROPDOWN,
+                    multiple=True,
                     custom_value=True,
                 )
             ),
+            vol.Optional(CONF_NOTIFY_LIVE, default=notify_live): selector.BooleanSelector(),
             vol.Optional(CONF_NOTIFY_COMPLETED, default=notify_completed): selector.BooleanSelector(),
             vol.Optional(CONF_NOTIFY_ERROR, default=notify_error): selector.BooleanSelector(),
             vol.Optional(CONF_NOTIFY_MINUTES_TO_END, default=notify_minutes_to_end): selector.BooleanSelector(),
             vol.Optional(CONF_MINUTES_TO_END_VALUE, default=minutes_to_end_value): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=1, max=60, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="min")
             ),
+            vol.Optional(CONF_NOTIFY_ACTIONS, default=notify_actions): selector.BooleanSelector(),
+            vol.Optional(CONF_NOTIFY_PREVIEW_IMAGE, default=notify_preview): selector.BooleanSelector(),
+            vol.Optional(CONF_NOTIFY_CAMERA_SNAPSHOT, default=notify_snapshot): selector.BooleanSelector(),
+            vol.Optional(CONF_NOTIFY_TAP_PATH, default=notify_tap_path or ""): selector.TextSelector(
+                selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT, autocomplete="off")
+            ),
         }
-        return self.async_show_form(step_id="notifications", data_schema=vol.Schema(schema_dict))
+        # No description_placeholders: the prose lives in strings.json as the
+        # step description, so each locale can actually translate it. A
+        # hardcoded placeholder would render the same English in every language.
+        return self.async_show_form(
+            step_id="notifications",
+            data_schema=vol.Schema(schema_dict),
+        )
 
     async def async_step_power(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Power switch detection settings."""

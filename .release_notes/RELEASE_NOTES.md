@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [Unreleased]
+
+> **This release raises the minimum Home Assistant version to 2026.7.0.** HACS
+> will not offer it to older cores. The live print card depends on the companion
+> app's Live Activity support, which landed in 2026.7.
+
+### Added
+- **Live print notifications for Android and iOS.** One card per printer that updates in place — on the iOS Lock Screen and in the Dynamic Island, and in the Android status bar and shade — with a countdown timer to the estimated finish, a progress bar, the current layer, and the G-code preview as its icon. It ends itself when the print does, replaced by a completion notification carrying a camera snapshot of the bed.
+  - The countdown **runs on the phone**, so it costs no pushes at all. Pushes happen on a state change (start, pause, resume, finish) and every 5% of progress, never more than once per 30 seconds — iOS throttles frequent Live Activity updates and eventually drops them.
+  - **Multiple notify targets.** Companion-app targets get the full card; every other notify platform gets the message and title only. That is deliberate: some platforms reject payload keys they do not recognise and fail the entire call, and `notify.send_message` has no payload field at all.
+  - **Optional Pause / Resume / Stop buttons**, off by default. They reuse the same code paths as the corresponding button entities. Stop is destructive and requires device authentication, so a mis-tap on a lock screen cannot end a long print.
+  - **Tapping** opens the printer camera's live feed on Android with no configuration. Set a dashboard path to control where a tap goes, which is also the only way an iOS tap can deep-link.
+- **Bus events** `ha_creality_ws_print_started`, `_print_finished` and `_print_error`, fired whether or not any notify target is configured. They carry `entry_id`, `host`, `device_name`, `filename`, `progress`, `layer`, `total_layers`, `left_seconds` and `err_code`. This is the supported way to write your own notification text in a language other than your server's, since an integration is never told which user a notification is for.
+- **`snapshot_supported` attribute** on the camera entities, saying whether the camera can produce a still image at all.
+
+### Changed
+- **The single *Notification Device* setting became *Notification targets*** and accepts several. Existing configurations migrate automatically on load, with nothing to do; the old value is left on disk so a downgrade keeps working. The live card is **opt-in** — an update will not start putting a persistent card on your Lock Screen by itself.
+- **Notification messages name the file, not its full path.** K1C firmware reports `/usr/data/printer_data/gcodes/3DBenchy.gcode`, and that whole string used to be interpolated into the text. Sensor attributes still publish the raw value, so templates are unaffected.
+- **Notifications are no longer awaited inside the WebSocket receive loop.** A push notification is an HTTPS request to Apple's or Google's relay; waiting for one there stalled the loop that keeps the printer connection alive, and with several targets it could have let every entity flicker unavailable.
+
+### Fixed
+- **A notify target that could not be routed failed silently** — no error, no log, no notification. Since the field accepts free text, a typo simply did nothing. It now logs a warning.
+- **Notification state stopped tracking when no target was configured**, so switching notifications on in the middle of a print could immediately fire a spurious "completed".
+- **The camera snapshot is skipped where it cannot work.** K2-family cameras using direct WebRTC signalling have no snapshot endpoint and serve a 1x1 placeholder; the same check applies to the G-code preview, which serves a transparent 1x1 when the printer has no preview. Either would have rendered as an empty grey box.
+
+### Notes
+- The live card needs **iOS 17.2+** or **Android 16+**. On older phones the notification still arrives and still replaces itself in place; you lose the timer and the progress bar, not the notification.
+- **iOS ends any Live Activity after 8 hours.** That is an Apple limit no app can extend, and it matters here because prints can run far longer. Past 8 hours the card carries on as an ordinary notification with the remaining time written into the text, and the completion notification still arrives. Android has no such limit.
+- The G-code preview does **not** appear inside an iOS Live Activity — that layout has no image slot. It shows on the Android card and on the plain notifications on both platforms.
+
 ## [0.9.9] - 2026-08-22
 > [List of issues (0.9.9)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.9)
 

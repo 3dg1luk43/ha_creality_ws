@@ -23,7 +23,7 @@ class HassStub:
 def _coordinator(monkeypatch, notify_completed=True):
     """A coordinator with notifications enabled and sends captured."""
     coord = KCoordinator(HassStub(), host="1.2.3.4")
-    coord._notify_device = "notify.mobile_app_test"
+    coord._notify_targets = ["notify.mobile_app_test"]
     coord._notify_completed = notify_completed
     coord._notify_error = True
     coord._notify_minutes_to_end = True
@@ -31,10 +31,10 @@ def _coordinator(monkeypatch, notify_completed=True):
 
     sent: list[str] = []
 
-    async def _capture(message):
+    async def _capture(message, *, kind=None):
         sent.append(message)
 
-    monkeypatch.setattr(coord, "_send_notification", _capture)
+    monkeypatch.setattr(coord, "_notify_event", _capture)
     return coord, sent
 
 

@@ -373,9 +373,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Listener for options updates
     entry.async_on_unload(entry.add_update_listener(options_update_listener))
 
+    # Live-notification buttons. Registered unconditionally rather than behind
+    # the option: the action ids are namespaced per config entry and the handler
+    # matches them exactly, so with buttons switched off nothing can fire (no
+    # notification carries them) and there is no listener lifecycle to get wrong.
+    async def _on_notification_action(event) -> None:
+        action = event.data.get("action")
+        if action:
+            await coord.async_handle_notification_action(action)
+
+    entry.async_on_unload(
+        hass.bus.async_listen("mobile_app_notification_action", _on_notification_action)
+    )
+
     # Periodic state checker
     def _interval_check(_now) -> None:
         coord.check_stale()
+        # Every live-card transition is otherwise driven by an incoming frame,
+        # so a printer that goes silent mid-print would leave a card counting
+        # down on the phone forever. Reuses this interval; no new timer.
+        coord.notifier_tick()
         # Do not force listener updates here; rely on coordinator's internal logic (throttled)
         # hass.loop.call_soon_threadsafe(coord.async_update_listeners)
     
@@ -930,6 +947,16 @@ async def async_monitor_zeroconf_update(hass: HomeAssistant, entry: ConfigEntry,
 
 async def options_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update - force full reload to apply power switch changes."""
+    # Before the reload wipes the in-memory live-card state: if the card is
+    # being switched off, this is the last moment anything knows one is still
+    # showing on a phone.
+    coord = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if coord is not None:
+        try:
+            coord.notify_options_changed(entry.options)
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("Failed to reconcile the live card with new options")
+
     max_retries = 3
     for attempt in range(max_retries):
         try:
