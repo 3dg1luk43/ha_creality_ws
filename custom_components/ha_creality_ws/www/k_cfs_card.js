@@ -1769,17 +1769,19 @@ class KCFSCard extends HTMLElement {
       else unresolved.push(eid);
     }
 
-    // hass.entities predates HA 2023.4; fall back to asking per entity. Every
-    // entity is asked, not just up to the first hit: stopping early resolved a
-    // card spanning two printers to whichever answered first, which is exactly
-    // the fail-closed behaviour this method exists to provide. Asked in parallel
-    // over the distinct ids -- a fully configured card supplies up to 51, and
-    // serial round trips delayed every edit button by all of them.
-    // Every entity the registry could not answer for is asked individually --
-    // not just when the registry answered for none of them. hass.entities can be
-    // partially populated, and accepting the one device it did know about
-    // resolved a card spanning two printers to that printer, so editing a slot
-    // on the other one wrote its box and slot ids to the wrong machine.
+    // Anything hass.entities could not answer for is asked individually. It is
+    // not a version fallback: hass.entities can be *partially* populated, and it
+    // is absent entirely for a non-admin user, whose browser is not allowed
+    // config/entity_registry/get either.
+    //
+    // Every unresolved entity is asked, not just enough to find one device.
+    // Accepting the first answer resolved a card spanning two printers to
+    // whichever replied first, so editing a slot on the other one wrote its box
+    // and slot ids to the wrong machine -- the exact failure the fail-closed
+    // behaviour below exists to prevent.
+    //
+    // Asked in parallel over the distinct ids: a fully configured card supplies
+    // up to 51, and serial round trips delayed every edit button by all of them.
     let anyLookupFailed = false;
     if (unresolved.length) {
       const answers = await Promise.all([...new Set(unresolved)].map(async (eid) => {

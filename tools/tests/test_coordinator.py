@@ -5,23 +5,11 @@ from types import SimpleNamespace
 from conftest import install_stub_module, restore_stubs
 
 # Mock homeassistant.helpers.update_coordinator
-mock_update_coordinator = MagicMock()
-# We need DataUpdateCoordinator to be a class that can be inherited from
-class MockDataUpdateCoordinator:
-    def __init__(self, hass, logger, name, update_interval=None, update_method=None, request_refresh_debouncer=None):
-        self.hass = hass
-    
-    async def async_refresh(self):
-        pass
-
-    def async_update_listeners(self):
-        pass
-
-    def __class_getitem__(cls, item):
-        return cls
-
-mock_update_coordinator.DataUpdateCoordinator = MockDataUpdateCoordinator
-install_stub_module(__name__, "homeassistant.helpers.update_coordinator", mock_update_coordinator)
+# The coordinator stub comes from conftest. This module used to install a
+# narrower one of its own, and because pytest imports every test module during
+# collection it was still active while *other* modules were imported -- so a
+# constructor argument missing here broke them, and teardown_module ran far too
+# late to help.
 
 # Mock homeassistant.helpers.aiohttp_client
 mock_aiohttp_client = MagicMock()

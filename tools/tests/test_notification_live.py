@@ -11,6 +11,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from conftest import fake_config_entry
+
 from custom_components.ha_creality_ws.const import (
     CLEAR_NOTIFICATION_MARKER,
     NOTIFY_LIVE_MILESTONE_STEP,
@@ -66,7 +68,7 @@ def _loop():
 
 def _coordinator(*, targets=("notify.mobile_app_pixel",), live=True):
     hass = HassStub()
-    coord = KCoordinator(hass, host="1.2.3.4", config_entry_id="abc123")
+    coord = KCoordinator(hass, host="1.2.3.4", config_entry=fake_config_entry("abc123"))
     coord._notify_targets = list(targets)
     coord._notify_live = live
     coord._notify_completed = True
@@ -339,7 +341,7 @@ def test_a_reprint_starts_a_fresh_card():
 def test_a_job_that_finished_before_startup_never_gets_a_card():
     """Issue #112: the printer reports the last job's name and 100% forever."""
     hass = HassStub()
-    coord = KCoordinator(hass, host="1.2.3.4", config_entry_id="abc123")
+    coord = KCoordinator(hass, host="1.2.3.4", config_entry=fake_config_entry("abc123"))
     coord._notify_targets = ["notify.mobile_app_pixel"]
     coord._notify_live = True
     coord._notify_completed = True
@@ -351,7 +353,7 @@ def test_a_job_that_finished_before_startup_never_gets_a_card():
 
 def test_a_restart_mid_print_resyncs_the_card_instead_of_leaving_it_frozen():
     hass = HassStub()
-    coord = KCoordinator(hass, host="1.2.3.4", config_entry_id="abc123")
+    coord = KCoordinator(hass, host="1.2.3.4", config_entry=fake_config_entry("abc123"))
     coord._notify_targets = ["notify.mobile_app_pixel"]
     coord._notify_live = True
     coord._notify_completed = True
@@ -617,7 +619,7 @@ def test_a_print_already_stopped_at_startup_is_not_announced():
     """Priming adopts whatever the printer is reporting; the printer holds state
     4 indefinitely, so a restart must not announce last week's cancellation."""
     hass = HassStub()
-    coord = KCoordinator(hass, host="1.2.3.4", config_entry_id="abc123")
+    coord = KCoordinator(hass, host="1.2.3.4", config_entry=fake_config_entry("abc123"))
     coord._notify_targets = ["notify.mobile_app_pixel"]
     coord._notify_completed = True
     coord._notify_live = True

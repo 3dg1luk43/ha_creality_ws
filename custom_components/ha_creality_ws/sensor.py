@@ -2,7 +2,8 @@
 from __future__ import annotations
 import logging
 import json
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 from .utils import (
     build_spool_key as _build_spool_key,
     derive_print_state as _derive_print_state,
@@ -1002,11 +1003,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     # --- Max temperature sensors (non-editable, from cached/live capability limits) ---
     # Pull cached values first
-    cached = None
-    try:
-        cached = coord.hass.config_entries.async_get_entry(getattr(coord, "_config_entry_id", None)).data  # type: ignore[assignment]
-    except Exception:  # pylint: disable=broad-except
-        cached = None
+    cached = coord.config_entry.data if coord.config_entry else None
 
     def _cached_or_live(key: str):
         if cached and (key in cached or f"_cached_{key}" in cached):
@@ -1078,21 +1075,18 @@ class KMaxTempSensor(KEntity, SensorEntity):
 
     def _read_cached_or_live(self) -> float | None:
         # From entry cache
-        try:
-            entry_id = getattr(self.coordinator, "_config_entry_id", None)
-            if entry_id:
-                entry = self.coordinator.hass.config_entries.async_get_entry(entry_id)
-                if entry and entry.data.get("_device_info_cached"):
-                    if self._key == "max_nozzle_temp":
-                        return entry.data.get("_cached_max_nozzle_temp")
-                    if self._key == "max_bed_temp":
-                        return entry.data.get("_cached_max_bed_temp")
-                    if self._key == "max_box_temp":
-                        # Prefer new chamber cache with legacy fallback
-                        return entry.data.get("_cached_max_chamber_temp", entry.data.get("_cached_max_box_temp"))
-        except (AttributeError, KeyError):
-            # Ignore cache read errors and fall back to live telemetry.
-            pass
+        entry = self.coordinator.config_entry
+        if entry and entry.data.get("_device_info_cached"):
+            if self._key == "max_nozzle_temp":
+                return entry.data.get("_cached_max_nozzle_temp")
+            if self._key == "max_bed_temp":
+                return entry.data.get("_cached_max_bed_temp")
+            if self._key == "max_box_temp":
+                # Prefer the chamber cache, falling back to the legacy box one
+                # for entries cached by a pre-rename release.
+                return entry.data.get(
+                    "_cached_max_chamber_temp", entry.data.get("_cached_max_box_temp")
+                )
         # Live telemetry fallback
         d = self.coordinator.data or {}
         if self._key == "max_nozzle_temp":

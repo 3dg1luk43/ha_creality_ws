@@ -98,7 +98,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     def async_get_options_flow(config_entry: config_entries.ConfigEntry):
-        return OptionsFlowHandler(config_entry)
+        # The entry is deliberately not passed on: OptionsFlow.config_entry is
+        # a property Home Assistant resolves itself, so handing it over again
+        # only created a second reference to keep in step.
+        return OptionsFlowHandler()
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
@@ -165,10 +168,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 # --------- Options Flow ---------
 class OptionsFlowHandler(config_entries.OptionsFlow):
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        # Avoid deprecated `self.config_entry = config_entry`; store private reference
-        self._entry = config_entry
         # Working copy of options edited across sub-steps. Changes are staged here
         # by each section's submit and only persisted (one reload) by "Save and
         # apply". The menu back arrow returns without staging. None until first use.
@@ -178,16 +179,16 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     def _ensure_working(self) -> None:
         """Initialize the working copy once per options-flow session."""
         if self._working is None:
-            self._working = dict(self._entry.options)
-            self._working_host = self._entry.data.get(CONF_HOST, "")
+            self._working = dict(self.config_entry.options)
+            self._working_host = self.config_entry.data.get(CONF_HOST, "")
 
     async def _detect_camera_type(self) -> str:
         """Detect the camera type for this printer."""
-        host = self._entry.data["host"]
+        host = self.config_entry.data["host"]
         
         # Get the coordinator to access printer data
         try:
-            coord = self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id)
+            coord = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
             if coord and coord.data:
                 # Use model detection if we have telemetry data
                 printermodel = ModelDetection(coord.data)
@@ -247,12 +248,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         self._ensure_working()
         assert self._working is not None
         # Apply a host change to the entry data (separate from options).
-        if self._working_host and self._working_host != self._entry.data.get(CONF_HOST):
+        if self._working_host and self._working_host != self.config_entry.data.get(CONF_HOST):
             self.hass.config_entries.async_update_entry(
-                self._entry, data={**self._entry.data, CONF_HOST: self._working_host}
+                self.config_entry, data={**self.config_entry.data, CONF_HOST: self._working_host}
             )
             self.hass.async_create_task(
-                self.hass.config_entries.async_reload(self._entry.entry_id)
+                self.hass.config_entries.async_reload(self.config_entry.entry_id)
             )
         return self.async_create_entry(title="", data=self._working)
 

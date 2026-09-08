@@ -126,7 +126,11 @@ def _handler(options):
     entry.data = {"host": "1.2.3.4"}
     entry.entry_id = "entry1"
 
-    handler = OptionsFlowHandler(entry)
+    handler = OptionsFlowHandler()
+    # Home Assistant resolves OptionsFlow.config_entry from a private handler id
+    # via hass; the stubbed base class has no such property, so the test assigns
+    # it directly.
+    handler.config_entry = entry
     handler.hass = MagicMock()
     handler.hass.data = {}
     # The step returns to the menu on success and re-renders on error; both are

@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from typing import Any, Optional
+from typing import Any
 import base64
 import time
 
@@ -51,7 +51,7 @@ class CurrentPrintPreviewImage(KEntity, ImageEntity):
     def __init__(self, coordinator):
         KEntity.__init__(self, coordinator, unique_id="current_print_preview")
         ImageEntity.__init__(self, coordinator.hass)
-        self._last_image: Optional[bytes] = None
+        self._last_image: bytes | None = None
         self._attr_image_last_updated = None
         self._last_reason: str | None = None
         self._last_source_url: str | None = None

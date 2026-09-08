@@ -12,6 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from conftest import fake_config_entry
+
 from custom_components.ha_creality_ws.const import CLEAR_NOTIFICATION_MARKER
 from custom_components.ha_creality_ws.coordinator import KCoordinator
 
@@ -368,10 +370,10 @@ def test_state_still_advances_without_a_target():
 
 
 def _load(options):
-    hass = HassStub()
-    hass.entries["e1"] = SimpleNamespace(options=options)
-    coord = KCoordinator(hass, host="1.2.3.4", config_entry_id="e1")
-    return coord
+    """A coordinator whose options have been read from its config entry."""
+    return KCoordinator(
+        HassStub(), host="1.2.3.4", config_entry=fake_config_entry("e1", options)
+    )
 
 
 def test_a_legacy_single_device_still_notifies_after_upgrade():

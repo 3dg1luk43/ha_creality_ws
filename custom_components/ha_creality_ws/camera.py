@@ -14,7 +14,7 @@ import asyncio
 import base64
 import json
 import logging
-from typing import Optional
+
 from urllib.parse import urlparse
 
 from aiohttp import ClientError, web  # type: ignore[assignment]
@@ -56,8 +56,6 @@ from .const import (
     CAM_MODE_CUSTOM,
 )
 from .entity import KEntity
-
-
 
 class _BaseCamera(KEntity, Camera):
     """Base camera class with common functionality and fallback image support.
@@ -199,8 +197,8 @@ class CrealityMjpegCamera(_BaseCamera):
 
     async def async_camera_image(
         self,
-        width: Optional[int] = None,
-        height: Optional[int] = None,
+        width: int | None = None,
+        height: int | None = None,
     ) -> bytes | None:
         """Return a single camera image.
         
@@ -487,7 +485,7 @@ class CrealityWebRTCCamera(_BaseCamera):
 
         return (host or "127.0.0.1", DEFAULT_GO2RTC_RTSP_PORT)
 
-    def _rtsp_stream_url(self) -> Optional[str]:
+    def _rtsp_stream_url(self) -> str | None:
         """Build the go2rtc RTSP URL for the already-configured stream."""
         if not self._uses_go2rtc_webrtc_bridge() or not self._stream_name:
             return None
@@ -497,7 +495,7 @@ class CrealityWebRTCCamera(_BaseCamera):
         authority = f"[{host}]" if ":" in host else host
         return f"rtsp://{authority}:{port}/{self._stream_name}"
 
-    async def stream_source(self) -> Optional[str]:
+    async def stream_source(self) -> str | None:
         """Return an RTSP URL that HA's `stream` component can ingest.
 
         `Camera.stream_source` is an async method in HA core and is awaited by the
@@ -646,8 +644,8 @@ class CrealityWebRTCCamera(_BaseCamera):
 
     async def async_camera_image(
         self,
-        width: Optional[int] = None,
-        height: Optional[int] = None,
+        width: int | None = None,
+        height: int | None = None,
     ) -> bytes | None:
         """Return a camera image using go2rtc snapshot API.
         

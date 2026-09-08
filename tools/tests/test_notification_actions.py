@@ -12,6 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from conftest import fake_config_entry
+
 from custom_components.ha_creality_ws.coordinator import KCoordinator
 from custom_components.ha_creality_ws.notification_rules import (
     ACTION_PAUSE,
@@ -71,7 +73,7 @@ def _run(coro):
 
 
 def _coordinator(entry_id="abc123def456", actions=True):
-    coord = KCoordinator(HassStub(), host="1.2.3.4", config_entry_id=entry_id)
+    coord = KCoordinator(HassStub(), host="1.2.3.4", config_entry=fake_config_entry(entry_id))
     coord._notify_actions = actions
     # Button titles come from strings.json; the conftest stub serves the real file.
     _run(coord._async_load_notify_strings())

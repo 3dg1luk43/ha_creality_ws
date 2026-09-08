@@ -46,7 +46,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import Any, Dict, Optional
+from typing import Any
 import sys
 
 import numpy as np
@@ -238,7 +238,7 @@ class H264PassthroughTrack(MediaStreamTrack):
         self._idx = 0
         self._pts_offset = 0
         self._clip_duration_pts = 0
-        self._t0: Optional[float] = None
+        self._t0: float | None = None
 
     @staticmethod
     def available(ffmpeg_bin: str = "ffmpeg") -> bool:
@@ -346,7 +346,7 @@ class FFmpegVideoTrack(MediaStreamTrack):
         self.height = height
         self.fps = fps
         self.ffmpeg_bin = ffmpeg_bin
-        self._proc: Optional[asyncio.subprocess.Process] = None
+        self._proc: asyncio.subprocess.Process | None = None
         self._frame_len = self.width * self.height * 3  # rgb24
         self._time_base = Fraction(1, fps)
         self._pts = 0
@@ -437,7 +437,7 @@ class PrinterState:
         self.deterministic = deterministic
         self.cfs_variant = cfs_variant
         # Fields forced by POST /test/set, applied last in snapshot().
-        self._overrides: Dict[str, Any] = {}
+        self._overrides: dict[str, Any] = {}
         self._t0 = time.monotonic()
         self._paused = False
         self._light_on = False
@@ -446,7 +446,7 @@ class PrinterState:
 
         # print timeline
         self._progress = 0
-        self._print_start_ts: Optional[float] = None
+        self._print_start_ts: float | None = None
         self._self_test_end = self._t0 + (sim.self_test_seconds if simulate_print else 0)
 
         # temperatures
@@ -888,8 +888,8 @@ class PrinterState:
         self._tick_print()
 
     # ----------------------- telemetry snapshot -----------------------
-    def snapshot(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {
+    def snapshot(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
             "model": self._cfg["name"],
             "hostname": f"creality-{self.model_key}",
             "modelVersion": f"Printer HW Ver: {self._cfg['name']}; Printer SW Ver: test-1",
@@ -964,7 +964,7 @@ class PrinterState:
         return d
 
     # ----------------------- test control -----------------------
-    def apply_overrides(self, values: Dict[str, Any]) -> None:
+    def apply_overrides(self, values: dict[str, Any]) -> None:
         """Force telemetry fields (POST /test/set). None removes an override."""
         for key, value in (values or {}).items():
             if value is None:
@@ -1117,7 +1117,7 @@ PC_CONNECT_TIMEOUT = 60.0
 class HttpServer:
     def __init__(self, host: str, port: int, cam_mode: str, width: int, height: int, fps: int, audio: bool,
                  video_source: str = "synthetic", ffmpeg_bin: str = "ffmpeg",
-                 prefer_codec: str = "h264", state: "Optional[PrinterState]" = None) -> None:
+                 prefer_codec: str = "h264", state: "PrinterState | None" = None) -> None:
         self.host = host
         self.port = port
         self.cam_mode = cam_mode  # "webrtc" or "mjpeg"
@@ -1146,8 +1146,8 @@ class HttpServer:
             web.get("/test/state", self.handle_test_state),
         ])
         self._cleanup_tasks: set[asyncio.Task] = set()
-        self._runner: Optional[web.AppRunner] = None
-        self._site: Optional[web.BaseSite] = None
+        self._runner: web.AppRunner | None = None
+        self._site: web.BaseSite | None = None
 
     async def handle_root(self, request: web.Request):
         return web.Response(text=(

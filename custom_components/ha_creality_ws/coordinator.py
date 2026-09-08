@@ -4,7 +4,8 @@ import logging
 import asyncio
 import json
 import time
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator  # type: ignore[import]
 from homeassistant.helpers.aiohttp_client import async_get_clientsession  # type: ignore[import]
 from homeassistant.helpers.dispatcher import async_dispatcher_send  # type: ignore[import]
@@ -87,10 +88,19 @@ _LOGGER = logging.getLogger(__name__)
 
 class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator to manage connection and data for the printer."""
-    def __init__(
-        self, hass, host: str, power_switch: str | None = None, config_entry_id: str | None = None
-    ):
-        super().__init__(hass, _LOGGER, name=f"{DOMAIN}@{host}", update_interval=None)
+    def __init__(self, hass, host: str, power_switch: str | None = None, config_entry=None):
+        # config_entry is passed explicitly rather than left to Home Assistant's
+        # ContextVar. It resolved to the same entry either way, but only while
+        # running inside async_setup_entry -- and `self.config_entry` is what
+        # every options and cache read below goes through, so it should not
+        # depend on where the coordinator happens to be constructed.
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=f"{DOMAIN}@{host}",
+            update_interval=None,
+            config_entry=config_entry,
+        )
         self.client = KClient(host, self._handle_message)
         self.data: dict[str, Any] = {}
         self._paused_flag = False
@@ -99,7 +109,6 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._pending_pause = False
         self._pending_resume = False
         self._last_power_off: bool = False
-        self._config_entry_id: str | None = config_entry_id  # Will be set after entry is created
         
         # Notification & Performance
         self._notify_targets: list[str] = []
@@ -148,7 +157,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Caches
         self._is_k2_base: bool | None = None
 
-        if self._config_entry_id:
+        if self.config_entry:
             self._load_options()
 
         # Only enable power detection if a switch is configured
@@ -160,14 +169,15 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             _LOGGER.debug("No power switch configured; connection will retry continuously")
 
+    @property
+    def entry_id(self) -> str | None:
+        """The config entry's id, or None when there is no entry (tests)."""
+        return self.config_entry.entry_id if self.config_entry else None
+
     def _load_options(self):
-        if not self._config_entry_id:
+        if not self.config_entry:
             return
-        entry = self.hass.config_entries.async_get_entry(self._config_entry_id)
-        if not entry:
-            return
-            
-        options = entry.options
+        options = self.config_entry.options
         self._notify_targets = coerce_targets(options)
         self._notify_live = bool(options.get(CONF_NOTIFY_LIVE, False))
         self._notify_actions = bool(options.get(CONF_NOTIFY_ACTIONS, False))
@@ -476,7 +486,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             if "boxsInfo" in newly_seen:
                 _LOGGER.debug("CFS Raw Data: %s", json.dumps(payload.get("boxsInfo"), default=str))
-            async_dispatcher_send(self.hass, f"{DOMAIN}_new_entities_{self._config_entry_id}")
+            async_dispatcher_send(self.hass, f"{DOMAIN}_new_entities_{self.entry_id}")
 
     async def _handle_message(self, payload: dict[str, Any]) -> None:
         """Handle incoming WebSocket telemetry data."""
@@ -1093,7 +1103,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.hass.bus.async_fire(
                 event,
                 {
-                    "entry_id": self._config_entry_id,
+                    "entry_id": self.entry_id,
                     "host": self.client._host,
                     "device_name": self._notify_title(),
                     "filename": job,
@@ -1116,7 +1126,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _notify_action_ids(self) -> dict[str, str]:
         """Action ids for this printer, namespaced by config entry."""
-        return action_ids(self._config_entry_id or self.client._host)
+        return action_ids(self.entry_id or self.client._host)
 
     def _notify_card_actions(self, snap: LiveSnapshot) -> list[dict[str, Any]] | None:
         """Buttons for the live card, or None when the user has not asked for them."""
@@ -1299,7 +1309,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Assistant restart, because that is what lets an existing card be
         replaced rather than duplicated.
         """
-        return sanitize_tag(f"{DOMAIN}_{self._config_entry_id or self.client._host}")
+        return sanitize_tag(f"{DOMAIN}_{self.entry_id or self.client._host}")
 
     async def _notify_event(self, message: str, *, kind: str) -> None:
         """Build and dispatch one of the one-shot lifecycle notifications.

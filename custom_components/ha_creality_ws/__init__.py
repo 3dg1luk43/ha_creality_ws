@@ -7,7 +7,8 @@ import time
 from datetime import timedelta
 import re
 from urllib.parse import urljoin, urlparse
-from typing import Callable, List, Optional, Any
+from collections.abc import Callable
+from typing import Any
 
 
 
@@ -196,7 +197,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.info("Power switch config: enabled=%s, entity=%s, effective=%s", 
                  power_switch_enabled, power_switch, effective_power_switch)
     
-    coord = KCoordinator(hass, host=host, power_switch=effective_power_switch, config_entry_id=entry.entry_id)
+    coord = KCoordinator(
+        hass, host=host, power_switch=effective_power_switch, config_entry=entry
+    )
 
     try:
         await coord.async_start()
@@ -384,9 +387,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _migrate_go2rtc_settings(hass, entry)
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coord
-    
-    # Store entry_id in coordinator for easy access
-    coord._config_entry_id = entry.entry_id  # pylint: disable=protected-access
 
 
 
@@ -428,7 +428,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(cancel_interval)
 
     # Watcher for power switch state changes
-    def _watch_power_switch(entity_id: Optional[str]) -> Callable:
+    def _watch_power_switch(entity_id: str | None) -> Callable:
         if not entity_id:
             return lambda: None
         
@@ -724,7 +724,7 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
         """Collect and log telemetry data for all printers."""
         try:
             # Get all coordinators (all printer instances)
-            coordinators: List[tuple[str, KCoordinator]] = []
+            coordinators: list[tuple[str, KCoordinator]] = []
             for entry_id, coord in hass.data[DOMAIN].items():
                 if isinstance(coord, KCoordinator):
                     coordinators.append((entry_id, coord))

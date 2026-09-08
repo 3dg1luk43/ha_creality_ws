@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Any, ClassVar, Optional
+from typing import Any, ClassVar
 
 __all__ = [
     "coerce_numbers",
@@ -38,7 +38,7 @@ def parse_model_version(s: str | None) -> tuple[str | None, str | None]:
     if not s or not isinstance(s, str):
         return (None, None)
 
-    parts: dict[str, Optional[str]] = {}
+    parts: dict[str, str | None] = {}
     for seg in s.split(";"):
         seg = seg.strip()
         if not seg or ":" not in seg:
@@ -85,7 +85,7 @@ def safe_float(v: Any) -> float | None:
         return float(v)
     except (TypeError, ValueError):
         return None
-def extract_info_from_zeroconf(info: Any) -> tuple[Optional[str], Optional[str]]:
+def extract_info_from_zeroconf(info: Any) -> tuple[str | None, str | None]:
     """Extract host/IP and optional MAC from zeroconf discovery info.
     
     Returns:
@@ -409,7 +409,7 @@ def build_spool_key(
     material_type: Any = None,
     name: Any = None,
     color: Any = None,
-) -> Optional[str]:
+) -> str | None:
     """Derive a stable per-spool identifier for external trackers.
 
     The printer's ``rfid`` field is a material/filament id, so two spools of the

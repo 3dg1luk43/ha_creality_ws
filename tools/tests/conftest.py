@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 import types
-from typing import Optional
+
 from unittest.mock import MagicMock
 
 # Ensure repository root is on sys.path so `custom_components` imports work
@@ -37,7 +37,6 @@ def callback(func):
     return func
 core_mod.callback = callback
 
-
 class ServiceCall:  # pragma: no cover - a type only
     def __init__(self, *args, **kwargs):
         self.data = kwargs.get("data", {})
@@ -56,11 +55,28 @@ sys.modules["homeassistant.components"] = components_mod
 
 # --- MOCK DataUpdateCoordinator ---
 class DataUpdateCoordinator:  # type: ignore
-    def __init__(self, hass, logger=None, name: Optional[str] = None, update_interval=None):
+    def __init__(
+        self,
+        hass,
+        logger=None,
+        name: str | None = None,
+        update_interval=None,
+        update_method=None,
+        request_refresh_debouncer=None,
+        config_entry=None,
+        always_update=True,
+    ):
         self.hass = hass
         self.logger = logger
         self.name = name
         self.update_interval = update_interval
+        # Home Assistant sets this from the argument, or from a ContextVar when
+        # the argument is omitted. The integration passes it explicitly.
+        self.config_entry = config_entry
+
+    async def async_refresh(self):
+        # no-op in tests
+        pass
 
     def async_update_listeners(self):
         # no-op in tests
@@ -367,6 +383,21 @@ class KClient:  # type: ignore
 
 setattr(ws_client_mod, "KClient", KClient)
 sys.modules["custom_components.ha_creality_ws.ws_client"] = ws_client_mod
+
+
+# --- Shared config-entry stub -------------------------------------------------
+# The coordinator holds the ConfigEntry itself now, and reads .options for its
+# settings and .data for the onboarding cache. Tests only ever need those three
+# fields, so one factory beats a SimpleNamespace per call site.
+
+
+def fake_config_entry(entry_id: str = "entry1", options=None, data=None):
+    """A stand-in for homeassistant.config_entries.ConfigEntry."""
+    return types.SimpleNamespace(
+        entry_id=entry_id,
+        options=dict(options or {}),
+        data=dict(data or {}),
+    )
 
 
 # --- Shared stub bookkeeping for test modules ---------------------------------

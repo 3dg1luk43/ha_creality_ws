@@ -7,7 +7,8 @@ only property that matters is that timestamps keep increasing across the seam.
 
 from __future__ import annotations
 
-from typing import Iterable, TypeVar
+from collections.abc import Iterable
+from typing import TypeVar
 
 T = TypeVar("T")
 

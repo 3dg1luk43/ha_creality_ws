@@ -13,6 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from conftest import fake_config_entry
+
 from homeassistant.helpers import entity_registry as er_mod
 
 from custom_components.ha_creality_ws.coordinator import KCoordinator
@@ -78,7 +80,7 @@ def registry(monkeypatch):
 
 def _coordinator(entry_id="abc123def456"):
     hass = HassStub()
-    coord = KCoordinator(hass, host="1.2.3.4", config_entry_id=entry_id)
+    coord = KCoordinator(hass, host="1.2.3.4", config_entry=fake_config_entry(entry_id))
     coord._notify_targets = ["notify.mobile_app_pixel"]
     coord.data = {"hostname": "K1C", "printProgress": 42}
     return coord, hass

@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from conftest import install_stub_module, restore_stubs
+from conftest import fake_config_entry, install_stub_module, restore_stubs
 
 from custom_components.ha_creality_ws.const import LATE_DISCOVERY_FIELDS  # noqa: E402
 from custom_components.ha_creality_ws.coordinator import KCoordinator  # noqa: E402
@@ -113,7 +113,7 @@ def coord(monkeypatch):
     monkeypatch.setattr(
         coord_mod, "async_dispatcher_send", lambda _hass, signal: sent.append(signal)
     )
-    c = KCoordinator(HassStub(), host="1.2.3.4", config_entry_id="entry1")
+    c = KCoordinator(HassStub(), host="1.2.3.4", config_entry=fake_config_entry("entry1"))
     # Keep the frame handler focused on discovery.
     monkeypatch.setattr(c, "_flush_pending", lambda: asyncio.sleep(0))
     monkeypatch.setattr(c, "_check_notifications", lambda _p: asyncio.sleep(0))
@@ -374,7 +374,7 @@ def test_number_platform_subscribes_to_the_discovery_signal():
 def _bare_coord(monkeypatch, data):
     """A coordinator carrying `data`, with the frame handler stubbed out."""
     monkeypatch.setattr(coord_mod, "async_dispatcher_send", lambda *_a, **_k: None)
-    c = KCoordinator(HassStub(), host="1.2.3.4", config_entry_id="entry1")
+    c = KCoordinator(HassStub(), host="1.2.3.4", config_entry=fake_config_entry("entry1"))
     c.data = dict(data)
     return c
 
