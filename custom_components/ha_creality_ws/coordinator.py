@@ -9,6 +9,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator  # ty
 from homeassistant.helpers.aiohttp_client import async_get_clientsession  # type: ignore[import]
 from homeassistant.helpers.dispatcher import async_dispatcher_send  # type: ignore[import]
 from homeassistant.helpers import entity_registry as er  # type: ignore[import]
+from homeassistant.helpers.translation import async_get_translations  # type: ignore[import]
 from .ws_client import KClient
 from .utils import BUSY_PRINT_STATES, ModelDetection, derive_print_state, safe_float
 from .notification_rules import (
@@ -30,13 +31,14 @@ from .notification_rules import (
     action_ids,
     build_actions,
     build_alert_payload,
+    format_duration,
+    format_filament_length,
     build_clear_payload,
     build_event_payload,
     build_live_payload,
     coerce_targets,
     compute_when,
     display_filename,
-    format_duration,
     is_mobile_target,
     is_new_job_cycle,
     sanitize_tag,
@@ -58,6 +60,10 @@ from .const import (
     BUS_EVENT_PRINT_ERROR,
     BUS_EVENT_PRINT_FINISHED,
     BUS_EVENT_PRINT_STARTED,
+    NOTIFY_BODY_SEPARATOR,
+    NOTIFY_CHANNEL_KEY_ALERT,
+    NOTIFY_CHANNEL_KEY_DONE,
+    NOTIFY_CHANNEL_KEY_LIVE,
     NOTIFY_LIVE_STALE_CLEAR_SECS,
     NOTIFY_PRIME_GRACE_SECS,
     PREVIEW_REASONS_UNUSABLE,
@@ -99,6 +105,8 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._notify_camera_snapshot = True
         self._notify_tap_path = ""
         self._live_card = LiveCardState()
+        # Notification text is translated at runtime; None until loaded.
+        self._notify_strings: dict[str, str] | None = None
         # (platform, unique suffix) -> entity id. Populated lazily: the
         # platforms are forwarded after this coordinator exists, so nothing
         # can be resolved here.
@@ -166,6 +174,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # A rename or a disabled entity invalidates these, and an options
         # change is the one moment we know we are being re-read.
         self._entity_id_cache.clear()
+        self._notify_strings = None
         self._notify_completed = options.get(CONF_NOTIFY_COMPLETED, False)
         self._notify_error = options.get(CONF_NOTIFY_ERROR, False)
         self._notify_minutes_to_end = options.get(CONF_NOTIFY_MINUTES_TO_END, False)
@@ -584,6 +593,11 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # fixes a latent bug: `_last_job_time` used to stop advancing without a
         # target, so enabling notifications mid-print saw a phantom restart.
         deliver = bool(self._notify_targets)
+        if deliver:
+            await self._async_load_notify_strings()
+            # Without text there is nothing to send. The bus events below still
+            # fire: they carry structured data, not prose.
+            deliver = bool(self._notify_strings)
 
         try:
             prog_val = int(progress) if progress is not None else 0
@@ -676,8 +690,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if prog_val >= 100 and not self._notified_completed:
             if self._notify_completed and deliver:
                 await self._notify_event(
-                    f"Print '{job}' completed successfully!",
-                    kind=EVENT_COMPLETED,
+                    self._completion_message(d, job), kind=EVENT_COMPLETED
                 )
             self._fire_print_event(BUS_EVENT_PRINT_FINISHED, d, job)
             self._notified_completed = True
@@ -688,7 +701,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             key = (d.get("err") or {}).get("key", 0)
             if self._notify_error and deliver:
                 await self._notify_event(
-                    f"Printer Error {code} (Key: {key}) occurred during '{job}'",
+                    self._t("error", code=code, key=key, filename=job),
                     kind=ALERT_ERROR,
                 )
             self._fire_print_event(BUS_EVENT_PRINT_ERROR, d, job)
@@ -705,8 +718,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if is_runout and not self._notified_filament_runout:
             if self._notify_error and deliver:
                 await self._notify_event(
-                    f"Filament runout detected during '{job}'",
-                    kind=ALERT_RUNOUT,
+                    self._t("filament_runout", filename=job), kind=ALERT_RUNOUT
                 )
             self._notified_filament_runout = True
         elif not is_runout and self._notified_filament_runout:
@@ -723,7 +735,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if 0 < left_min <= target_min and not self._notified_minutes_to_end:
                 if self._notify_minutes_to_end and deliver:
                     await self._notify_event(
-                        f"Print '{job}' finishing in {int(left_min)} minutes.",
+                        self._t(
+                            "finishing_soon", filename=job, minutes=int(left_min)
+                        ),
                         kind=EVENT_SOON,
                     )
                 self._notified_minutes_to_end = True
@@ -894,19 +908,26 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if snap.filename:
             parts.append(snap.filename)
         if snap.activity_state == "paused":
-            if snap.progress is not None:
-                parts.append(f"Paused at {snap.progress}%")
-            else:
-                parts.append("Paused")
+            parts.append(
+                self._t("body_paused", progress=snap.progress)
+                if snap.progress is not None
+                else self._t("body_paused_unknown")
+            )
         elif snap.progress is not None:
-            parts.append(f"{snap.progress}%")
+            parts.append(self._t("body_progress", progress=snap.progress))
         if snap.layer is not None and snap.total_layers:
-            parts.append(f"Layer {snap.layer}/{snap.total_layers}")
+            parts.append(
+                self._t(
+                    "body_layer", layer=snap.layer, total_layers=snap.total_layers
+                )
+            )
         if include_eta:
-            remaining = format_duration(snap.seconds_left)
+            remaining = format_duration(snap.seconds_left, self._notify_strings or {})
             if remaining:
-                parts.append(f"{remaining} left")
-        return " · ".join(parts) or "Printing"
+                parts.append(self._t("body_time_left", duration=remaining))
+        return NOTIFY_BODY_SEPARATOR.join(p for p in parts if p) or self._t(
+            "body_fallback"
+        )
 
     def _update_live_card(self, snap: LiveSnapshot) -> None:
         """Start, update or end the live print card.
@@ -959,6 +980,8 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             phase=phase,
             progress=snap.progress,
             when=when,
+            channel=self._t(NOTIFY_CHANNEL_KEY_LIVE),
+            status_text=self._live_status_text(phase, paused),
             live_update=not expired,
             group=tag_base,
             # No snapshot: Android re-downloads a big picture on every push and
@@ -977,6 +1000,14 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             now_epoch=now_epoch,
             when=when,
         )
+
+    def _live_status_text(self, phase: str, paused: bool) -> str:
+        """The short label shown when there is no chronometer to show instead."""
+        if paused:
+            return self._t("status_paused")
+        if phase == PHASE_START:
+            return self._t("status_starting")
+        return self._t("status_finishing")
 
     def _clear_live_card(self, *, finished: bool = False) -> None:
         """End the live activity.
@@ -1039,7 +1070,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self._notify_actions:
             return None
         return build_actions(
-            paused=snap.activity_state == "paused", ids=self._notify_action_ids()
+            paused=snap.activity_state == "paused",
+            ids=self._notify_action_ids(),
+            labels={
+                ACTION_PAUSE: self._t("action_pause"),
+                ACTION_RESUME: self._t("action_resume"),
+                ACTION_STOP: self._t("action_stop"),
+            },
         )
 
     async def async_handle_notification_action(self, action: str) -> bool:
@@ -1094,6 +1131,69 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._clear_live_card()
 
+    async def _async_load_notify_strings(self) -> None:
+        """Load the translated notification strings, once per entry load.
+
+        Notification bodies are composed here rather than rendered in the
+        frontend, and an integration is never told *which user* a notification
+        is for -- so the only language available is the server's. That is a
+        documented limitation, not a reason to hardcode English: the strings
+        still live in strings.json, and the bus events exist for anyone who
+        needs per-user text. Home Assistant caches these, so the call is cheap
+        after the first.
+        """
+        if self._notify_strings is not None:
+            return
+        language = getattr(getattr(self.hass, "config", None), "language", None) or "en"
+        # "common" rather than a category of our own: hassfest validates
+        # strings.json against a fixed set of top-level keys and rejects
+        # anything else, and `common` is the only one shaped as a flat
+        # slug -> string bag. It is namespaced per integration either way.
+        prefix = f"component.{DOMAIN}.common."
+        try:
+            raw = await async_get_translations(self.hass, language, "common", {DOMAIN})
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("Could not load notification strings")
+            self._notify_strings = {}
+            return
+
+        self._notify_strings = {
+            key[len(prefix) :]: value
+            for key, value in (raw or {}).items()
+            if key.startswith(prefix)
+        }
+        if not self._notify_strings:
+            _LOGGER.error(
+                "No notification strings available for language %s; "
+                "notifications are disabled until this is fixed",
+                language,
+            )
+
+    def _t(self, key: str, /, **values: Any) -> str:
+        """Resolve one translated notification string.
+
+        `key` is positional-only: the error template substitutes a placeholder
+        literally named `key` (the printer's error key), which would otherwise
+        collide with this parameter.
+
+        A translation whose placeholders do not match returns empty rather than
+        raising: callers drop empty segments, so one bad string in one language
+        costs a line of text instead of the whole notification.
+        """
+        template = (self._notify_strings or {}).get(key)
+        if not template:
+            _LOGGER.debug("No notification string for %r", key)
+            return ""
+        try:
+            return template.format(**values)
+        except (KeyError, IndexError, ValueError):
+            _LOGGER.warning(
+                "Notification string %r does not match its placeholders; "
+                "check that translation",
+                key,
+            )
+            return ""
+
     def _notify_title(self) -> str:
         """Printer name, used as the notification title.
 
@@ -1105,14 +1205,14 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         incrementally and priming only waits for a file name and progress, so a
         card can start before `hostname` has been reported -- and because the
         title is then frozen, a generic fallback would leave the whole job
-        labelled "Creality Printer" with no way to tell two machines apart.
+        labelled with the generic fallback and no way to tell two machines apart.
         """
         d = self.data or {}
         return str(
             d.get("hostname")
             or d.get("model")
             or self.client._host
-            or "Creality Printer"
+            or self._t("title_fallback")
         )
 
     def notify_options_changed(self, options: Any) -> None:
@@ -1166,6 +1266,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 title=title,
                 message=message,
                 kind=kind,
+                channel=self._t(NOTIFY_CHANNEL_KEY_ALERT),
                 group=tag_base,
                 # A picture of the bed is the whole point of a failure alert you
                 # read from another room.
@@ -1178,6 +1279,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 title=title,
                 message=message,
                 kind=kind,
+                channel=self._t(NOTIFY_CHANNEL_KEY_DONE),
                 progress=self._notify_progress(),
                 group=tag_base,
                 visuals=self._notify_media(include_snapshot=True),
@@ -1185,6 +1287,29 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
         self._notify_dispatch(payload, kind=kind)
+
+    def _completion_message(self, d: dict[str, Any], job: str) -> str:
+        """Completion text, with elapsed time and filament used when known.
+
+        Two whole sentences rather than one sentence plus bolted-on fragments,
+        so each reads naturally in every language. Falls back to the plain form
+        unless *both* numbers are available -- a half-filled detailed sentence
+        would read worse than the simple one.
+        """
+        duration = format_duration(d.get("printJobTime"), self._notify_strings or {})
+        filament = format_filament_length(
+            d.get("usedMaterialLength"), (self._notify_strings or {}).get("filament_length")
+        )
+        if duration and filament:
+            detailed = self._t(
+                "completed_detailed",
+                filename=job,
+                duration=duration,
+                filament=filament,
+            )
+            if detailed:
+                return detailed
+        return self._t("completed", filename=job)
 
     def _notify_progress(self) -> int | None:
         """Progress for a notification body, or None when the printer has not said."""

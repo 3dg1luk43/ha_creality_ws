@@ -42,6 +42,7 @@ class HassStub:
         self.services = SimpleNamespace(async_call=self._async_call)
         self.tasks: list = []
         self.config_entries = SimpleNamespace(async_get_entry=lambda _id: None)
+        self.config = SimpleNamespace(language="en")
 
     async def _async_call(self, domain, service, data, **_kw):
         self.calls.append((domain, service, data))

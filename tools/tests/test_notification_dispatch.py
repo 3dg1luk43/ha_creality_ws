@@ -34,6 +34,7 @@ class HassStub:
         )
         self.tasks: list = []
         self.entries: dict[str, SimpleNamespace] = {}
+        self.config = SimpleNamespace(language="en")
         self.config_entries = SimpleNamespace(async_get_entry=self.entries.get)
 
     async def _async_call(self, domain, service, data, **_kw):
@@ -402,7 +403,7 @@ def test_the_filename_in_a_message_is_basenamed():
     }
     _run(coord._check_notifications({}))
     calls = _flush(hass)
-    assert calls[0][2]["message"] == "Print '3DBenchy.gcode' completed successfully!"
+    assert calls[0][2]["message"] == "Print 3DBenchy.gcode completed successfully!"
 
 
 def test_a_new_file_fires_the_started_event():

@@ -21,6 +21,44 @@
       "not_K": "Not a K-series printer"
     }
   },
+  "common": {
+    "title_fallback": "Creality Printer",
+    "channel_live": "3D Print",
+    "channel_finished": "3D Print Finished",
+    "channel_alerts": "3D Print Alerts",
+    "action_pause": "Pause",
+    "action_resume": "Resume",
+    "action_stop": "Stop",
+    "status_starting": "Starting",
+    "status_paused": "Paused",
+    "status_finishing": "Finishing",
+    "body_progress": "{progress}%",
+    "body_paused": "Paused at {progress}%",
+    "body_paused_unknown": "Paused",
+    "body_layer": "Layer {layer}/{total_layers}",
+    "body_time_left": "{duration} left",
+    "body_fallback": "Printing",
+    "duration_hours_minutes": "{hours}h {minutes}m",
+    "duration_minutes": "{minutes}m",
+    "duration_seconds": "{seconds}s",
+    "filament_length": "{metres} m",
+    "completed": "Print {filename} completed successfully!",
+    "completed_detailed": "Print {filename} completed in {duration}, using {filament} of filament",
+    "error": "Printer Error {code} (Key: {key}) occurred during {filename}",
+    "filament_runout": "Filament runout detected during {filename}",
+    "finishing_soon": "Print {filename} finishing in {minutes} minutes."
+  },
+  "selector": {
+    "camera_mode": {
+      "options": {
+        "auto": "Auto (detect by model)",
+        "mjpeg": "MJPEG (K1 family)",
+        "webrtc": "WebRTC via go2rtc (K2 family)",
+        "webrtc_direct": "WebRTC direct, no go2rtc (alternative)",
+        "custom": "Custom camera URL (MJPEG / RTSP)"
+      }
+    }
+  },
   "options": {
     "step": {
       "init": {
@@ -36,7 +74,7 @@
       },
       "camera": {
         "title": "Camera",
-        "description": "{camera_help}",
+        "description": "Camera streaming mode. Auto detects from the printer model. WebRTC via go2rtc is the default for K2-family printers; WebRTC direct is an alternative that signals the printer itself (no go2rtc) - try it if the default does not work, e.g. on newer K1C firmware. Custom lets you point at any http(s) MJPEG/snapshot URL or an rtsp:// stream (served via go2rtc). Leave the go2rtc RTSP port at 0 unless HLS / camera.record needs a non-default port. Submit returns to the menu; use Save and apply there to apply changes.",
         "data": {
           "camera_mode": "Camera Streaming Mode",
           "go2rtc_url": "External go2rtc Host/URL (if needed)",
@@ -63,7 +101,7 @@
       },
       "power": {
         "title": "Power switch",
-        "description": "{power_help}",
+        "description": "Optional power switch entity ID (e.g. switch.smart_plug_name) to enable accurate 'Off' state detection.",
         "data": {
           "power_switch_enabled": "Enable Power Switch Detection",
           "power_switch": "Power Switch Entity"

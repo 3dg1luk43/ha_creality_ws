@@ -125,6 +125,39 @@ const_mod.UnitOfTemperature.CELSIUS = "°C"
 sys.modules["homeassistant.const"] = const_mod
 ha_mod.const = const_mod
 
+# --- MOCK helpers.translation ---
+# Serves the integration's *real* translation files, flattened exactly the way
+# Home Assistant flattens them, so tests assert the shipped text rather than a
+# fixture copy of it that could silently drift from strings.json.
+translation_mod = types.ModuleType("homeassistant.helpers.translation")
+
+
+def _flatten_translations(prefix: str, obj: dict, out: dict) -> None:
+    for key, value in obj.items():
+        if isinstance(value, dict):
+            _flatten_translations(f"{prefix}{key}.", value, out)
+        else:
+            out[f"{prefix}{key}"] = value
+
+
+async def async_get_translations(hass, language, category, integrations=None):
+    import json
+
+    base = pkg_root / pkg_name
+    path = base / "translations" / f"{language}.json"
+    if not path.exists():
+        path = base / "strings.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    out: dict[str, str] = {}
+    if category in data:
+        _flatten_translations(f"component.{pkg_name}.{category}.", data[category], out)
+    return out
+
+
+translation_mod.async_get_translations = async_get_translations
+sys.modules["homeassistant.helpers.translation"] = translation_mod
+helpers_mod.translation = translation_mod
+
 entity_registry_mod = types.ModuleType("homeassistant.helpers.entity_registry")
 # Legacy fan numbers are only created for entities that already exist, so the
 # default "nothing registered" keeps a fresh setup to the modern entities.

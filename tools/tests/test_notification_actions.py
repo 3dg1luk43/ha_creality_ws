@@ -6,6 +6,8 @@ tap on one card must never touch another machine's print.
 """
 
 import asyncio
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -21,6 +23,21 @@ from custom_components.ha_creality_ws.notification_rules import (
 )
 
 
+_STRINGS = json.loads(
+    (
+        Path(__file__).resolve().parents[2]
+        / "custom_components/ha_creality_ws/strings.json"
+    ).read_text(encoding="utf-8")
+)["common"]  # notification strings; see test_translations.py for why "common"
+
+# Button titles come from the shipped strings, so a renamed key fails here.
+LABELS = {
+    ACTION_PAUSE: _STRINGS["action_pause"],
+    ACTION_RESUME: _STRINGS["action_resume"],
+    ACTION_STOP: _STRINGS["action_stop"],
+}
+
+
 class HassStub:
     def __init__(self):
         self.loop = SimpleNamespace(time=lambda: 1000.0)
@@ -31,6 +48,7 @@ class HassStub:
         self.tasks: list = []
         self.config_entries = SimpleNamespace(async_get_entry=lambda _id: None)
         self.bus = SimpleNamespace(async_fire=lambda *_a, **_k: None)
+        self.config = SimpleNamespace(language="en")
 
     async def _async_call(self, domain, service, data, **_kw):
         self.calls.append((domain, service, data))
@@ -55,6 +73,8 @@ def _run(coro):
 def _coordinator(entry_id="abc123def456", actions=True):
     coord = KCoordinator(HassStub(), host="1.2.3.4", config_entry_id=entry_id)
     coord._notify_actions = actions
+    # Button titles come from strings.json; the conftest stub serves the real file.
+    _run(coord._async_load_notify_strings())
     return coord
 
 
@@ -86,14 +106,14 @@ def test_a_paused_card_offers_resume_instead_of_pause():
 
 def test_stop_is_guarded():
     """A mis-tap on a lock screen must not be able to end a 14-hour print."""
-    stop = build_actions(paused=False, ids=action_ids("abc123"))[-1]
+    stop = build_actions(paused=False, ids=action_ids("abc123"), labels=LABELS)[-1]
     assert stop["destructive"] is True
     assert stop["authenticationRequired"] is True
 
 
 def test_pause_is_not_guarded():
     """Pausing is recoverable, so an extra confirmation would just be friction."""
-    pause = build_actions(paused=False, ids=action_ids("abc123"))[0]
+    pause = build_actions(paused=False, ids=action_ids("abc123"), labels=LABELS)[0]
     assert "authenticationRequired" not in pause
     assert "destructive" not in pause
 

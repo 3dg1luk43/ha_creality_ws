@@ -18,6 +18,14 @@ class HassStub:
     def __init__(self):
         self.loop = asyncio.get_event_loop()
         self.states = SimpleNamespace(get=lambda _eid: None)
+        # Only what the rules engine may legitimately touch. Anything else
+        # missing here is the point: it fails loudly if the WebSocket path
+        # starts reaching for services or the registry.
+        self.config = SimpleNamespace(language="en")
+        self.events: list = []
+        self.bus = SimpleNamespace(
+            async_fire=lambda event, data=None: self.events.append((event, data))
+        )
 
 
 def _coordinator(monkeypatch, notify_completed=True):
@@ -76,7 +84,7 @@ def test_completion_after_startup_still_notifies(monkeypatch):
 
     coord.data = {"printFileName": "job.gcode", "printProgress": 100}
     _run(coord._check_notifications({}))
-    assert sent == ["Print 'job.gcode' completed successfully!"]
+    assert sent == ["Print job.gcode completed successfully!"]
 
     _run(coord._check_notifications({}))
     assert len(sent) == 1
@@ -96,7 +104,7 @@ def test_new_job_after_a_stale_completion_notifies(monkeypatch):
 
     coord.data = {"printFileName": "new_job.gcode", "printProgress": 100}
     _run(coord._check_notifications({}))
-    assert sent == ["Print 'new_job.gcode' completed successfully!"]
+    assert sent == ["Print new_job.gcode completed successfully!"]
 
 
 def test_priming_waits_for_a_frame_with_progress(monkeypatch):
@@ -152,7 +160,7 @@ def test_minutes_to_end_reads_the_real_telemetry_field(monkeypatch):
 
     coord.data = {"printFileName": "job.gcode", "printProgress": 96, "printLeftTime": 120}
     _run(coord._check_notifications({}))
-    assert sent == ["Print 'job.gcode' finishing in 2 minutes."]
+    assert sent == ["Print job.gcode finishing in 2 minutes."]
 
 
 def test_minutes_to_end_already_inside_window_at_startup_is_silent(monkeypatch):
@@ -205,7 +213,7 @@ def test_a_genuine_zero_percent_frame_re_arms_completion(monkeypatch):
 
     coord.data = {"printFileName": "job.gcode", "printProgress": 100, "dProgress": 100}
     _run(coord._check_notifications({}))
-    assert sent == ["Print 'job.gcode' completed successfully!"]
+    assert sent == ["Print job.gcode completed successfully!"]
 
 
 def test_priming_reads_progress_the_same_way_as_the_check(monkeypatch):
@@ -221,7 +229,7 @@ def test_priming_reads_progress_the_same_way_as_the_check(monkeypatch):
 
     coord.data = {"printFileName": "job.gcode", "printProgress": 100, "dProgress": 100}
     _run(coord._check_notifications({}))
-    assert sent == ["Print 'job.gcode' completed successfully!"]
+    assert sent == ["Print job.gcode completed successfully!"]
 
 
 def test_a_new_job_does_not_notify_off_the_previous_jobs_progress(monkeypatch):
@@ -248,7 +256,7 @@ def test_a_new_job_does_not_notify_off_the_previous_jobs_progress(monkeypatch):
     _run(coord._check_notifications({}))
     coord.data = {"printFileName": "job_b.gcode", "printProgress": 100}
     _run(coord._check_notifications({}))
-    assert sent == ["Print 'job_b.gcode' completed successfully!"]
+    assert sent == ["Print job_b.gcode completed successfully!"]
 
 
 def test_a_new_job_starting_from_zero_still_notifies(monkeypatch):
@@ -263,7 +271,7 @@ def test_a_new_job_starting_from_zero_still_notifies(monkeypatch):
 
     coord.data = {"printFileName": "job_b.gcode", "printProgress": 100}
     _run(coord._check_notifications({}))
-    assert sent == ["Print 'job_b.gcode' completed successfully!"]
+    assert sent == ["Print job_b.gcode completed successfully!"]
 
 
 def test_dprogress_is_still_used_when_printprogress_is_absent(monkeypatch):
@@ -276,7 +284,7 @@ def test_dprogress_is_still_used_when_printprogress_is_absent(monkeypatch):
 
     coord.data = {"printFileName": "job.gcode", "dProgress": 100}
     _run(coord._check_notifications({}))
-    assert sent == ["Print 'job.gcode' completed successfully!"]
+    assert sent == ["Print job.gcode completed successfully!"]
 
 
 def test_reprint_after_a_stale_startup_completion_notifies(monkeypatch):
@@ -294,7 +302,7 @@ def test_reprint_after_a_stale_startup_completion_notifies(monkeypatch):
 
     coord.data = {"printFileName": "demo.gcode", "printProgress": 100}
     _run(coord._check_notifications({}))
-    assert sent == ["Print 'demo.gcode' completed successfully!"]
+    assert sent == ["Print demo.gcode completed successfully!"]
 
 
 def test_end_of_print_progress_jitter_notifies_once(monkeypatch):
@@ -328,7 +336,7 @@ def test_end_of_print_progress_jitter_notifies_once(monkeypatch):
         coord.data = frame(progress, job_time, left)
         _run(coord._check_notifications({}))
 
-    assert sent == ["Print 'tower.gcode' completed successfully!"]
+    assert sent == ["Print tower.gcode completed successfully!"]
 
 
 def test_a_restarted_job_clock_re_arms_completion(monkeypatch):
@@ -348,7 +356,7 @@ def test_a_restarted_job_clock_re_arms_completion(monkeypatch):
 
     coord.data = {"printFileName": "job.gcode", "printProgress": 100, "printJobTime": 900}
     _run(coord._check_notifications({}))
-    assert sent == ["Print 'job.gcode' completed successfully!"]
+    assert sent == ["Print job.gcode completed successfully!"]
 
 
 def test_reprinting_the_same_file_notifies_again_with_a_job_clock(monkeypatch):

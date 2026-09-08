@@ -30,7 +30,7 @@ This custom [Home Assistant](https://www.home-assistant.io/) integration provide
 
 > **Requires Home Assistant 2026.7.0 or newer.** The live print notifications
 > depend on the companion app's Live Activity support, which arrived in that
-> release. If you are on an older core, stay on 0.9.x.
+> release. If you are on an older core, stay on 0.9.7.
 
 ### HACS (recommended)
 
@@ -252,6 +252,12 @@ Set **Dashboard path to open on tap** to something like `/lovelace/printer`. It 
 ### Buttons
 
 **Show Pause/Resume/Stop buttons** is off by default. Pause and Resume go through exactly the same path as the corresponding button entities. **Stop** is marked destructive and requires device authentication, so a mis‑tap on a lock screen cannot end a long print.
+
+### Language
+
+Notification text is translated — messages, status labels, button captions and the Android notification-channel names all come from the integration's translation files.
+
+It follows the **server** language (**Settings → System → General**), not each person's profile language. That is not an oversight: an integration is never told which user a `notify` call is for, so the server language is the only one available to it. For a household that needs different languages per person, use the bus events below.
 
 ### Building your own notifications
 

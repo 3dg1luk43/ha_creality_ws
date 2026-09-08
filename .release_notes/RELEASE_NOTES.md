@@ -6,13 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [Unreleased]
+## [0.9.8] - 2026-09-08
+> [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)
 
 > **This release raises the minimum Home Assistant version to 2026.7.0.** HACS
 > will not offer it to older cores. The live print card depends on the companion
 > app's Live Activity support, which landed in 2026.7.
 
 ### Added
+
 - **Live print notifications for Android and iOS.** One card per printer that updates in place — on the iOS Lock Screen and in the Dynamic Island, and in the Android status bar and shade — with a countdown timer to the estimated finish, a progress bar, the current layer, and the G-code preview as its icon. It ends itself when the print does, replaced by a completion notification carrying a camera snapshot of the bed.
   - The countdown **runs on the phone**, so it costs no pushes at all. Pushes happen on a state change (start, pause, resume, finish) and every 5% of progress, never more than once per 30 seconds — iOS throttles frequent Live Activity updates and eventually drops them.
   - **Multiple notify targets.** Companion-app targets get the full card; every other notify platform gets the message and title only. That is deliberate: some platforms reject payload keys they do not recognise and fail the entire call, and `notify.send_message` has no payload field at all.
@@ -20,28 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Tapping** opens the printer camera's live feed on Android with no configuration. Set a dashboard path to control where a tap goes, which is also the only way an iOS tap can deep-link.
 - **Bus events** `ha_creality_ws_print_started`, `_print_finished` and `_print_error`, fired whether or not any notify target is configured. They carry `entry_id`, `host`, `device_name`, `filename`, `progress`, `layer`, `total_layers`, `left_seconds` and `err_code`. This is the supported way to write your own notification text in a language other than your server's, since an integration is never told which user a notification is for.
 - **`snapshot_supported` attribute** on the camera entities, saying whether the camera can produce a still image at all.
+- **Notification text is translated.** Every message, status label, button caption and Android notification-channel name now lives in the translation files, with Spanish supplied. Note the limitation this cannot escape: an integration is never told *which user* a notification is for, so the text follows the **server** language (Settings → System → General), not each person's profile. If your household needs per-user languages, use the bus events above and write the text in your own automation.
 
-### Changed
-- **The single *Notification Device* setting became *Notification targets*** and accepts several. Existing configurations migrate automatically on load, with nothing to do; the old value is left on disk so a downgrade keeps working. The live card is **opt-in** — an update will not start putting a persistent card on your Lock Screen by itself.
-- **Notification messages name the file, not its full path.** K1C firmware reports `/usr/data/printer_data/gcodes/3DBenchy.gcode`, and that whole string used to be interpolated into the text. Sensor attributes still publish the raw value, so templates are unaffected.
-- **Notifications are no longer awaited inside the WebSocket receive loop.** A push notification is an HTTPS request to Apple's or Google's relay; waiting for one there stalled the loop that keeps the printer connection alive, and with several targets it could have let every entity flicker unavailable.
-
-### Fixed
-- **A notify target that could not be routed failed silently** — no error, no log, no notification. Since the field accepts free text, a typo simply did nothing. It now logs a warning.
-- **Notification state stopped tracking when no target was configured**, so switching notifications on in the middle of a print could immediately fire a spurious "completed".
-- **The camera snapshot is skipped where it cannot work.** K2-family cameras using direct WebRTC signalling have no snapshot endpoint and serve a 1x1 placeholder; the same check applies to the G-code preview, which serves a transparent 1x1 when the printer has no preview. Either would have rendered as an empty grey box.
-
-### Notes
-- The live card needs **iOS 17.2+** or **Android 16+**. On older phones the notification still arrives and still replaces itself in place; you lose the timer and the progress bar, not the notification.
-- **iOS ends any Live Activity after 8 hours.** That is an Apple limit no app can extend, and it matters here because prints can run far longer. Past 8 hours the card carries on as an ordinary notification with the remaining time written into the text, and the completion notification still arrives. Android has no such limit.
-- The G-code preview does **not** appear inside an iOS Live Activity — that layout has no image slot. It shows on the Android card and on the plain notifications on both platforms.
-
-## [0.9.9] - 2026-08-22
-> [List of issues (0.9.9)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.9)
-
-Salvages the CFS material-editing work from [#75](https://github.com/3dg1luk43/ha_creality_ws/pull/75) (thanks **@buzato**), brought up to current code and reworked. The branch descends from his commits, so his authorship is intact.
-
-### Added
 - **Edit filament from the CFS card.** Each slot tile gains an edit button opening a dialog for material type, name, vendor, colour, temperature range and pressure advance. Saving writes to the printer and then asks it to re-report, so the tile only changes once the write has actually landed.
   - The dialog states which **box and slot** it will write to, and says so explicitly when it had to infer the target from the card layout rather than read it from the printer.
   - Editing is disabled while the printer is **busy**, and for cards whose entities span **more than one printer** (there would be no way to tell which machine to write to).
@@ -51,19 +33,6 @@ Salvages the CFS material-editing work from [#75](https://github.com/3dg1luk43/h
 - **New CFS slot attributes**: `box_id`, `slot_id`, `min_temp`, `max_temp` and `pressure`. The first two are how the service addresses a slot; the rest are what the edit dialog prefills from. Not every printer reports the temperatures on every slot, so treat `null` as "unknown" rather than zero.
 - **Third card display mode, `box`**: a photo of the CFS unit with a spool overlay per bay. Requires a mapped four-slot box and falls back to the full view otherwise, since the overlay geometry is tied to that image.
 
-### Changed
-- **The card's `compact_view` option became `view_mode`** (`full` | `compact` | `box`). Existing dashboards migrate automatically on load, and the old key is dropped the next time you edit the card. No action needed.
-- **The card only re-renders when something it displays has actually changed**, instead of on every state update.
-- **Printer status is derived in one place** now, shared by the status sensor and the service's "is it safe to write" check, so the card and the service cannot disagree about whether the printer is busy.
-- **The bundled CFS unit image is 17 kB instead of 509 kB** (WebP). The whole `www/` directory had been 143 kB, so as a PNG this one decorative asset would have made every install over four times larger.
-
-### Notes for anyone with CFS hardware
-Creality does not document the `modifyMaterial` command. The payload shape comes from @buzato's testing against a real CFS, and is verified here against the bundled printer simulator — but two details are still unconfirmed: the printer *streams* colours as seven hex characters yet appears to accept six on write, and the `rfid` field name is inferred from telemetry rather than from a confirmed dump. Every write logs both the outgoing payload and what the printer reports back afterwards. **If a material edit does something unexpected, please open an issue with that part of your debug log** — that is what will settle these.
-
-## [0.9.8] - 2026-08-22
-> [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)
-
-### Added
 - **`spool_key` attribute on every CFS slot** (closes #117 part 2):
   - The printer's `rfid` field is a material/filament id, not a tag serial, so two spools of the same vendor and material share it even when their colours differ — external trackers such as spoolman-sync could not tell them apart. Each slot (and the external filament) now also exposes `spool_key`, which combines that id with the normalised colour, so four slots of `Creality Hyper PLA` in different colours get four distinct keys.
   - `spool_key` is a **derived** identifier, not new telemetry: the printer streams no per-tag serial, so two genuinely identical spools still produce the same key. The raw `rfid` value is passed through unchanged.
@@ -72,7 +41,25 @@ Creality does not document the `modifyMaterial` command. The payload shape comes
 - **Optional go2rtc RTSP port** under *Configure → Camera*: only needed if your go2rtc listens on a non-default RTSP port. `0` (the default) keeps auto-detection.
 - **Fan documentation**: the `fan.*_model_fan` / `*_case_fan` / `*_side_fan` entities have always supported on/off and speed control, but were undocumented (#114). The README now covers them, including a chamber-too-hot automation example.
 
+### Changed
+
+- **The single *Notification Device* setting became *Notification targets*** and accepts several. Existing configurations migrate automatically on load, with nothing to do; the old value is left on disk so a downgrade keeps working. The live card is **opt-in** — an update will not start putting a persistent card on your Lock Screen by itself.
+- **Notification messages name the file, not its full path.** K1C firmware reports `/usr/data/printer_data/gcodes/3DBenchy.gcode`, and that whole string used to be interpolated into the text. Sensor attributes still publish the raw value, so templates are unaffected.
+- **Notification messages no longer wrap the file name in quotes** — `Print 3DBenchy.gcode completed successfully!` rather than `Print '3DBenchy.gcode' completed successfully!`. Home Assistant's own translation validation rejects placeholders inside single quotes, and the messages had to move into the translation files to be translatable at all. Only the punctuation changed.
+- **The camera-mode dropdown and the camera and power-switch help text are translatable.** They were hardcoded English regardless of your language; the dropdown now uses a translation key and the two step descriptions live in the translation files like every other string.
+- **Notifications are no longer awaited inside the WebSocket receive loop.** A push notification is an HTTPS request to Apple's or Google's relay; waiting for one there stalled the loop that keeps the printer connection alive, and with several targets it could have let every entity flicker unavailable.
+
+- **The card's `compact_view` option became `view_mode`** (`full` | `compact` | `box`). Existing dashboards migrate automatically on load, and the old key is dropped the next time you edit the card. No action needed.
+- **The card only re-renders when something it displays has actually changed**, instead of on every state update.
+- **Printer status is derived in one place** now, shared by the status sensor and the service's "is it safe to write" check, so the card and the service cannot disagree about whether the printer is busy.
+- **The bundled CFS unit image is 17 kB instead of 509 kB** (WebP). The whole `www/` directory had been 143 kB, so as a PNG this one decorative asset would have made every install over four times larger.
+
 ### Fixed
+
+- **A notify target that could not be routed failed silently** — no error, no log, no notification. Since the field accepts free text, a typo simply did nothing. It now logs a warning.
+- **Notification state stopped tracking when no target was configured**, so switching notifications on in the middle of a print could immediately fire a spurious "completed".
+- **The camera snapshot is skipped where it cannot work.** K2-family cameras using direct WebRTC signalling have no snapshot endpoint and serve a 1x1 placeholder; the same check applies to the G-code preview, which serves a transparent 1x1 when the printer has no preview. Either would have rendered as an empty grey box.
+
 - **Camera stream API (HLS, recording, casting) failed with `TypeError: 'str' object is not callable`** (closes #116, thanks @Raymondvb1985):
   - `stream_source` was defined as a synchronous property returning the go2rtc *stream name*, which shadowed HA core's `async def stream_source()`. Every consumer of the classic stream pipeline — the `camera/stream` WebSocket command, HLS playback, `camera.record`, `camera.play_stream`, casting — does `source = await self.stream_source()`, so it tried to call a string.
   - It is now an async method returning an RTSP URL on the same go2rtc instance, which HA's `stream` component can actually ingest. The port is detected automatically (`18554` for HA's built-in go2rtc, `8554` for a stand-alone one) and can be overridden in the options flow. WebRTC playback in the frontend is unchanged; "WebRTC direct" cameras still have no HLS source, as they never register a go2rtc stream.
@@ -94,9 +81,20 @@ Creality does not document the `modifyMaterial` command. The payload shape comes
 - **Completion notification only ever arrived once per file name**: the "already notified" flag was only cleared when the print file name changed, so reprinting the same file never notified again. It is now also re-armed whenever progress falls back below 100%. Found while verifying #112 against a live printer.
 
 ### Internal
+
 - `LATE_DISCOVERY_FIELDS` in `const.py` lists the telemetry fields that gate entity creation (`boxsInfo`, `maxBoxTemp`); the coordinator fires a single discovery signal the first time each appears, replacing the CFS-only trigger. Platforms subscribe and re-check idempotently.
 - New shared CFS helpers in `utils.py` — `normalize_color_hex`, `format_filament_label`, `build_spool_key` — replacing the duplicated inline logic in `KCFSSlotSensor`, `KCFSExtSlotSensor` and `KActiveFilamentSensor`, whose attribute dicts now come from one `_cfs_slot_attributes` builder.
 - Regression tests added for all of the above (`test_cfs_filament.py`, `test_cfs_sensors.py`, `test_notifications.py`, `test_fan.py`, plus new `stream_source` cases in `test_camera_stream_config.py`).
+
+### Notes
+
+- The live card needs **iOS 17.2+** or **Android 16+**. On older phones the notification still arrives and still replaces itself in place; you lose the timer and the progress bar, not the notification.
+- **iOS ends any Live Activity after 8 hours.** That is an Apple limit no app can extend, and it matters here because prints can run far longer. Past 8 hours the card carries on as an ordinary notification with the remaining time written into the text, and the completion notification still arrives. Android has no such limit.
+- The G-code preview does **not** appear inside an iOS Live Activity — that layout has no image slot. It shows on the Android card and on the plain notifications on both platforms.
+
+### Notes for anyone with CFS hardware
+
+Creality does not document the `modifyMaterial` command. The payload shape comes from @buzato's testing against a real CFS, and is verified here against the bundled printer simulator — but two details are still unconfirmed: the printer *streams* colours as seven hex characters yet appears to accept six on write, and the `rfid` field name is inferred from telemetry rather than from a confirmed dump. Every write logs both the outgoing payload and what the printer reports back afterwards. **If a material edit does something unexpected, please open an issue with that part of your debug log** — that is what will settle these.
 
 ### Test server (`tools/creality_printer_test_server.py`)
 
@@ -110,7 +108,6 @@ Several fidelity gaps made the simulator disagree with real hardware, which hid 
 - **`--cfs-variant edge`** adds the awkward CFS payloads: an already-correct six-character colour, a slot with no vendor, a multi-colour spool, shared `rfid` values across colours, and an empty external slot.
 - **Test-control endpoints** (`POST /test/set`, `/test/reset`, `/test/cfs`, `GET /test/state`) pin any telemetry field on demand, so notification scenarios (completion, error, runout, minutes-to-end) can be driven in seconds instead of waiting out a simulated print. Real printers have no such endpoints.
 - Log lines now carry timestamps, and the offer/answer SDP is dumped under `--debug`.
-
 
 ## [0.9.7] - 2026-07-28
 > [List of issues (0.9.7)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.7)

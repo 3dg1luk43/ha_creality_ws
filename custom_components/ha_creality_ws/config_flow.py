@@ -366,14 +366,18 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         schema_dict: dict[str, Any] = {
             vol.Optional(CONF_CAMERA_MODE, default=effective_mode): selector.SelectSelector(
+                # Bare values plus a translation_key: the visible labels live
+                # under `selector.camera_mode.options` in strings.json, so they
+                # are translated like everything else rather than hardcoded here.
                 selector.SelectSelectorConfig(
                     options=[
-                        selector.SelectOptionDict(value=CAM_MODE_AUTO, label="Auto (detect by model)"),
-                        selector.SelectOptionDict(value=CAM_MODE_MJPEG, label="MJPEG (K1 family)"),
-                        selector.SelectOptionDict(value=CAM_MODE_WEBRTC, label="WebRTC via go2rtc (K2 family)"),
-                        selector.SelectOptionDict(value=CAM_MODE_WEBRTC_DIRECT, label="WebRTC direct, no go2rtc (alternative)"),
-                        selector.SelectOptionDict(value=CAM_MODE_CUSTOM, label="Custom camera URL (MJPEG / RTSP)"),
+                        CAM_MODE_AUTO,
+                        CAM_MODE_MJPEG,
+                        CAM_MODE_WEBRTC,
+                        CAM_MODE_WEBRTC_DIRECT,
+                        CAM_MODE_CUSTOM,
                     ],
+                    translation_key="camera_mode",
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
             ),
@@ -404,19 +408,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             step_id="camera",
             data_schema=vol.Schema(schema_dict),
             errors=errors,
-            description_placeholders={
-                "camera_help": (
-                    "Camera streaming mode. Auto detects from the printer model. "
-                    "WebRTC via go2rtc is the default for K2-family printers; "
-                    "WebRTC direct is an alternative that signals the printer itself "
-                    "(no go2rtc) — try it if the default does not work, e.g. on newer "
-                    "K1C firmware. Custom lets you point at any http(s) MJPEG/snapshot "
-                    "URL or an rtsp:// stream (served via go2rtc). "
-                    "Leave the go2rtc RTSP port at 0 unless HLS / camera.record "
-                    "needs a non-default port. "
-                    "Submit returns to the menu; use Save and apply there to apply changes."
-                ),
-            },
         )
 
     def _notify_target_options(self, current: list[str]) -> list[Any]:
@@ -546,9 +537,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="power",
             data_schema=vol.Schema(schema_dict),
-            description_placeholders={
-                "power_help": "Optional power switch entity ID (e.g., switch.smart_plug_name) to enable accurate 'Off' state detection",
-            },
         )
 
     async def async_step_connection(self, user_input: dict[str, Any] | None = None) -> FlowResult:

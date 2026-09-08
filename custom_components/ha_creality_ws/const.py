@@ -159,11 +159,17 @@ NOTIFY_COLOR_PAUSED = "#ffa726"
 NOTIFY_COLOR_DONE = "#43a047"
 NOTIFY_COLOR_ERROR = "#e53935"
 
-# Android notification channels. Splitting the terminal and alert channels from
-# the live one lets a user silence progress without silencing failures.
-NOTIFY_CHANNEL_LIVE = "3D Print"
-NOTIFY_CHANNEL_DONE = "3D Print Finished"
-NOTIFY_CHANNEL_ALERT = "3D Print Alerts"
+# Android notification channel *names* are user-visible in the phone's settings,
+# so they live in strings.json like every other label. Splitting the terminal
+# and alert channels from the live one lets a user silence progress without
+# silencing failures.
+NOTIFY_CHANNEL_KEY_LIVE = "channel_live"
+NOTIFY_CHANNEL_KEY_DONE = "channel_finished"
+NOTIFY_CHANNEL_KEY_ALERT = "channel_alerts"
+
+# Joins the segments of a live-card body. Punctuation rather than prose, so it
+# stays here instead of in strings.json.
+NOTIFY_BODY_SEPARATOR = " · "
 
 # `preview_reason` values that mean the image entity would serve its 1x1
 # placeholder. Anything else -- including an unset value, which just means

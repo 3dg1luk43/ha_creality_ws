@@ -14,6 +14,10 @@ Two house rules worth knowing before editing:
 * ``const.py`` is exec'd standalone by ``tools/tests/test_manifest_and_specs.py``
   and must stay import-free, which is why the option-coercion helpers live in
   this module instead of alongside the keys they read.
+* **No user-visible text lives here.** Every label, status word and message
+  template comes from ``strings.json`` and is passed in already resolved, so
+  this module only decides structure. Colours and mdi slugs stay, being neither
+  language nor prose.
 """
 
 from __future__ import annotations
@@ -27,9 +31,6 @@ from .const import (
     CLEAR_NOTIFICATION_MARKER,
     CONF_NOTIFY_DEVICE,
     CONF_NOTIFY_TARGETS,
-    NOTIFY_CHANNEL_ALERT,
-    NOTIFY_CHANNEL_DONE,
-    NOTIFY_CHANNEL_LIVE,
     NOTIFY_COLOR_DONE,
     NOTIFY_COLOR_ERROR,
     NOTIFY_COLOR_PAUSED,
@@ -138,8 +139,12 @@ def display_filename(raw: Any) -> str:
     return tail or text
 
 
-def format_duration(secs: Any) -> str:
-    """Human duration, e.g. ``4h 12m`` / ``12m`` / ``45s``. Empty when unknown."""
+def format_duration(secs: Any, templates: Mapping[str, str]) -> str:
+    """Human duration from the caller's templates. Empty when unknown.
+
+    Numbers are pre-formatted into strings before substitution so a translator
+    cannot break a format spec (``{minutes:02d}``) by reordering placeholders.
+    """
     try:
         total = int(float(secs))
     except (TypeError, ValueError):
@@ -149,21 +154,40 @@ def format_duration(secs: Any) -> str:
     hours, rem = divmod(total, 3600)
     minutes, seconds = divmod(rem, 60)
     if hours:
-        return f"{hours}h {minutes:02d}m"
+        return _fill(
+            templates.get("duration_hours_minutes"),
+            hours=str(hours),
+            minutes=f"{minutes:02d}",
+        )
     if minutes:
-        return f"{minutes}m"
-    return f"{seconds}s"
+        return _fill(templates.get("duration_minutes"), minutes=str(minutes))
+    return _fill(templates.get("duration_seconds"), seconds=str(seconds))
 
 
-def format_filament_length(mm: Any) -> str:
-    """Filament used in metres, e.g. ``4.8 m``. Empty when unknown or zero."""
+def format_filament_length(mm: Any, template: str | None) -> str:
+    """Filament used, rendered by the caller's template. Empty when unknown."""
     try:
         value = float(mm)
     except (TypeError, ValueError):
         return ""
     if value <= 0:
         return ""
-    return f"{value / 1000.0:.1f} m"
+    return _fill(template, metres=f"{value / 1000.0:.1f}")
+
+
+def _fill(template: str | None, **values: str) -> str:
+    """Substitute into a translated template, tolerating a broken one.
+
+    A translation with a renamed or malformed placeholder must not take a
+    notification down with it, so a failure yields an empty segment that the
+    caller drops.
+    """
+    if not template:
+        return ""
+    try:
+        return template.format(**values)
+    except (KeyError, IndexError, ValueError):
+        return ""
 
 
 def sanitize_tag(raw: Any) -> str:
@@ -463,6 +487,8 @@ def build_live_payload(
     phase: str,
     progress: Any,
     when: int | None,
+    channel: str,
+    status_text: str = "",
     live_update: bool = True,
     group: str | None = None,
     visuals: NotifyVisuals | None = None,
@@ -485,7 +511,7 @@ def build_live_payload(
     data: dict[str, Any] = {
         "tag": sanitize_tag(tag),
         "notification_icon": "mdi:pause-circle" if paused else "mdi:printer-3d-nozzle",
-        "channel": NOTIFY_CHANNEL_LIVE,
+        "channel": channel,
         "importance": "low",
         # Progress pushes only. Terminal pushes reuse this tag, and alert_once
         # there would update the card silently -- the "finished" ping would
@@ -517,13 +543,8 @@ def build_live_payload(
             # at 0:00 because the estimate ran out is the whole reason the
             # overrun push exists, and omitting the key could leave it there.
             data["chronometer"] = False
-            data["critical_text"] = (
-                "Paused"
-                if paused
-                else "Starting"
-                if phase == PHASE_START
-                else "Finishing"
-            )
+            if status_text:
+                data["critical_text"] = status_text
 
     # No snapshot on live pushes: Android re-downloads a big picture every time
     # and an iOS Live Activity has no image slot, so it would be pure waste on
@@ -541,6 +562,7 @@ def build_event_payload(
     title: str,
     message: str,
     kind: str,
+    channel: str,
     progress: Any = 100,
     group: str | None = None,
     visuals: NotifyVisuals | None = None,
@@ -560,7 +582,7 @@ def build_event_payload(
         "notification_icon": icon,
         "notification_icon_color": color,
         "color": color,
-        "channel": NOTIFY_CHANNEL_DONE,
+        "channel": channel,
         "importance": "high",
         "push": {"interruption-level": "time-sensitive"},
     }
@@ -588,6 +610,7 @@ def build_alert_payload(
     title: str,
     message: str,
     kind: str,
+    channel: str,
     group: str | None = None,
     visuals: NotifyVisuals | None = None,
     links: NotifyLinks | None = None,
@@ -606,7 +629,7 @@ def build_alert_payload(
         ),
         "notification_icon_color": NOTIFY_COLOR_ERROR,
         "color": NOTIFY_COLOR_ERROR,
-        "channel": NOTIFY_CHANNEL_ALERT,
+        "channel": channel,
         "importance": "high",
         "push": {"interruption-level": "time-sensitive"},
     }
@@ -659,30 +682,27 @@ def action_ids(entry_key: str) -> dict[str, str]:
     }
 
 
-def build_actions(*, paused: bool, ids: Mapping[str, str]) -> list[dict[str, Any]]:
+def build_actions(
+    *, paused: bool, ids: Mapping[str, str], labels: Mapping[str, str]
+) -> list[dict[str, Any]]:
     """Buttons for a live card: the useful one, plus Stop.
+
+    ``labels`` supplies the translated button titles, keyed by ACTION_*.
 
     Stop is marked destructive and authentication-required. A mis-tap on a lock
     screen must not be able to end a fourteen-hour print.
     """
-    primary = (
-        {
-            "action": ids[ACTION_RESUME],
-            "title": "Resume",
-            "icon": "sfsymbols:play.circle",
-        }
-        if paused
-        else {
-            "action": ids[ACTION_PAUSE],
-            "title": "Pause",
-            "icon": "sfsymbols:pause.circle",
-        }
-    )
+    primary_key = ACTION_RESUME if paused else ACTION_PAUSE
+    primary_icon = "sfsymbols:play.circle" if paused else "sfsymbols:pause.circle"
     return [
-        primary,
+        {
+            "action": ids[primary_key],
+            "title": labels.get(primary_key, ""),
+            "icon": primary_icon,
+        },
         {
             "action": ids[ACTION_STOP],
-            "title": "Stop",
+            "title": labels.get(ACTION_STOP, ""),
             "icon": "sfsymbols:stop.circle",
             "destructive": True,
             "authenticationRequired": True,

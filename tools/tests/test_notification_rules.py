@@ -5,7 +5,9 @@ Home Assistant on purpose -- so these tests need no stubs, no coordinator and no
 event loop. Anything that needs `hass` is covered in test_notification_dispatch.
 """
 
+import json
 import re
+from pathlib import Path
 
 import pytest
 
@@ -45,6 +47,22 @@ from custom_components.ha_creality_ws.notification_rules import (
 )
 
 TAG_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+# The real shipped strings, not a fixture copy: a template renamed in
+# strings.json without updating the code should fail here.
+STRINGS = json.loads(
+    (
+        Path(__file__).resolve().parents[2]
+        / "custom_components/ha_creality_ws/strings.json"
+    ).read_text(encoding="utf-8")
+)["common"]  # notification strings; see test_translations.py for why "common"
+
+CHANNEL = STRINGS["channel_live"]
+_LABELS = {
+    "pause": STRINGS["action_pause"],
+    "resume": STRINGS["action_resume"],
+    "stop": STRINGS["action_stop"],
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -139,7 +157,14 @@ def test_display_filename(raw, expected):
     ],
 )
 def test_format_duration(secs, expected):
-    assert format_duration(secs) == expected
+    assert format_duration(secs, STRINGS) == expected
+
+
+def test_format_duration_survives_a_broken_translation():
+    """One mistranslated template must cost a line of text, not the whole
+    notification."""
+    assert format_duration(720, {"duration_minutes": "{minutes_typo}m"}) == ""
+    assert format_duration(720, {}) == ""
 
 
 @pytest.mark.parametrize(
@@ -147,7 +172,11 @@ def test_format_duration(secs, expected):
     [(4800, "4.8 m"), (12400, "12.4 m"), (0, ""), (-5, ""), (None, ""), ("x", "")],
 )
 def test_format_filament_length(mm, expected):
-    assert format_filament_length(mm) == expected
+    assert format_filament_length(mm, STRINGS["filament_length"]) == expected
+
+
+def test_format_filament_length_survives_a_missing_template():
+    assert format_filament_length(4800, None) == ""
 
 
 def test_sanitize_tag_survives_a_dotted_host():
@@ -456,6 +485,7 @@ def _live(**kw):
     kw.setdefault("phase", PHASE_PRINTING)
     kw.setdefault("progress", 42)
     kw.setdefault("when", 1_700_003_600)
+    kw.setdefault("channel", CHANNEL)
     return build_live_payload(**kw)
 
 
@@ -483,7 +513,7 @@ def test_live_payload_alerts_only_once():
 def test_paused_payload_stops_the_timer_explicitly():
     """Omitting `chronometer` may not clear a previously-set one, and a timer
     counting down through a pause is the worse failure."""
-    data = _live(phase=PHASE_PAUSED)["data"]
+    data = _live(phase=PHASE_PAUSED, status_text=STRINGS["status_paused"])["data"]
     assert data["chronometer"] is False
     assert "when" not in data
     assert data["critical_text"] == "Paused"
@@ -491,7 +521,9 @@ def test_paused_payload_stops_the_timer_explicitly():
 
 
 def test_start_payload_labels_itself_when_there_is_no_eta_yet():
-    data = _live(phase=PHASE_START, progress=0, when=None)["data"]
+    data = _live(
+        phase=PHASE_START, progress=0, when=None, status_text=STRINGS["status_starting"]
+    )["data"]
     assert data["critical_text"] == "Starting"
     assert data["progress"] == 0
     # Stated, not omitted: dropping the key might leave a chronometer already
@@ -502,7 +534,12 @@ def test_start_payload_labels_itself_when_there_is_no_eta_yet():
 def test_an_expired_estimate_stops_the_timer_rather_than_freezing_it():
     """The overrun push exists to replace a chronometer stuck at 0:00, so it has
     to say so explicitly -- omitting the key could leave it stuck."""
-    data = _live(phase=PHASE_PRINTING, progress=88, when=None)["data"]
+    data = _live(
+        phase=PHASE_PRINTING,
+        progress=88,
+        when=None,
+        status_text=STRINGS["status_finishing"],
+    )["data"]
     assert data["chronometer"] is False
     assert data["critical_text"] == "Finishing"
 
@@ -585,6 +622,7 @@ def test_terminal_payload_must_actually_alert():
     """It shares the live tag, and alert_once there would replace the card
     silently -- the "print finished" ping would never sound."""
     payload = build_event_payload(
+        channel=STRINGS["channel_finished"],
         tag="ha_creality_ws_abc123_job",
         title="K1C",
         message="3DBenchy.gcode finished in 4h 12m",
@@ -602,7 +640,8 @@ def test_terminal_payload_must_actually_alert():
 
 def test_stopped_payload_reports_where_it_stopped():
     data = build_event_payload(
-        tag="t", title="K1C", message="stopped", kind=EVENT_STOPPED, progress=42
+        tag="t", title="K1C", message="stopped", kind=EVENT_STOPPED, progress=42,
+        channel=STRINGS["channel_finished"],
     )["data"]
     assert data["progress"] == 42
     assert data["notification_icon"] == "mdi:stop-circle"
@@ -614,7 +653,8 @@ def test_stopped_payload_reports_where_it_stopped():
 )
 def test_alert_payload_uses_its_own_tag_and_never_alert_once(kind, icon):
     data = build_alert_payload(
-        tag="ha_creality_ws_abc123_alert", title="K1C", message="boom", kind=kind
+        tag="ha_creality_ws_abc123_alert", title="K1C", message="boom", kind=kind,
+        channel=STRINGS["channel_alerts"],
     )["data"]
     assert data["tag"] == "ha_creality_ws_abc123_alert"
     assert data["notification_icon"] == icon
@@ -633,8 +673,10 @@ def test_every_builder_emits_a_legal_tag_even_from_a_dotted_host():
     host_tag = "ha_creality_ws_192.168.1.50_job"
     for payload in (
         _live(tag=host_tag),
-        build_event_payload(tag=host_tag, title="K1C", message="m", kind=EVENT_COMPLETED),
-        build_alert_payload(tag=host_tag, title="K1C", message="m", kind=ALERT_ERROR),
+        build_event_payload(tag=host_tag, title="K1C", message="m", kind=EVENT_COMPLETED,
+                            channel=CHANNEL),
+        build_alert_payload(tag=host_tag, title="K1C", message="m", kind=ALERT_ERROR,
+                            channel=CHANNEL),
         build_clear_payload(host_tag),
     ):
         assert TAG_RE.match(payload["data"]["tag"])
@@ -649,7 +691,8 @@ def test_every_builder_emits_a_legal_tag_even_from_a_dotted_host():
     ],
 )
 def test_every_lifecycle_flavour_has_its_own_glyph(kind, icon):
-    data = build_event_payload(tag="t", title="K1C", message="m", kind=kind)["data"]
+    data = build_event_payload(tag="t", title="K1C", message="m", kind=kind,
+                              channel=CHANNEL)["data"]
     assert data["notification_icon"] == icon
     # None of them may carry alert_once: they share the live card's tag family
     # and would replace it without a sound.
@@ -657,5 +700,6 @@ def test_every_lifecycle_flavour_has_its_own_glyph(kind, icon):
 
 
 def test_an_unknown_lifecycle_flavour_falls_back_rather_than_raising():
-    data = build_event_payload(tag="t", title="K1C", message="m", kind="???")["data"]
+    data = build_event_payload(tag="t", title="K1C", message="m", kind="???",
+                              channel=CHANNEL)["data"]
     assert data["notification_icon"] == "mdi:check-circle"

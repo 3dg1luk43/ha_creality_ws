@@ -34,6 +34,7 @@ class HassStub:
         # A config_entry_id is passed so the tag is entry-derived; returning no
         # entry keeps _load_options on its defaults.
         self.config_entries = SimpleNamespace(async_get_entry=lambda _id: None)
+        self.config = SimpleNamespace(language="en")
 
     async def _async_call(self, domain, service, data, **_kw):
         self.calls.append((domain, service, data))
