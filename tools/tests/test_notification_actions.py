@@ -73,7 +73,14 @@ def _run(coro):
 
 
 def _coordinator(entry_id="abc123def456", actions=True):
-    coord = KCoordinator(HassStub(), host="1.2.3.4", config_entry=fake_config_entry(entry_id))
+    hass = HassStub()
+    coord = KCoordinator(hass, host="1.2.3.4", config_entry=fake_config_entry(entry_id))
+    # `available` subtracts the client's last-rx from hass.loop.time(), and the
+    # stub client stamps that from the real time.monotonic() -- a clock this
+    # fixed 1000.0 has nothing to do with. Left mixed it reads "fresh" only on
+    # a host whose uptime happens to exceed 985s, which is what made the live
+    # card tests pass on a dev box and fail on a freshly booted CI runner.
+    coord.client.last_rx_monotonic = hass.loop.time
     coord._notify_actions = actions
     # Button titles come from strings.json; the conftest stub serves the real file.
     _run(coord._async_load_notify_strings())
