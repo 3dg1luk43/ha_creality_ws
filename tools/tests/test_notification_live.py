@@ -155,10 +155,12 @@ def test_a_print_starts_exactly_one_card():
     first = _live(_frame(coord, hass, **_printing(5)))
     assert len(first) == 1
     data = first[0]["data"]
-    assert data["live_update"] is True
-    assert data["progress"] == 5
-    assert data["chronometer"] is True
-    assert data["progress_max"] == 100
+    # Wire format: the FCM relay rejects a push whose top-level data holds a
+    # native int or bool, so these are strings by the time they are sent.
+    assert data["live_update"] == "true"
+    assert data["progress"] == "5"
+    assert data["chronometer"] == "true"
+    assert data["progress_max"] == "100"
 
     # The very next frame changes nothing worth pushing.
     coord.hass.loop.advance(1)
@@ -181,8 +183,8 @@ def test_when_is_wall_clock_not_the_loop_clock():
     coord, hass = _coordinator()
     before = time.time()
     data = _live(_frame(coord, hass, **_printing(5, printLeftTime=3600)))[0]["data"]
-    assert data["when"] >= int(before + 3600) - 2
-    assert data["when"] > 1_700_000_000
+    assert int(data["when"]) >= int(before + 3600) - 2
+    assert int(data["when"]) > 1_700_000_000
 
 
 def test_live_pushes_never_reach_a_non_mobile_target():
@@ -230,7 +232,7 @@ def test_a_pause_is_pushed_immediately():
     data = payload["data"]
     # The timer is stopped explicitly: omitting the key may not clear a
     # previously set one, and a countdown running through a pause is worse.
-    assert data["chronometer"] is False
+    assert data["chronometer"] == "false"
     assert "when" not in data
     assert data["critical_text"] == "Paused"
 
@@ -242,7 +244,7 @@ def test_resuming_is_pushed_immediately_too():
     _frame(coord, hass, **_printing(42, state=5))
     coord.hass.loop.advance(6)
     data = _live(_frame(coord, hass, **_printing(42, state=1)))[0]["data"]
-    assert data["chronometer"] is True
+    assert data["chronometer"] == "true"
 
 
 def test_the_title_never_changes_across_a_job():
@@ -357,7 +359,7 @@ def test_a_reprint_starts_a_fresh_card():
         coord, hass, **_printing(2, printJobTime=5, printLeftTime=3600)
     )
     assert len(_live(payloads)) == 1
-    assert _live(payloads)[0]["data"]["progress"] == 2
+    assert _live(payloads)[0]["data"]["progress"] == "2"
 
 
 def test_a_job_that_finished_before_startup_never_gets_a_card():
@@ -386,7 +388,7 @@ def test_a_restart_mid_print_resyncs_the_card_instead_of_leaving_it_frozen():
     coord.hass.loop.advance(1)
     payloads = _live(_frame(coord, hass, **_printing(42)))
     assert len(payloads) == 1
-    assert payloads[0]["data"]["progress"] == 42
+    assert payloads[0]["data"]["progress"] == "42"
 
 
 # --------------------------------------------------------------------------- #
@@ -411,7 +413,7 @@ def test_a_stale_error_code_does_not_pin_the_card_to_error():
     coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
     later = _live(_frame(coord, hass, **_printing(40, err={"errcode": 521, "key": 1})))
     assert len(later) == 1, "a stale error code froze the live card"
-    assert later[0]["data"]["progress"] == 40
+    assert later[0]["data"]["progress"] == "40"
 
 
 # --------------------------------------------------------------------------- #
@@ -431,7 +433,7 @@ def test_past_the_ios_ceiling_the_card_degrades_instead_of_dying_silently():
         assert key not in data, key
     # Still one card, still replaced in place, still shows progress.
     assert data["tag"].endswith("_live")
-    assert data["progress"] == 30
+    assert data["progress"] == "30"
 
 
 def test_a_degraded_card_spells_out_the_remaining_time():

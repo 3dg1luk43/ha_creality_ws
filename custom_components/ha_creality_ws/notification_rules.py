@@ -197,6 +197,37 @@ def sanitize_tag(raw: Any) -> str:
     return (cleaned or "ha_creality_ws")[:_TAG_MAX_LEN]
 
 
+def stringify_data(data: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Coerce a companion-app ``data`` dict to what the push relay accepts.
+
+    Android delivery goes out as an FCM data message, whose payload is a
+    map<string, string>. A native ``int`` or ``bool`` at the top level makes the
+    relay reject the **whole push** with "data must only contain string values",
+    so a single `live_update: True` silently costs every Android notification --
+    which is exactly what it did: every live-card push to a Galaxy S24 failed
+    while the log said only "Error sending notification to S24".
+
+    Nesting is exempt, verified against a real device: ``actions`` (a list of
+    dicts, bools inside it and all) and ``push`` go through untouched. Only the
+    top level is rewritten.
+
+    ``None`` drops the key rather than sending the string "None", which the
+    companion app would treat as a value.
+    """
+    out: dict[str, Any] = {}
+    for key, value in (data or {}).items():
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            # Lowercase: the companion app compares against "true"/"false".
+            out[key] = "true" if value else "false"
+        elif isinstance(value, (int, float)):
+            out[key] = str(value)
+        else:
+            out[key] = value
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Job-cycle detection
 # --------------------------------------------------------------------------- #

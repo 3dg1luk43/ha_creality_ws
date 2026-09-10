@@ -49,6 +49,7 @@ from .notification_rules import (
     is_mobile_target,
     is_new_job_cycle,
     sanitize_tag,
+    stringify_data,
 )
 from .const import (
     DOMAIN,
@@ -1495,7 +1496,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if title:
                 service_data["title"] = title
             if data:
-                service_data["data"] = data
+                # Only the mobile branch reaches here with data still attached,
+                # and that is the one the FCM string rule applies to.
+                service_data["data"] = stringify_data(data)
             await self.hass.services.async_call(domain, service, service_data)
         except Exception:  # pylint: disable=broad-except
             # One unreachable phone must not starve the others.

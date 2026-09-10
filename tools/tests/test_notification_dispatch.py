@@ -107,11 +107,21 @@ RICH = {
 def test_a_legacy_mobile_service_receives_the_full_payload():
     coord, hass = _coordinator(["notify.mobile_app_pixel"])
     coord._notify_dispatch(RICH)
+    # Scalars arrive stringified: the FCM relay rejects the whole push if the
+    # top level of `data` holds a native int or bool.
     assert _flush(hass) == [
         (
             "notify",
             "mobile_app_pixel",
-            {"message": "42%", "title": "K1C", "data": RICH["data"]},
+            {
+                "message": "42%",
+                "title": "K1C",
+                "data": {
+                    "tag": "ha_creality_ws_abc_job",
+                    "live_update": "true",
+                    "progress": "42",
+                },
+            },
         )
     ]
 
