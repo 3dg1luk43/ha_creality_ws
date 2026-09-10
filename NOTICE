@@ -1,0 +1,44 @@
+Creality WebSocket Integration for Home Assistant
+Copyright (C) 3dg1luk43 and contributors
+
+This program is free software licensed under the GNU Affero General Public
+License v3.0. See LICENSE for the full text.
+
+================================================================================
+Third-party material
+================================================================================
+
+The following file is NOT covered by the AGPL-3.0 grant above. It is included
+under the copyright of its respective owner, and this project claims no rights
+over it and grants none to you:
+
+  custom_components/ha_creality_ws/www/cfs_box.webp
+
+    A product render of the Creality Filament System (CFS) unit.
+    Copyright (C) Shenzhen Creality 3D Technology Co., Ltd.
+
+    Used by the CFS card's "box" display mode to depict the specific hardware
+    this integration controls. Contributed by @buzato in pull request #75.
+
+    If you redistribute this project, note that redistributing this image is
+    subject to Creality's rights, not the AGPL. If you need a build free of
+    third-party material, delete the file and remove "cfs_box.webp" from the
+    ASSETS list in custom_components/ha_creality_ws/frontend.py; the card falls
+    back to its "full" display mode automatically.
+
+--------------------------------------------------------------------------------
+Reproducing cfs_box.webp
+--------------------------------------------------------------------------------
+
+Derived from the original 784x540 RGBA PNG (509,311 bytes) in pull request #75:
+
+    cwebp -q 68 -m 6 -alpha_q 60 -sharp_yuv -metadata none \
+          cfs_box.png -o cfs_box.webp
+
+17,766 bytes, visually indistinguishable at the size the card renders it. The
+784px width is kept deliberately: the card draws the image at roughly 400-560
+CSS pixels, so this is about 2x for high-DPI displays, and downscaling further
+looked soft. Below roughly q60 the glass gradients start to band.
+
+Re-encode from the original PNG, never from cfs_box.webp, or generation loss
+compounds.

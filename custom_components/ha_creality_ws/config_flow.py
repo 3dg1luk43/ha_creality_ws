@@ -1,12 +1,12 @@
 from __future__ import annotations
 import asyncio
 import logging
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
-from .utils import extract_host_from_zeroconf as util_extract_host_from_zeroconf
+from .notification_rules import coerce_targets
 import voluptuous as vol
 from homeassistant import config_entries #type: ignore[import]
-from homeassistant.data_entry_flow import FlowResult #type: ignore[import]
+from homeassistant.config_entries import ConfigFlowResult #type: ignore[import]
 from homeassistant.helpers import selector #type: ignore[import]
 from homeassistant.helpers.aiohttp_client import async_get_clientsession #type: ignore[import]
 from .const import (
@@ -27,10 +27,17 @@ from .const import (
     CAM_MODE_CUSTOM,
     CONF_GO2RTC_URL,
     CONF_GO2RTC_PORT,
+    CONF_GO2RTC_RTSP_PORT,
+    GO2RTC_SOURCE_SCHEMES,
     CONF_CUSTOM_CAMERA_URL,
     DEFAULT_GO2RTC_URL,
     DEFAULT_GO2RTC_PORT,
-    CONF_NOTIFY_DEVICE,
+    CONF_NOTIFY_TARGETS,
+    CONF_NOTIFY_LIVE,
+    CONF_NOTIFY_ACTIONS,
+    CONF_NOTIFY_PREVIEW_IMAGE,
+    CONF_NOTIFY_CAMERA_SNAPSHOT,
+    CONF_NOTIFY_TAP_PATH,
     CONF_NOTIFY_COMPLETED,
     CONF_NOTIFY_ERROR,
     CONF_NOTIFY_MINUTES_TO_END,
@@ -86,22 +93,17 @@ async def _has_webrtc_signaling(hass, host: str) -> bool:
         if await _probe_webrtc_signaling(hass, url, timeout=2.0):
             return True
     return False
-
-
-def _extract_host_from_zeroconf(info: Any) -> Optional[str]:
-    # Use shared helper for testability
-    return util_extract_host_from_zeroconf(info)
-
-
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 3
 
     @staticmethod
-    @config_entries.HANDLERS.register("options")
     def async_get_options_flow(config_entry: config_entries.ConfigEntry):
-        return OptionsFlowHandler(config_entry)
+        # The entry is deliberately not passed on: OptionsFlow.config_entry is
+        # a property Home Assistant resolves itself, so handing it over again
+        # only created a second reference to keep in step.
+        return OptionsFlowHandler()
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
             host = user_input[CONF_HOST].strip()
@@ -125,7 +127,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={"name": DEFAULT_NAME}
         )
 
-    async def async_step_zeroconf(self, discovery_info: Any) -> FlowResult:
+    async def async_step_zeroconf(self, discovery_info: Any) -> ConfigFlowResult:
         from .utils import extract_info_from_zeroconf
         host, mac = extract_info_from_zeroconf(discovery_info)
         
@@ -166,10 +168,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 # --------- Options Flow ---------
 class OptionsFlowHandler(config_entries.OptionsFlow):
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        # Avoid deprecated `self.config_entry = config_entry`; store private reference
-        self._entry = config_entry
         # Working copy of options edited across sub-steps. Changes are staged here
         # by each section's submit and only persisted (one reload) by "Save and
         # apply". The menu back arrow returns without staging. None until first use.
@@ -179,16 +179,16 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     def _ensure_working(self) -> None:
         """Initialize the working copy once per options-flow session."""
         if self._working is None:
-            self._working = dict(self._entry.options)
-            self._working_host = self._entry.data.get(CONF_HOST, "")
+            self._working = dict(self.config_entry.options)
+            self._working_host = self.config_entry.data.get(CONF_HOST, "")
 
     async def _detect_camera_type(self) -> str:
         """Detect the camera type for this printer."""
-        host = self._entry.data["host"]
+        host = self.config_entry.data["host"]
         
         # Get the coordinator to access printer data
         try:
-            coord = self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id)
+            coord = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
             if coord and coord.data:
                 # Use model detection if we have telemetry data
                 printermodel = ModelDetection(coord.data)
@@ -219,7 +219,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         _LOGGER.debug("ha_creality_ws: defaulting to MJPEG")
         return CAM_MODE_MJPEG
 
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Top-level options menu (the hub each section returns to).
 
         Each settings group is its own step so its form is rebuilt fresh from the
@@ -243,21 +243,21 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             },
         )
 
-    async def async_step_save(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_save(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Persist all staged changes (single reload)."""
         self._ensure_working()
         assert self._working is not None
         # Apply a host change to the entry data (separate from options).
-        if self._working_host and self._working_host != self._entry.data.get(CONF_HOST):
+        if self._working_host and self._working_host != self.config_entry.data.get(CONF_HOST):
             self.hass.config_entries.async_update_entry(
-                self._entry, data={**self._entry.data, CONF_HOST: self._working_host}
+                self.config_entry, data={**self.config_entry.data, CONF_HOST: self._working_host}
             )
             self.hass.async_create_task(
-                self.hass.config_entries.async_reload(self._entry.entry_id)
+                self.hass.config_entries.async_reload(self.config_entry.entry_id)
             )
         return self.async_create_entry(title="", data=self._working)
 
-    async def async_step_camera(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_camera(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Camera settings. Conditional fields follow the selected mode."""
         self._ensure_working()
         assert self._working is not None
@@ -280,45 +280,96 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 parsed = urlparse(custom_url)
                 # Require a supported scheme and a host. http(s) -> MJPEG/snapshot;
                 # rtsp/rtmp/srt -> ingested via go2rtc (see camera.async_setup_entry).
-                if parsed.scheme.lower() not in ("http", "https", "rtsp", "rtmp", "srt") or not parsed.netloc:
+                if parsed.scheme.lower() not in ("http", "https") + GO2RTC_SOURCE_SCHEMES or not parsed.netloc:
                     errors[CONF_CUSTOM_CAMERA_URL] = "invalid_camera_url"
                     effective_mode = CAM_MODE_CUSTOM  # ensure the URL field is shown
                 else:
                     self._working[CONF_CUSTOM_CAMERA_URL] = custom_url
 
-            if camera_mode == CAM_MODE_WEBRTC:
-                self._working[CONF_GO2RTC_URL] = (
-                    str(user_input.get(CONF_GO2RTC_URL) or "").strip() or DEFAULT_GO2RTC_URL
-                )
-                port = user_input.get(CONF_GO2RTC_PORT)
-                try:
-                    self._working[CONF_GO2RTC_PORT] = int(port) if port is not None else DEFAULT_GO2RTC_PORT
-                except (ValueError, TypeError):
+            # A Custom source with an rtsp/rtmp/srt URL is ingested by go2rtc as
+            # well (camera.async_setup_entry -> _make_go2rtc_camera), so it needs
+            # the same settings. Popping them left that path unable to reach an
+            # external go2rtc at all, and silently dropped its RTSP port.
+            custom_uses_go2rtc = (
+                camera_mode == CAM_MODE_CUSTOM
+                and urlparse(self._working.get(CONF_CUSTOM_CAMERA_URL, "") or "")
+                    .scheme.lower() in GO2RTC_SOURCE_SCHEMES
+            )
+
+            if camera_mode == CAM_MODE_WEBRTC or custom_uses_go2rtc:
+                # Only fields the form actually rendered are applied. A submit can
+                # reach here without them: switching to Custom hides the go2rtc
+                # fields, and the Custom-uses-go2rtc branch then ran with no
+                # go2rtc keys in user_input, so `.get() or DEFAULT` silently
+                # replaced a configured external server with localhost:11984.
+                if CONF_GO2RTC_URL in user_input:
+                    self._working[CONF_GO2RTC_URL] = (
+                        str(user_input.get(CONF_GO2RTC_URL) or "").strip() or DEFAULT_GO2RTC_URL
+                    )
+                elif CONF_GO2RTC_URL not in self._working:
+                    self._working[CONF_GO2RTC_URL] = DEFAULT_GO2RTC_URL
+
+                if CONF_GO2RTC_PORT in user_input:
+                    port = user_input.get(CONF_GO2RTC_PORT)
+                    try:
+                        self._working[CONF_GO2RTC_PORT] = int(port) if port is not None else DEFAULT_GO2RTC_PORT
+                    except (ValueError, TypeError):
+                        self._working[CONF_GO2RTC_PORT] = DEFAULT_GO2RTC_PORT
+                elif CONF_GO2RTC_PORT not in self._working:
                     self._working[CONF_GO2RTC_PORT] = DEFAULT_GO2RTC_PORT
-            else:
+
+                # RTSP port is only needed for HA's HLS pipeline; blank/0 means
+                # "auto-detect" (18554 for HA-managed go2rtc, 8554 otherwise).
+                if CONF_GO2RTC_RTSP_PORT in user_input:
+                    rtsp_port = user_input.get(CONF_GO2RTC_RTSP_PORT)
+                    try:
+                        rtsp_port_int = int(rtsp_port) if rtsp_port is not None else 0
+                    except (ValueError, TypeError):
+                        rtsp_port_int = 0
+                    if rtsp_port_int > 0:
+                        self._working[CONF_GO2RTC_RTSP_PORT] = rtsp_port_int
+                    else:
+                        self._working.pop(CONF_GO2RTC_RTSP_PORT, None)
+            elif not errors:
                 # Drop go2rtc settings for non-go2rtc modes so they don't linger.
+                # Only once the submission is otherwise valid: an invalid Custom
+                # URL re-renders this step, and discarding the settings meanwhile
+                # lost them before the user could correct the URL.
                 self._working.pop(CONF_GO2RTC_URL, None)
                 self._working.pop(CONF_GO2RTC_PORT, None)
+                self._working.pop(CONF_GO2RTC_RTSP_PORT, None)
 
             if not errors:
                 return await self.async_step_init()
 
         current_go2rtc_url = self._working.get(CONF_GO2RTC_URL, DEFAULT_GO2RTC_URL)
         current_go2rtc_port = self._working.get(CONF_GO2RTC_PORT, DEFAULT_GO2RTC_PORT)
+        # 0 renders as "auto-detect" in the form.
+        current_go2rtc_rtsp_port = self._working.get(CONF_GO2RTC_RTSP_PORT, 0)
         current_custom_url = self._working.get(CONF_CUSTOM_CAMERA_URL, "")
-        show_go2rtc = effective_mode in (CAM_MODE_WEBRTC, CAM_MODE_AUTO)
+        # Offered for Custom too once its URL is a go2rtc-ingested scheme, since
+        # that path builds a go2rtc camera. On a fresh Custom setup the URL is not
+        # staged yet, so the fields appear the next time the step is opened.
+        show_go2rtc = effective_mode in (CAM_MODE_WEBRTC, CAM_MODE_AUTO) or (
+            effective_mode == CAM_MODE_CUSTOM
+            and urlparse(current_custom_url or "").scheme.lower() in GO2RTC_SOURCE_SCHEMES
+        )
         show_custom_url = effective_mode == CAM_MODE_CUSTOM
 
         schema_dict: dict[str, Any] = {
             vol.Optional(CONF_CAMERA_MODE, default=effective_mode): selector.SelectSelector(
+                # Bare values plus a translation_key: the visible labels live
+                # under `selector.camera_mode.options` in strings.json, so they
+                # are translated like everything else rather than hardcoded here.
                 selector.SelectSelectorConfig(
                     options=[
-                        selector.SelectOptionDict(value=CAM_MODE_AUTO, label="Auto (detect by model)"),
-                        selector.SelectOptionDict(value=CAM_MODE_MJPEG, label="MJPEG (K1 family)"),
-                        selector.SelectOptionDict(value=CAM_MODE_WEBRTC, label="WebRTC via go2rtc (K2 family)"),
-                        selector.SelectOptionDict(value=CAM_MODE_WEBRTC_DIRECT, label="WebRTC direct, no go2rtc (alternative)"),
-                        selector.SelectOptionDict(value=CAM_MODE_CUSTOM, label="Custom camera URL (MJPEG / RTSP)"),
+                        CAM_MODE_AUTO,
+                        CAM_MODE_MJPEG,
+                        CAM_MODE_WEBRTC,
+                        CAM_MODE_WEBRTC_DIRECT,
+                        CAM_MODE_CUSTOM,
                     ],
+                    translation_key="camera_mode",
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
             ),
@@ -330,6 +381,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ),
                 vol.Optional(CONF_GO2RTC_PORT, default=current_go2rtc_port): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=1, max=65535, mode=selector.NumberSelectorMode.BOX)
+                ),
+                vol.Optional(CONF_GO2RTC_RTSP_PORT, default=current_go2rtc_rtsp_port): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=65535, mode=selector.NumberSelectorMode.BOX)
                 ),
             })
         if show_custom_url:
@@ -346,59 +400,95 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             step_id="camera",
             data_schema=vol.Schema(schema_dict),
             errors=errors,
-            description_placeholders={
-                "camera_help": (
-                    "Camera streaming mode. Auto detects from the printer model. "
-                    "WebRTC via go2rtc is the default for K2-family printers; "
-                    "WebRTC direct is an alternative that signals the printer itself "
-                    "(no go2rtc) — try it if the default does not work, e.g. on newer "
-                    "K1C firmware. Custom lets you point at any http(s) MJPEG/snapshot "
-                    "URL or an rtsp:// stream (served via go2rtc). "
-                    "Submit returns to the menu; use Save and apply there to apply changes."
-                ),
-            },
         )
 
-    async def async_step_notifications(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    def _notify_target_options(self, current: list[str]) -> list[Any]:
+        """Every notify target we can offer, plus whatever is already stored.
+
+        Covers both dialects: legacy `notify.<service>` services and modern
+        notify *entities*. Anything already configured is kept in the list even
+        if its integration is not loaded right now, so opening this step while a
+        phone's integration is down does not quietly drop it on save.
+        """
+        candidates: list[str] = [
+            f"notify.{name}"
+            for name in self.hass.services.async_services().get("notify", {})
+        ]
+        try:
+            candidates.extend(self.hass.states.async_entity_ids("notify"))
+        except Exception:  # pylint: disable=broad-except
+            # A stub in tests, where states is not backed by a registry.
+            # The service list alone is enough to render the step.
+            pass
+        candidates.extend(current)
+        return [
+            selector.SelectOptionDict(value=value, label=value)
+            for value in sorted(set(candidates))
+        ]
+
+    async def async_step_notifications(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Notification settings."""
         self._ensure_working()
         assert self._working is not None
         if user_input is not None:
-            self._working.update(user_input)
+            # Never persist None. `options.get(key, DEFAULT)` returns the stored
+            # None rather than the default, and the int()/float() casts at setup
+            # then fail for good -- a cleared field would brick the entry.
+            cleaned = {k: v for k, v in user_input.items() if v is not None}
+            cleaned[CONF_NOTIFY_TARGETS] = [
+                t.strip()
+                for t in (cleaned.get(CONF_NOTIFY_TARGETS) or [])
+                if isinstance(t, str) and t.strip()
+            ]
+            self._working.update(cleaned)
             return await self.async_step_init()
 
-        notify_device = self._working.get(CONF_NOTIFY_DEVICE)
+        # Seeded through the same coercion the coordinator uses, so a user
+        # upgrading from the single-device option sees it pre-selected here and
+        # the first save persists the new shape.
+        current_targets = coerce_targets(self._working)
         notify_completed = self._working.get(CONF_NOTIFY_COMPLETED, False)
         notify_error = self._working.get(CONF_NOTIFY_ERROR, False)
         notify_minutes_to_end = self._working.get(CONF_NOTIFY_MINUTES_TO_END, False)
         minutes_to_end_value = self._working.get(CONF_MINUTES_TO_END_VALUE, 5)
-
-        notify_services = self.hass.services.async_services().get("notify", {})
-        notify_service_options = [
-            selector.SelectOptionDict(value=f"notify.{name}", label=name)
-            for name in notify_services.keys()
-        ]
-        if notify_device and notify_device not in [o["value"] for o in notify_service_options]:
-            notify_service_options.append(selector.SelectOptionDict(value=notify_device, label=notify_device))
+        notify_live = self._working.get(CONF_NOTIFY_LIVE, False)
+        notify_actions = self._working.get(CONF_NOTIFY_ACTIONS, False)
+        notify_preview = self._working.get(CONF_NOTIFY_PREVIEW_IMAGE, True)
+        notify_snapshot = self._working.get(CONF_NOTIFY_CAMERA_SNAPSHOT, True)
+        notify_tap_path = self._working.get(CONF_NOTIFY_TAP_PATH, "")
 
         schema_dict: dict[str, Any] = {
-            vol.Optional(CONF_NOTIFY_DEVICE, default=notify_device or vol.UNDEFINED): selector.SelectSelector(
+            vol.Optional(CONF_NOTIFY_TARGETS, default=current_targets): selector.SelectSelector(
                 selector.SelectSelectorConfig(
-                    options=notify_service_options,
+                    options=self._notify_target_options(current_targets),
                     mode=selector.SelectSelectorMode.DROPDOWN,
+                    multiple=True,
                     custom_value=True,
                 )
             ),
+            vol.Optional(CONF_NOTIFY_LIVE, default=notify_live): selector.BooleanSelector(),
             vol.Optional(CONF_NOTIFY_COMPLETED, default=notify_completed): selector.BooleanSelector(),
             vol.Optional(CONF_NOTIFY_ERROR, default=notify_error): selector.BooleanSelector(),
             vol.Optional(CONF_NOTIFY_MINUTES_TO_END, default=notify_minutes_to_end): selector.BooleanSelector(),
             vol.Optional(CONF_MINUTES_TO_END_VALUE, default=minutes_to_end_value): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=1, max=60, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="min")
             ),
+            vol.Optional(CONF_NOTIFY_ACTIONS, default=notify_actions): selector.BooleanSelector(),
+            vol.Optional(CONF_NOTIFY_PREVIEW_IMAGE, default=notify_preview): selector.BooleanSelector(),
+            vol.Optional(CONF_NOTIFY_CAMERA_SNAPSHOT, default=notify_snapshot): selector.BooleanSelector(),
+            vol.Optional(CONF_NOTIFY_TAP_PATH, default=notify_tap_path or ""): selector.TextSelector(
+                selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT, autocomplete="off")
+            ),
         }
-        return self.async_show_form(step_id="notifications", data_schema=vol.Schema(schema_dict))
+        # No description_placeholders: the prose lives in strings.json as the
+        # step description, so each locale can actually translate it. A
+        # hardcoded placeholder would render the same English in every language.
+        return self.async_show_form(
+            step_id="notifications",
+            data_schema=vol.Schema(schema_dict),
+        )
 
-    async def async_step_power(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_power(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Power switch detection settings."""
         self._ensure_working()
         assert self._working is not None
@@ -440,12 +530,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="power",
             data_schema=vol.Schema(schema_dict),
-            description_placeholders={
-                "power_help": "Optional power switch entity ID (e.g., switch.smart_plug_name) to enable accurate 'Off' state detection",
-            },
         )
 
-    async def async_step_connection(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_connection(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Connection (IP) and performance (polling) settings."""
         self._ensure_working()
         assert self._working is not None

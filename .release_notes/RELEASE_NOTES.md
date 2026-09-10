@@ -6,6 +6,136 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.9.8] - 2026-09-08
+> [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)
+
+> **This release raises the minimum Home Assistant version to 2026.7.0.** HACS
+> will not offer it to older cores, and on an older core setup now fails with an
+> explicit message rather than a live print card that quietly never appears —
+> a manual or git install never goes through HACS. Stay on 0.9.7 if you cannot
+> update Home Assistant. The live print card depends on the companion app's Live
+> Activity support, which landed in 2026.7.
+
+### Added
+
+- **Live print notifications for Android and iOS.** One card per printer that updates in place — on the iOS Lock Screen and in the Dynamic Island, and in the Android status bar and shade — with a countdown timer to the estimated finish, a progress bar, the current layer, and the G-code preview as its icon. It ends itself when the print does, replaced by a completion notification carrying a camera snapshot of the bed.
+  - The countdown **runs on the phone**, so it costs no pushes at all. Pushes happen on a state change (start, pause, resume, finish) and every 5% of progress, never more than once per 30 seconds — iOS throttles frequent Live Activity updates and eventually drops them.
+  - **Multiple notify targets.** Companion-app targets get the full card; every other notify platform gets the message and title only. That is deliberate: some platforms reject payload keys they do not recognise and fail the entire call, and `notify.send_message` has no payload field at all.
+  - **Optional Pause / Resume / Stop buttons**, off by default. They reuse the same code paths as the corresponding button entities. Stop is destructive and requires device authentication, so a mis-tap on a lock screen cannot end a long print.
+  - **Tapping** opens the printer camera's live feed on Android with no configuration. Set a dashboard path to control where a tap goes, which is also the only way an iOS tap can deep-link.
+- **Bus events** `ha_creality_ws_print_started`, `_print_finished` and `_print_error`, fired whether or not any notify target is configured. They carry `entry_id`, `host`, `device_name`, `filename`, `progress`, `layer`, `total_layers`, `left_seconds` and `err_code`. This is the supported way to write your own notification text in a language other than your server's, since an integration is never told which user a notification is for.
+- **`snapshot_supported` attribute** on the camera entities, saying whether the camera can produce a still image at all.
+- **A cancelled or aborted print now says so.** The live card was dismissed and nothing else happened, so from the phone's side a notification silently disappeared with no indication of whether the print had finished or died. There is a new banner naming the file and the percentage it stopped at, plus a `ha_creality_ws_print_stopped` bus event. It shares the *Notify when a print ends* toggle, because being told a print completed is only half the story.
+- **Notification text is translated.** Every message, status label, button caption and Android notification-channel name now lives in the translation files, with Spanish supplied. Note the limitation this cannot escape: an integration is never told *which user* a notification is for, so the text follows the **server** language (Settings → System → General), not each person's profile. If your household needs per-user languages, use the bus events above and write the text in your own automation.
+
+- **Edit filament from the CFS card.** Each slot tile gains an edit button opening a dialog for material type, name, vendor, colour, temperature range and pressure advance. Saving writes to the printer and then asks it to re-report, so the tile only changes once the write has actually landed.
+  - The dialog states which **box and slot** it will write to, and says so explicitly when it had to infer the target from the card layout rather than read it from the printer.
+  - Editing is disabled while the printer is **busy**, and for cards whose entities span **more than one printer** (there would be no way to tell which machine to write to).
+  - **Multi-colour spools** show their colour read-only. The printer reports two values for them and a single colour cannot represent them, so the rest of the fields save and the colour is left alone.
+  - **Colour presets**: Creality's standard palette plus your own, kept in your browser rather than in the dashboard config.
+- **`ha_creality_ws.set_cfs_material` service** for writing filament metadata to a slot, usable from automations as well as the card. Only the fields you supply are changed — the printer merges into the slot it already has, so leaving `rfid` empty preserves the existing tag association.
+- **New CFS slot attributes**: `box_id`, `slot_id`, `min_temp`, `max_temp` and `pressure`. The first two are how the service addresses a slot; the rest are what the edit dialog prefills from. Not every printer reports the temperatures on every slot, so treat `null` as "unknown" rather than zero.
+- **Third card display mode, `box`**: a photo of the CFS unit with a spool overlay per bay. Requires a mapped four-slot box and falls back to the full view otherwise, since the overlay geometry is tied to that image.
+
+- **`spool_key` attribute on every CFS slot** (closes #117 part 2):
+  - The printer's `rfid` field is a material/filament id, not a tag serial, so two spools of the same vendor and material share it even when their colours differ — external trackers such as spoolman-sync could not tell them apart. Each slot (and the external filament) now also exposes `spool_key`, which combines that id with the normalised colour, so four slots of `Creality Hyper PLA` in different colours get four distinct keys.
+  - `spool_key` is a **derived** identifier, not new telemetry: the printer streams no per-tag serial, so two genuinely identical spools still produce the same key. The raw `rfid` value is passed through unchanged.
+  - Multi-colour spools collapse to a single flat token (`generic-pla-silk_ffa800-ff97e1`), and colours the printer reports as sentinels (`N/A`, empty) are left out of the key entirely.
+- **`color_hex_raw` attribute on every CFS slot**: the printer's original colour string, kept alongside the corrected `color_hex` for reference and debugging.
+- **Optional go2rtc RTSP port** under *Configure → Camera*: only needed if your go2rtc listens on a non-default RTSP port. `0` (the default) keeps auto-detection.
+- **Fan documentation**: the `fan.*_model_fan` / `*_case_fan` / `*_side_fan` entities have always supported on/off and speed control, but were undocumented (#114). The README now covers them, including a chamber-too-hot automation example.
+
+### Changed
+
+- **The *Notify when Completed* option is now *Notify when a print ends*** and covers both a finished and a stopped print. The setting itself is unchanged; if you had it on, you will now also hear about cancellations.
+- **⚠️ `sensor.<printer>_system` has been removed.** It was a byte-identical duplicate of `sensor.<printer>_model` — same value, same `hostname` and `modelVersion` attributes — and every install had both. The one with the self-describing name was kept, and the duplicate is removed from the entity registry on upgrade rather than left orphaned. **If a dashboard or automation references `sensor.<printer>_system`, point it at `sensor.<printer>_model`.**
+- **The single *Notification Device* setting became *Notification targets*** and accepts several. Existing configurations migrate automatically on load, with nothing to do; the old value is left on disk so a downgrade keeps working. The live card is **opt-in** — an update will not start putting a persistent card on your Lock Screen by itself.
+- **Notification messages name the file, not its full path.** K1C firmware reports `/usr/data/printer_data/gcodes/3DBenchy.gcode`, and that whole string used to be interpolated into the text. Sensor attributes still publish the raw value, so templates are unaffected.
+- **Notification messages no longer wrap the file name in quotes** — `Print 3DBenchy.gcode completed successfully!` rather than `Print '3DBenchy.gcode' completed successfully!`. Home Assistant's own translation validation rejects placeholders inside single quotes, and the messages had to move into the translation files to be translatable at all. Only the punctuation changed.
+- **The camera-mode dropdown and the camera and power-switch help text are translatable.** They were hardcoded English regardless of your language; the dropdown now uses a translation key and the two step descriptions live in the translation files like every other string.
+- **Notifications are no longer awaited inside the WebSocket receive loop.** A push notification is an HTTPS request to Apple's or Google's relay; waiting for one there stalled the loop that keeps the printer connection alive, and with several targets it could have let every entity flicker unavailable.
+
+- **The card's `compact_view` option became `view_mode`** (`full` | `compact` | `box`). Existing dashboards migrate automatically on load, and the old key is dropped the next time you edit the card. No action needed.
+- **The card only re-renders when something it displays has actually changed**, instead of on every state update.
+- **Printer status is derived in one place** now, shared by the status sensor and the service's "is it safe to write" check, so the card and the service cannot disagree about whether the printer is busy.
+- **The bundled CFS unit image is 17 kB instead of 509 kB** (WebP). The whole `www/` directory had been 143 kB, so as a PNG this one decorative asset would have made every install over four times larger.
+
+### Fixed
+
+- **Pause was sent to printers that had already stopped.** The coordinator had its own idea of "printing" — a job counted as printing if it merely had a file name and a progress value — so a job at 100%, or one the printer had already halted, still looked printable. Pressing Pause at the end of a print fired a `pause` command at a finished printer. Pause and resume now go through the same state derivation as everything else.
+- **A queued pause or resume outlived the job it was meant for.** Requests made while the printer was busy but not yet printing are held until they can land; they were never discarded when the job ended, so one left over would fire as the *next* print started. They are dropped when the job is over.
+- **Stopping a print and re-running the same file left notifications dead.** The "has a new job begun" check keyed on a *completion* having been seen, which a stopped print never produces — so the second run got no live card and no notifications at all. It now recognises either kind of ending, using the job clock rather than progress for a print stopped part-way (a job stopped at 30% never leaves the end-of-print jitter band, so a progress test would re-arm immediately).
+- **The G-code preview vanished while a print was paused**, and stayed hidden for the rest of a print once the printer set an error code it never cleared. The preview now follows the same shared state derivation as everything else, which tolerates a stale fault, and covers paused and warming-up jobs.
+- **The diagnostic service was re-registered on every printer setup**, and the Home Assistant version in a diagnostic dump always read `unknown`. Both were `hasattr` checks against objects that never had the attribute — one against a dict, one against `hass.config` — so neither guard ever fired. The dump now reports the real version, with a UTC timestamp instead of a naive local one.
+- **The legacy light switch and the legacy fan percentage controls could never be created.** The migration that removes those entities from the registry runs *before* platform setup, and both platforms only created an entity if the registry already had one — so `switch.py` produced nothing at all. The dead platform and controls are gone; the migration that cleans up the old entities stays.
+- **The camera advertised a feature flag that does not exist.** `CameraEntityFeature` has only `ON_OFF` and `STREAM`; the code also OR'd in a non-existent `ON_DEMAND` and then logged `ON_OFF`'s bit under that name, so the log line always said `ON_DEMAND=False`. It now declares `STREAM`, which is what native WebRTC actually needs.
+- **The printer card had branches for `resuming` and `pausing`**, neither of which the integration can ever report — so the paused colour and two icon choices keyed on states that never arrive. The card now mirrors the real state list, and a test cross-checks it against the integration the way the CFS card already did.
+- **A failure to serve the dashboard cards was logged at debug level**, meaning the cards would 404 with nothing in the log to say why. It is a warning now.
+
+- **A notify target that could not be routed failed silently** — no error, no log, no notification. Since the field accepts free text, a typo simply did nothing. It now logs a warning.
+- **Notification state stopped tracking when no target was configured**, so switching notifications on in the middle of a print could immediately fire a spurious "completed".
+- **The camera snapshot is skipped where it cannot work.** K2-family cameras using direct WebRTC signalling have no snapshot endpoint and serve a 1x1 placeholder; the same check applies to the G-code preview, which serves a transparent 1x1 when the printer has no preview. Either would have rendered as an empty grey box.
+
+- **Camera stream API (HLS, recording, casting) failed with `TypeError: 'str' object is not callable`** (closes #116, thanks @Raymondvb1985):
+  - `stream_source` was defined as a synchronous property returning the go2rtc *stream name*, which shadowed HA core's `async def stream_source()`. Every consumer of the classic stream pipeline — the `camera/stream` WebSocket command, HLS playback, `camera.record`, `camera.play_stream`, casting — does `source = await self.stream_source()`, so it tried to call a string.
+  - It is now an async method returning an RTSP URL on the same go2rtc instance, which HA's `stream` component can actually ingest. The port is detected automatically (`18554` for HA's built-in go2rtc, `8554` for a stand-alone one) and can be overridden in the options flow. WebRTC playback in the frontend is unchanged; "WebRTC direct" cameras still have no HLS source, as they never register a go2rtc stream.
+- **Wrong CFS spool colour: leading pad character was kept** (closes #113 and #117 part 1, thanks @raf802):
+  - Creality RFID tags store the colour as *seven* hex characters — one padding character followed by the real `RRGGBB` — and the printer streams that verbatim. Reading the first six digits produced the wrong colour, e.g. `#0ffffff` reported as `#0ffffff` instead of `#ffffff`.
+  - The colour sensors and the `color_hex` attribute now keep the **last** six digits and normalise to lowercase `#rrggbb`. Values that are not recognisable hex (`N/A`, named colours, empty) are left untouched, and multi-colour values are normalised element-wise. The CFS card already compensated for this, so its rendering is unchanged.
+- **`Generic Generic PLA` in the filament label** (closes #115):
+  - The filament sensors joined the vendor and the material name unconditionally, but the printer frequently repeats the vendor inside the name (vendor `Generic`, name `Generic PLA`). The vendor is now only prepended when the name does not already start with it.
+  - **⚠️ A vendor the printer never reported is no longer invented.** When the telemetry carries no `vendor` at all, the old code substituted the literal string `Generic`, so a slot reporting only `PETG` was labelled `Generic PETG`. The label now falls back to the material name, then the material type. If you match on the old value in a template or automation, update it.
+  - A completely empty slot no longer produces the malformed state `'Generic '` (with a trailing space); it reports `Unknown`, which both the CFS card and Home Assistant render as `—`.
+- **"Print completed" notification on every Home Assistant restart** (closes #112, thanks @chairstacker):
+  - The printer keeps reporting the finished job's file name and 100% progress indefinitely, so a freshly started coordinator read that stale state as a brand new completion and notified about it — on every restart and every config-entry reload.
+  - Notifications are now baselined on startup: the first telemetry frame that carries the print state is recorded silently (with a 10 s grace window for printers that report neither field), so only a genuine transition after that notifies. The same guard applies to the error, filament-runout and minutes-to-end notifications.
+- **Minutes-to-end notification never fired**: it read `printTimeLeft`, but the printer streams the remaining time as `printLeftTime`, so the value was always absent. Found while fixing #112.
+- **Chamber-target control missing after a restart while the printer was off**:
+  - `number.<printer>_chamber_target` was only created if the printer had already reported `maxBoxTemp` at the moment the `number` platform was set up. Platform setup deliberately does not wait for the printer (an offline printer must not block the config entry), so restarting Home Assistant while the printer was off left the entity uncreated — and nothing recreated it when the printer came back, so it sat `unavailable` until a restart that happened to win the race.
+  - The control is now satisfied by the chamber capability cached during onboarding, and the coordinator additionally fires a discovery signal the first time any gating telemetry field appears, so late-arriving capabilities create their entities without a restart. Found while verifying #112/#114 against a live printer.
+- **Dynamic CFS discovery relied on a swallowed error**: the late-discovery handler wrapped `async_add_entities` in a coroutine and awaited it. `async_add_entities` is a synchronous callback returning `None`, so the await raised `TypeError` every time — after the entities had been added, with the exception discarded because nothing held the resulting future. Both platforms now schedule the callback on the event loop instead, which is also what stops the entity-add task being destroyed mid-flight.
+- **Completion notification only ever arrived once per file name**: the "already notified" flag was only cleared when the print file name changed, so reprinting the same file never notified again. It is now also re-armed whenever progress falls back below 100%. Found while verifying #112 against a live printer.
+
+### Internal
+
+- **The coordinator holds its `ConfigEntry` instead of just the entry id**, so reading the onboarding cache or the options no longer means a `config_entries.async_get_entry` round trip in five different places, each wrapped in its own `try/except`. Passed explicitly rather than left to Home Assistant's ContextVar, which only resolved correctly while running inside `async_setup_entry`.
+- **The options flow no longer receives the config entry it is already given.** `OptionsFlow.config_entry` is a property Home Assistant resolves itself; passing it in created a second reference to keep in step.
+- **`typing.Optional`/`List`/`Dict` replaced with `X | None`, `list` and `dict`**, and `Callable`/`Mapping`/`Iterable`/`Awaitable` imported from `collections.abc`. Every module already had `from __future__ import annotations`.
+- **`KEntity`'s reads of the onboarding cache are covered by tests.** They had none, which is how the device name and the temperature limits shown while a printer is unreachable came to be refactored blind — including the fallback that keeps chamber control working for entries cached before the box/chamber rename.
+- **Two more accidental test-ordering dependencies removed.** Both `test_coordinator.py` and `test_options_flow.py` installed module-level stubs narrower than the shared ones; pytest imports every module during collection, so those were still active while later modules were imported, and a missing constructor argument or attribute broke them.
+
+- **Removed the backwards-compatibility code that the 2026.7 minimum makes unreachable**: six `try/except ImportError` unit- and feature-detection blocks, the pre-2024.7 static-path API, the pre-dataclass Lovelace resources access, and the positional-argument handling in `fan.turn_on`. The two shims that remain are deliberate — they run at import time, before the version check, so an ancient core still gets the friendly "update Home Assistant" message rather than an `ImportError`.
+- **Deleted code nothing called**: six unused functions, a write-only `use_proxy` parameter, four unused constants, a duplicated statement, a no-op `if` body, and a test that asserted `"logistics" not in manifest.json`.
+- **Modernised deprecated APIs**: `FlowResult` → `ConfigFlowResult`, `AddEntitiesCallback` → `AddConfigEntryEntitiesCallback`, `DeviceInfo` and `EntityCategory` from their canonical modules, `datetime.utcnow()` → the timezone-aware `dt_util.utcnow()`, and `asyncio.get_event_loop()` → `get_running_loop()`.
+- **The test suite no longer depends on collection order.** Home Assistant stubs the integration needs at import time now live in `conftest.py`. Previously the first test module to import the package supplied them by accident, so deleting an unrelated test file was enough to break a later one — and no test module could be run on its own. All of them can now.
+
+- `LATE_DISCOVERY_FIELDS` in `const.py` lists the telemetry fields that gate entity creation (`boxsInfo`, `maxBoxTemp`); the coordinator fires a single discovery signal the first time each appears, replacing the CFS-only trigger. Platforms subscribe and re-check idempotently.
+- New shared CFS helpers in `utils.py` — `normalize_color_hex`, `format_filament_label`, `build_spool_key` — replacing the duplicated inline logic in `KCFSSlotSensor`, `KCFSExtSlotSensor` and `KActiveFilamentSensor`, whose attribute dicts now come from one `_cfs_slot_attributes` builder.
+- Regression tests added for all of the above (`test_cfs_filament.py`, `test_cfs_sensors.py`, `test_notifications.py`, `test_fan.py`, plus new `stream_source` cases in `test_camera_stream_config.py`).
+
+### Notes
+
+- The live card needs **iOS 17.2+** or **Android 16+**. On older phones the notification still arrives and still replaces itself in place; you lose the timer and the progress bar, not the notification.
+- **iOS ends any Live Activity after 8 hours.** That is an Apple limit no app can extend, and it matters here because prints can run far longer. Past 8 hours the card carries on as an ordinary notification with the remaining time written into the text, and the completion notification still arrives. Android has no such limit.
+- The G-code preview does **not** appear inside an iOS Live Activity — that layout has no image slot. It shows on the Android card and on the plain notifications on both platforms.
+
+### Notes for anyone with CFS hardware
+
+Creality does not document the `modifyMaterial` command. The payload shape comes from @buzato's testing against a real CFS, and is verified here against the bundled printer simulator — but two details are still unconfirmed: the printer *streams* colours as seven hex characters yet appears to accept six on write, and the `rfid` field name is inferred from telemetry rather than from a confirmed dump. Every write logs both the outgoing payload and what the printer reports back afterwards. **If a material edit does something unexpected, please open an issue with that part of your debug log** — that is what will settle these.
+
+### Test server (`tools/creality_printer_test_server.py`)
+
+Several fidelity gaps made the simulator disagree with real hardware, which hid working behaviour and invented broken behaviour. All of these are dev-tooling only.
+
+- **Fan telemetry used names the integration never reads**: it emitted `caseFan` / `modelFan` / `sideFan` where the printer sends `modelFanPct` / `caseFanPct` / `auxiliaryFanPct`, so fan entities always looked stuck at 0. It now emits the real names, honours `M106 P<ch> S<0-255>` arriving over `gcodeCmd`, and leaves a manually driven fan alone instead of overwriting it with jitter.
+- **Video was answered as VP8**: aiortc's default capability order puts VP8 first, and Home Assistant's `stream` component cannot package VP8 into HLS, so the playlist blocked forever. Real K-series printers send H.264, so the simulator now answers H.264 first (`--prefer-codec`, default `h264`).
+- **Keyframes were up to 25 s apart**: aiortc's H.264 encoder inherits libx264's 250-frame keyframe interval, and HA's stream worker gives up long before that. Video is now pre-encoded with a 1 s GOP and sent through as packets, bypassing aiortc's encoder (`--video-source auto`).
+- **Healthy WebRTC sessions were killed after 60 s** by an unconditional sleep-then-close, which made every consumer reconnect in a loop. Teardown now follows the connection state.
+- **`--deterministic`** removes all randomness (temperature oscillation, fan jitter, XYZ drift) so telemetry is reproducible — that is what makes an entity-state diff between two integration versions usable as a regression check. The print-progress fields (`printProgress`, `printJobTime`, `printLeftTime`, `layer`, `usedMaterialLength`) stay derived from elapsed wall-clock time, so they still depend on when you sample them.
+- **`--cfs-variant edge`** adds the awkward CFS payloads: an already-correct six-character colour, a slot with no vendor, a multi-colour spool, shared `rfid` values across colours, and an empty external slot.
+- **Test-control endpoints** (`POST /test/set`, `/test/reset`, `/test/cfs`, `GET /test/state`) pin any telemetry field on demand, so notification scenarios (completion, error, runout, minutes-to-end) can be driven in seconds instead of waiting out a simulated print. Real printers have no such endpoints.
+- Log lines now carry timestamps, and the offer/answer SDP is dumped under `--debug`.
+
 ## [0.9.7] - 2026-07-28
 > [List of issues (0.9.7)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.7)
 

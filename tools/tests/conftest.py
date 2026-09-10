@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 import types
-from typing import Optional
+
 from unittest.mock import MagicMock
 
 # Ensure repository root is on sys.path so `custom_components` imports work
@@ -37,6 +37,13 @@ def callback(func):
     return func
 core_mod.callback = callback
 
+class ServiceCall:  # pragma: no cover - a type only
+    def __init__(self, *args, **kwargs):
+        self.data = kwargs.get("data", {})
+
+
+core_mod.ServiceCall = ServiceCall
+
 setattr(ha_mod, "core", core_mod)
 setattr(ha_mod, "helpers", helpers_mod)
 setattr(ha_mod, "components", components_mod)
@@ -48,11 +55,28 @@ sys.modules["homeassistant.components"] = components_mod
 
 # --- MOCK DataUpdateCoordinator ---
 class DataUpdateCoordinator:  # type: ignore
-    def __init__(self, hass, logger=None, name: Optional[str] = None, update_interval=None):
+    def __init__(
+        self,
+        hass,
+        logger=None,
+        name: str | None = None,
+        update_interval=None,
+        update_method=None,
+        request_refresh_debouncer=None,
+        config_entry=None,
+        always_update=True,
+    ):
         self.hass = hass
         self.logger = logger
         self.name = name
         self.update_interval = update_interval
+        # Home Assistant sets this from the argument, or from a ContextVar when
+        # the argument is omitted. The integration passes it explicitly.
+        self.config_entry = config_entry
+
+    async def async_refresh(self):
+        # no-op in tests
+        pass
 
     def async_update_listeners(self):
         # no-op in tests
@@ -71,6 +95,27 @@ setattr(uc_mod, "CoordinatorEntity", CoordinatorEntity)
 setattr(helpers_mod, "update_coordinator", uc_mod)
 sys.modules["homeassistant.helpers.update_coordinator"] = uc_mod
 
+# --- MOCK helpers.dispatcher ---
+# Installed here rather than in each test module: four of them used to do
+# `if "homeassistant.helpers.dispatcher" not in sys.modules: ... MagicMock()`,
+# which made the module every later import saw depend on pytest's collection
+# order. Named no-ops rather than a blanket MagicMock, so a rename in the
+# integration surfaces as a failure instead of silently passing. Tests that need
+# to observe a dispatch monkeypatch the name the module under test imported.
+dispatcher_mod = types.ModuleType("homeassistant.helpers.dispatcher")
+
+def async_dispatcher_send(_hass, _signal, *_args) -> None:
+    return None
+
+def async_dispatcher_connect(_hass, _signal, _target):
+    """Return the unsubscribe callable HA hands back."""
+    return lambda: None
+
+dispatcher_mod.async_dispatcher_send = async_dispatcher_send
+dispatcher_mod.async_dispatcher_connect = async_dispatcher_connect
+sys.modules["homeassistant.helpers.dispatcher"] = dispatcher_mod
+helpers_mod.dispatcher = dispatcher_mod
+
 # --- MOCK aiohttp_client ---
 aiohttp_client_mod = types.ModuleType("homeassistant.helpers.aiohttp_client")
 def async_get_clientsession(hass):
@@ -78,6 +123,231 @@ def async_get_clientsession(hass):
 setattr(aiohttp_client_mod, "async_get_clientsession", async_get_clientsession)
 sys.modules["homeassistant.helpers.aiohttp_client"] = aiohttp_client_mod
 setattr(helpers_mod, "aiohttp_client", aiohttp_client_mod)
+
+# --- MOCK components.number + const + helpers.entity_registry ---
+# Needed by number.py, which test_late_discovery drives directly. Registered here
+# rather than inside that test module: these are process-wide, so a per-module
+# install leaks into whatever pytest collects next.
+number_mod = types.ModuleType("homeassistant.components.number")
+
+class NumberEntity:
+    pass
+
+number_mod.NumberEntity = NumberEntity
+number_mod.NumberMode = MagicMock()
+number_mod.NumberDeviceClass = MagicMock()
+sys.modules["homeassistant.components.number"] = number_mod
+components_mod.number = number_mod
+
+# A MagicMock rather than a real module: the integration imports a moving set of
+# unit constants from here (including an older-core fallback block), and every
+# `from homeassistant.const import X` has to resolve. Named attributes are pinned
+# where a test asserts on the value.
+const_mod = MagicMock()
+const_mod.PERCENTAGE = "%"
+# Pinned so the minimum-core check is exercisable: MAJOR/MINOR would otherwise be
+# MagicMocks and int() on one raises, silently taking the "version unknown" path.
+const_mod.MAJOR_VERSION = 2026
+const_mod.MINOR_VERSION = 7
+const_mod.__version__ = "2026.7.0"
+const_mod.UnitOfTemperature.CELSIUS = "°C"
+sys.modules["homeassistant.const"] = const_mod
+ha_mod.const = const_mod
+
+# --- MOCK helpers.translation ---
+# Serves the integration's *real* translation files, flattened exactly the way
+# Home Assistant flattens them, so tests assert the shipped text rather than a
+# fixture copy of it that could silently drift from strings.json.
+translation_mod = types.ModuleType("homeassistant.helpers.translation")
+
+
+def _flatten_translations(prefix: str, obj: dict, out: dict) -> None:
+    for key, value in obj.items():
+        if isinstance(value, dict):
+            _flatten_translations(f"{prefix}{key}.", value, out)
+        else:
+            out[f"{prefix}{key}"] = value
+
+
+async def async_get_translations(hass, language, category, integrations=None):
+    import json
+
+    base = pkg_root / pkg_name
+    path = base / "translations" / f"{language}.json"
+    if not path.exists():
+        path = base / "strings.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    out: dict[str, str] = {}
+    if category in data:
+        _flatten_translations(f"component.{pkg_name}.{category}.", data[category], out)
+    return out
+
+
+translation_mod.async_get_translations = async_get_translations
+sys.modules["homeassistant.helpers.translation"] = translation_mod
+helpers_mod.translation = translation_mod
+
+entity_registry_mod = types.ModuleType("homeassistant.helpers.entity_registry")
+# Legacy fan numbers are only created for entities that already exist, so the
+# default "nothing registered" keeps a fresh setup to the modern entities.
+entity_registry_mod.async_get = MagicMock(
+    return_value=MagicMock(async_get_entity_id=MagicMock(return_value=None))
+)
+sys.modules["homeassistant.helpers.entity_registry"] = entity_registry_mod
+helpers_mod.entity_registry = entity_registry_mod
+
+# --- MOCK util.dt ---
+# Home Assistant's timezone-aware clock helpers. The integration uses
+# dt_util.utcnow() rather than the naive, deprecated datetime.utcnow().
+util_mod = types.ModuleType("homeassistant.util")
+dt_mod = types.ModuleType("homeassistant.util.dt")
+
+
+def _dt_utcnow():
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc)
+
+
+dt_mod.utcnow = _dt_utcnow
+util_mod.dt = dt_mod
+
+
+def _slugify(text: str, *, separator: str = "_") -> str:
+    """Home Assistant's slugify, close enough for the one thing we use it for.
+
+    `mobile_app` names its notify service after the slugified device name, and
+    the coordinator slugifies the name back to identify a target's platform.
+    Real HA uses the `slugify` package; this reproduces the behaviour the
+    matching depends on -- lowercase, non-alphanumerics collapsed to one
+    separator, no leading or trailing separator. The cases that matter are
+    pinned in test_notification_dispatch: "iPhone 15 PRO", "MacBookAirLukas"
+    and "Galaxy Watch7 (LFMA)".
+    """
+    import re as _re
+
+    out = _re.sub(r"[^a-z0-9]+", separator, str(text).lower())
+    return out.strip(separator)
+
+
+util_mod.slugify = _slugify
+sys.modules["homeassistant.util"] = util_mod
+sys.modules["homeassistant.util.dt"] = dt_mod
+ha_mod.util = util_mod
+
+# --- MOCK exceptions / helpers.event / components.persistent_notification ---
+# Everything the integration package imports at module scope. Registered here so
+# importing it never depends on which test module happened to run first: that
+# chain existed only by accident, and deleting an unrelated test module was
+# enough to break a later one. Modules needing richer behaviour still install
+# and restore their own.
+exceptions_mod = types.ModuleType("homeassistant.exceptions")
+
+
+class HomeAssistantError(Exception):
+    """Base HA error; the integration derives its own from this."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args)
+        self.translation_domain = kwargs.get("translation_domain")
+        self.translation_key = kwargs.get("translation_key")
+        self.translation_placeholders = kwargs.get("translation_placeholders")
+
+
+class ConfigEntryNotReady(HomeAssistantError):
+    pass
+
+
+class ConfigEntryError(HomeAssistantError):
+    pass
+
+
+class ServiceValidationError(HomeAssistantError):
+    pass
+
+
+for _name, _cls in (
+    ("HomeAssistantError", HomeAssistantError),
+    ("ConfigEntryNotReady", ConfigEntryNotReady),
+    ("ConfigEntryError", ConfigEntryError),
+    ("ServiceValidationError", ServiceValidationError),
+):
+    setattr(exceptions_mod, _name, _cls)
+sys.modules["homeassistant.exceptions"] = exceptions_mod
+
+cv_mod = types.ModuleType("homeassistant.helpers.config_validation")
+cv_mod.config_entry_only_config_schema = lambda *a, **k: None
+cv_mod.string = str
+cv_mod.slug = str
+sys.modules["homeassistant.helpers.config_validation"] = cv_mod
+helpers_mod.config_validation = cv_mod
+
+event_mod = types.ModuleType("homeassistant.helpers.event")
+event_mod.async_track_time_interval = lambda *a, **k: (lambda: None)
+event_mod.async_track_state_change_event = lambda *a, **k: (lambda: None)
+sys.modules["homeassistant.helpers.event"] = event_mod
+helpers_mod.event = event_mod
+
+pn_mod = types.ModuleType("homeassistant.components.persistent_notification")
+pn_mod.async_create = lambda *a, **k: None
+pn_mod.async_dismiss = lambda *a, **k: None
+sys.modules["homeassistant.components.persistent_notification"] = pn_mod
+components_mod.persistent_notification = pn_mod
+
+# --- MOCK config_entries ---
+# The integration package imports this at module scope, so whichever test module
+# happens to trigger that import first needs it present. Providing it here keeps
+# the suite independent of collection order -- deleting an unrelated test module
+# used to be enough to break a later one, because the first importer had been
+# supplying the stub by accident. Modules needing a richer version still install
+# and restore their own.
+config_entries_mod = types.ModuleType("homeassistant.config_entries")
+
+
+class _ConfigEntry:  # pragma: no cover - a type only
+    pass
+
+
+class _OperationNotAllowed(Exception):
+    pass
+
+
+config_entries_mod.ConfigEntry = _ConfigEntry
+config_entries_mod.OperationNotAllowed = _OperationNotAllowed
+config_entries_mod.ConfigFlowResult = dict
+sys.modules["homeassistant.config_entries"] = config_entries_mod
+
+# --- MOCK components.http ---
+# frontend.py imports StaticPathConfig at module level, which anything importing
+# the integration package now pulls in. `http` is a manifest dependency, so in a
+# real Home Assistant it is always present.
+http_mod = types.ModuleType("homeassistant.components.http")
+
+
+class _StaticPathConfig:
+    def __init__(self, url_path, path, cache_headers=True):
+        self.url_path = url_path
+        self.path = path
+        self.cache_headers = cache_headers
+
+
+http_mod.StaticPathConfig = _StaticPathConfig
+sys.modules["homeassistant.components.http"] = http_mod
+components_mod.http = http_mod
+
+# --- MOCK helpers.device_registry ---
+# DeviceInfo's canonical home. helpers.entity only re-exports it transitively,
+# so the integration imports it from here.
+device_registry_mod = types.ModuleType("homeassistant.helpers.device_registry")
+
+
+class _DeviceInfo(dict):
+    """DeviceInfo is a TypedDict in Home Assistant, i.e. a plain dict."""
+
+
+device_registry_mod.DeviceInfo = _DeviceInfo
+sys.modules["homeassistant.helpers.device_registry"] = device_registry_mod
+helpers_mod.device_registry = device_registry_mod
 
 # --- MOCK helpers.entity ---
 class DeviceInfo:
@@ -133,3 +403,48 @@ class KClient:  # type: ignore
 
 setattr(ws_client_mod, "KClient", KClient)
 sys.modules["custom_components.ha_creality_ws.ws_client"] = ws_client_mod
+
+
+# --- Shared config-entry stub -------------------------------------------------
+# The coordinator holds the ConfigEntry itself now, and reads .options for its
+# settings and .data for the onboarding cache. Tests only ever need those three
+# fields, so one factory beats a SimpleNamespace per call site.
+
+
+def fake_config_entry(entry_id: str = "entry1", options=None, data=None):
+    """A stand-in for homeassistant.config_entries.ConfigEntry."""
+    return types.SimpleNamespace(
+        entry_id=entry_id,
+        options=dict(options or {}),
+        data=dict(data or {}),
+    )
+
+
+# --- Shared stub bookkeeping for test modules ---------------------------------
+# sys.modules is process-wide, so a module that installs a stub at import time
+# leaks it into whatever pytest collects next and makes the suite order-dependent.
+# A module that needs its own stub registers it here and calls restore_stubs()
+# from its teardown_module.
+_ABSENT = object()
+_MODULE_STUBS: dict[str, list] = {}
+
+
+def install_stub_module(owner: str, name: str, module) -> None:
+    """Install `module` at `name`, remembering what `owner` displaced."""
+    _MODULE_STUBS.setdefault(owner, []).append((name, sys.modules.get(name, _ABSENT)))
+    sys.modules[name] = module
+
+
+def drop_stub_module(owner: str, name: str) -> None:
+    """Remove `name` from sys.modules, remembering it for restore_stubs."""
+    _MODULE_STUBS.setdefault(owner, []).append((name, sys.modules.get(name, _ABSENT)))
+    sys.modules.pop(name, None)
+
+
+def restore_stubs(owner: str) -> None:
+    """Put back everything `owner` installed or dropped, newest first."""
+    for name, old in reversed(_MODULE_STUBS.pop(owner, [])):
+        if old is _ABSENT:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = old

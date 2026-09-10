@@ -18,14 +18,21 @@ This custom [Home Assistant](https://www.home-assistant.io/) integration provide
 * **Optional power switch binding** to a `switch` entity for accurate "Off" handling.
 * **Entities:** status, progress, time left, temperatures (nozzle/bed/chamber), current layer/total layers, etc.
 * **Image (print preview):** shows the current model image for all supported printers when available; falls back to a tiny placeholder when not applicable.
-* **Controls:** pause, resume, stop, light toggle.
+* **Controls:** pause, resume, stop, light toggle, fan speeds (model / case / side), temperature targets.
 * **Camera:** auto-detects stream type by model (MJPEG or WebRTC).
 * **Lovelace card**: dependency-free, uses HA fonts, progress ring, contextual chips, telemetry pills.
 * **Style Editor**: Built-in theme customization with color picker for all card elements.
+* **Live print notifications** to any number of phones: a countdown timer and progress bar on the iOS Lock Screen and the Android status bar, the G-code preview as the icon, a camera snapshot when a print ends, and optional Pause/Resume/Stop buttons. See [Notifications](#notifications).
 
 ---
 
 ## Installation
+
+> **Requires Home Assistant 2026.7.0 or newer.** The live print notifications
+> depend on the companion app's Live Activity support, which arrived in that
+> release. HACS will not offer this version to an older core, and installing it
+> by hand anyway makes setup fail with a message saying so. If you cannot update
+> Home Assistant, stay on 0.9.7.
 
 ### HACS (recommended)
 
@@ -198,6 +205,81 @@ Tip: You can use the built‑in Image card or any card that supports `image` ent
 
 ---
 
+## Notifications
+
+Configure under **Settings → Devices & Services → Creality → Configure → Notifications**.
+
+### Targets
+
+Pick **one or more** notify targets. Both kinds work:
+
+- `notify.mobile_app_*` — the Home Assistant companion app. Only these can show the live print card, the G‑code preview, action buttons or a tap target.
+- Anything else (`notify.signal_messenger`, `notify.persistent_notification`, a notify *entity*, …) — receives the **message and title only**.
+
+That split is deliberate rather than a limitation: several notify platforms reject payload keys they do not recognise and fail the whole call, `notify.send_message` has no payload field at all, and the image URLs below only authenticate from inside the companion app.
+
+If you previously set the single **Notification Device**, it is migrated automatically the first time the integration loads — there is nothing to do. The old setting is left on disk, so downgrading keeps working.
+
+### The live print card
+
+Enable **Live print card**. During a print you get one card that updates in place, on the iOS Lock Screen and in the Dynamic Island, and in the Android status bar and notification shade:
+
+- a **countdown timer** to the estimated finish, which ticks on the phone itself
+- a **progress bar** and the current layer
+- the **G‑code preview** as the notification icon
+- **Pause / Resume / Stop** buttons, if you enable them
+
+It ends by itself when the print finishes, and is replaced by a completion notification carrying a **camera snapshot** of the bed. A print that is cancelled or aborted gets its own notification saying where it stopped, rather than the card simply vanishing.
+
+**Notify when a print ends** covers both outcomes — finished *and* stopped. Being told a print completed is only half the story if you are not also told when it didn't.
+
+**Requirements:** Home Assistant **2026.7.0 or newer** (this is the integration's minimum), plus **iOS 17.2+** or **Android 16+**. On older phones the same notification still arrives and still replaces itself in place — you lose the timer and the bar, not the notification.
+
+**Update rate.** The card is pushed on a state change (start, pause, resume, finish) and every 5% of progress, never more often than once every 30 seconds. That is not a compromise: iOS throttles frequent Live Activity updates and eventually drops them, and the countdown needs no pushes at all because it runs on the phone.
+
+**Long prints.** iOS ends any Live Activity after **8 hours** — an Apple limit, not something an app can extend. Past that the card keeps updating as an ordinary notification, with the remaining time written into the text instead of shown as a timer, and you still get the completion notification. Android has no such limit.
+
+### Tapping the notification
+
+| | Default | With a dashboard path set |
+|---|---|---|
+| **Android** | opens the printer camera's more‑info dialog, with the live feed | opens that dashboard view |
+| **iOS** | opens the app | opens that dashboard view |
+
+Set **Dashboard path to open on tap** to something like `/lovelace/printer`. It is the only way to make an iOS tap go anywhere specific, because the `entityId:` deep link Android uses is Android‑only.
+
+### Pictures
+
+- **G‑code preview** — used as the notification icon. Skipped when the printer has no preview to serve, rather than sending the placeholder, which renders as an empty grey box.
+- **Camera snapshot** — attached when a print ends or fails. Skipped on printers whose camera cannot produce a still image at all: K2‑family cameras using direct WebRTC signalling have no snapshot endpoint, so there is nothing to attach.
+
+### Buttons
+
+**Show Pause/Resume/Stop buttons** is off by default. Pause and Resume go through exactly the same path as the corresponding button entities. **Stop** is marked destructive and requires device authentication, so a mis‑tap on a lock screen cannot end a long print.
+
+### Language
+
+Notification text is translated — messages, status labels, button captions and the Android notification-channel names all come from the integration's translation files.
+
+It follows the **server** language (**Settings → System → General**), not each person's profile language. That is not an oversight: an integration is never told which user a `notify` call is for, so the server language is the only one available to it. For a household that needs different languages per person, use the bus events below.
+
+### Building your own notifications
+
+The integration fires plain bus events whether or not you configure a notify target:
+
+| Event | When |
+|---|---|
+| `ha_creality_ws_print_started` | a new job appears |
+| `ha_creality_ws_print_finished` | progress reaches 100% |
+| `ha_creality_ws_print_stopped` | a job ends without finishing — cancelled, or aborted by the printer |
+| `ha_creality_ws_print_error` | the printer reports a new error code |
+
+Each carries `entry_id`, `host`, `device_name`, `filename`, `progress`, `layer`, `total_layers`, `left_seconds` and `err_code`.
+
+This is the supported way to get notification text in a language other than your server's. An integration is never told *which user* a notification is for, so any message it composes itself can only follow the Home Assistant server language — build your own text in an automation instead.
+
+---
+
 ## Card Usage
 
 The card's element tag is **`custom:k-printer-card`**.
@@ -242,6 +324,42 @@ stop_btn: button.k1c_stop_print
 
 ---
 
+## Fans
+
+The three fans the printer exposes are available as full `fan` entities, so they can
+be turned on/off and set to any speed, not just monitored:
+
+- `fan.<host>_model_fan` (part-cooling fan)
+- `fan.<host>_case_fan` (case / chamber exhaust fan)
+- `fan.<host>_side_fan` (auxiliary / side fan)
+
+Speed is set as a percentage and sent to the printer as `M106 P<channel> S<0-255>`
+over the same WebSocket, so no extra configuration is needed. The printer's own
+temperature-driven fan control keeps running; a manual command overrides it until
+the printer decides otherwise.
+
+Equivalent `number.*_fan` entities also exist, but they are legacy and disabled by
+default; prefer the `fan` entities.
+
+Example: force the case fan to full when the chamber gets too hot.
+
+```yaml
+automation:
+  - alias: Chamber too hot -> case fan to max
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.k2_chamber_temperature
+        above: 55
+    actions:
+      - action: fan.set_percentage
+        target:
+          entity_id: fan.k2_case_fan
+        data:
+          percentage: 100
+```
+
+---
+
 ## CFS (Creality Filament System)
 
 If your printer reports CFS data, the integration creates sensors for each CFS box and slot. It also exposes a dedicated set of sensors for the **external filament** (single slot).
@@ -265,6 +383,35 @@ If your printer reports CFS data, the integration creates sensors for each CFS b
 - `sensor.<host>_cfs_external_color`
 - `sensor.<host>_cfs_external_percent`
 
+**Slot attributes** (on both the box-slot and external filament sensors):
+
+| Attribute | Meaning |
+| --- | --- |
+| `vendor`, `type`, `name` | As reported by the printer / RFID tag |
+| `color_hex` | Colour normalised to `#rrggbb` |
+| `color_hex_raw` | The printer's original value, before normalisation |
+| `rfid` | The printer's material id, exactly as reported |
+| `spool_key` | Derived id, stable per material **and** colour |
+| `state`, `selected` | Slot state and whether the printer is using it |
+| `box_id`, `slot_id` | The ids the **printer** uses for this slot |
+| `min_temp`, `max_temp` | Printing temperature range, °C (`null` if the printer omits them) |
+| `pressure` | Pressure advance (`null` if the printer omits it) |
+
+Creality RFID tags store the colour as *seven* hex characters: a padding character
+followed by the real `RRGGBB`. `color_hex` therefore keeps the **last** six digits,
+so `#0ffffff` becomes `#ffffff`. `color_hex_raw` is kept for reference.
+
+`rfid` is a material/filament id rather than a tag serial, so two spools of the same
+material and vendor share it even when their colours differ. `spool_key` combines it
+with the normalised colour to tell those apart, which is what external trackers such
+as spoolman-sync need. It is a *derived* key: the telemetry carries no per-tag serial,
+so two genuinely identical spools still produce the same key.
+
+`box_id` and `slot_id` are the printer's own ids, which is what `set_cfs_material`
+needs to address a slot. Not every printer reports `min_temp`/`max_temp`/`pressure` on
+every slot — CFS box slots often omit them where the external slot has them — so treat
+`null` as "unknown", not as zero.
+
 ### CFS Card
 
 The CFS card is a native UI card with a visual editor. It renders one tile per slot and a dedicated tile for the external filament.
@@ -275,8 +422,20 @@ The CFS card is a native UI card with a visual editor. It renders one tile per s
 
 **Editor fields:**
 
+- **Display Mode**: `Full`, `Compact` or `Box (visual)`
 - **External Filament**: map `external_filament`, `external_color`, `external_percent`
 - **Box 1–4**: map temperature/humidity and up to 4 slots per box
+
+**Display modes:**
+
+| Mode | Looks like |
+| --- | --- |
+| `full` | One ring tile per slot, with a unit selector when more than one box is mapped |
+| `compact` | A single row of mini spools per box |
+| `box` | A photo of the CFS unit with a spool overlay per bay. Requires a mapped four-slot box; anything else falls back to `full` |
+
+Dashboards using the old `compact_view: true` are migrated automatically the first
+time they load, and the legacy key is dropped when you next edit the card.
 
 **Behavior:**
 
@@ -289,6 +448,26 @@ The CFS card is a native UI card with a visual editor. It renders one tile per s
   - **Orange** (40-59%): Attention required
   - **Red** (≥ 60%): Critical humidity level
 
+#### Editing filament from the card
+
+Each slot tile has an edit button (hover on a desktop; always visible on touch)
+that opens a dialog for the material's type, name, vendor, colour, temperature
+range and pressure advance. Saving calls
+[`set_cfs_material`](#writing-filament-data-back-to-the-printer) and then asks the
+printer to re-report, so the tile updates once the change has actually landed.
+
+- The dialog states which **box and slot** it will write to. If the card cannot
+  get that from the printer it says the target was inferred — check it before saving.
+- Editing is **disabled while the printer is busy** (printing, paused, processing
+  or self-testing).
+- A card whose entities come from **more than one printer** cannot edit, because
+  there would be no way to tell which machine to write to.
+- **Multi-colour spools** show their colour as read-only: the printer reports two
+  values and a single colour cannot represent them.
+- **Colour presets**: Creality's standard palette plus your own, saved in your
+  browser rather than in the dashboard config. Right-click one of your own
+  presets to delete it.
+
 ### CFS Card screenshots
 
 Full view
@@ -298,6 +477,54 @@ Full view
 Compact view
 
 ![CFS Compact](img/cfs_compact.png)
+
+### Writing filament data back to the printer
+
+`ha_creality_ws.set_cfs_material` writes filament metadata to one CFS slot. The
+CFS card's edit dialog calls it, and it is also usable from automations and
+Developer Tools.
+
+```yaml
+action: ha_creality_ws.set_cfs_material
+data:
+  device_id: <your printer>
+  box_id: 1          # as the printer reports it -- see the box_id attribute
+  slot_id: 2         # 0-based within the box
+  type: PETG
+  name: Hyper PETG
+  vendor: Creality
+  color: "#ff00aa"   # six hex digits
+  min_temp: 230
+  max_temp: 260
+  pressure: 0.03
+```
+
+**Only the fields you supply are changed.** The printer merges the payload into
+the slot it already holds, so anything you leave out keeps its current value.
+That matters most for `rfid`: leaving it empty omits the field entirely, so the
+existing tag association is preserved.
+
+Other things worth knowing:
+
+- `box_id` is the printer's own id, not a position on the card. Read it from the
+  `box_id` attribute of any slot sensor — it is usually `1` for the first CFS unit.
+- `color` is a **six-digit hex string**, not an RGB list. Multi-colour spools
+  cannot be written and must be left empty.
+- `max_temp` must not be below `min_temp`; the service rejects the call rather
+  than quietly adjusting it.
+- The service **refuses to write while the printer is busy** (printing, paused,
+  processing or self-testing).
+
+> **A note on how well this is understood.** Creality does not document the
+> `modifyMaterial` command. The payload shape comes from @buzato's work in
+> [#75](https://github.com/3dg1luk43/ha_creality_ws/pull/75), tested against real
+> CFS hardware there, and is verified here against the bundled printer simulator.
+> Two details remain unconfirmed on real hardware: the printer *streams* colours
+> as seven hex characters but appears to accept six on write, and the `rfid`
+> field name is inferred from the telemetry rather than from any dump that
+> confirms it. Each write logs both the outgoing payload and what the printer
+> reports afterwards, so if something looks wrong please open an issue with that
+> section of your debug log.
 
 ---
 
@@ -382,6 +609,18 @@ The integration auto-detects the printer model and creates the appropriate camer
   - Forwards WebRTC offers/answers between Home Assistant frontend and go2rtc
   - Provides native WebRTC streaming without additional HACS integrations
   - Works with all standard Home Assistant camera cards that support WebRTC
+
+### HLS / recording for go2rtc cameras
+
+The frontend plays go2rtc cameras over WebRTC. Home Assistant's classic stream
+pipeline (the `camera/stream` WebSocket command, HLS playback, `camera.record`,
+`camera.play_stream` and casting) needs an ingestible URL instead, so the
+integration points it at the RTSP endpoint of the same go2rtc instance.
+
+That port is detected automatically: `18554` for Home Assistant's built-in
+go2rtc, `8554` for a stand-alone one. If your go2rtc listens elsewhere, set
+**go2rtc RTSP Port** under *Configure -> Camera* (0 keeps auto-detection).
+"WebRTC direct" cameras bypass go2rtc entirely and therefore have no HLS source.
 
 ---
 
@@ -527,4 +766,9 @@ The diagnostic data can be safely shared with developers for troubleshooting. It
 
 ## License
 
-MIT. See `LICENSE`.
+GNU Affero General Public License v3.0. See `LICENSE`.
+
+One bundled file is **not** covered by that grant: `www/cfs_box.webp` is a
+Creality product render, used by the CFS card's `box` display mode to depict the
+hardware this integration controls. See `NOTICE` for the details, including how
+to produce a build with no third-party material in it.

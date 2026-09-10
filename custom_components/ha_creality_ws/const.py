@@ -2,7 +2,6 @@ DOMAIN = "ha_creality_ws"
 
 CONF_HOST = "host"
 CONF_NAME = "name"
-CONF_DISCOVERY_SCAN_CIDR = "scan_cidr"
 CONF_POWER_SWITCH = "power_switch"
 CONF_POWER_SWITCH_ENABLED = "power_switch_enabled"
 CONF_CAMERA_MODE = "camera_mode"
@@ -12,9 +11,14 @@ CONF_CUSTOM_CAMERA_URL = "custom_camera_url"
 
 DEFAULT_NAME = "Creality Printer (WS)"
 
+# The live print card needs the companion app's Live Activity support, which
+# arrived in this core release. Declared to HACS in hacs.json, and enforced at
+# runtime as well: a manual or git install never goes through HACS, and would
+# otherwise get a card that silently does not work.
+MINIMUM_HA_VERSION = (2026, 7)
+
 WS_PORT = 9999
 MJPEG_PORT = 8080
-HTTP_PORT = 80
 
 WS_URL_TEMPLATE = "ws://{host}:" + str(WS_PORT)
 # Subprotocol advertised by the printer's own web UI on the WebSocket handshake.
@@ -52,12 +56,159 @@ PROBE_ON_SILENCE_SECS = 10.0
 DEFAULT_GO2RTC_URL = "localhost"
 DEFAULT_GO2RTC_PORT = 11984
 
+# go2rtc RTSP endpoint, used for HA's classic stream pipeline (HLS,
+# camera.record, camera.play_stream, casting). HA's own managed go2rtc binary
+# listens for RTSP on 127.0.0.1:18554 while its REST API is on 11984 (see
+# homeassistant/components/go2rtc/server.py); a stand-alone go2rtc defaults to
+# 8554. Users with a non-default RTSP port can override it in the options flow.
+CONF_GO2RTC_RTSP_PORT = "go2rtc_rtsp_port"
+# Custom-camera URL schemes that go2rtc ingests rather than Home Assistant
+# fetching directly. A Custom source using one of these ends up on the same
+# go2rtc camera as CAM_MODE_WEBRTC, so it needs the same settings.
+GO2RTC_SOURCE_SCHEMES = ("rtsp", "rtmp", "srt")
+
+HA_MANAGED_GO2RTC_RTSP_PORT = 18554
+DEFAULT_GO2RTC_RTSP_PORT = 8554
+
+# Telemetry fields that gate entity creation and can only arrive once the printer
+# is actually reachable. Platform setup does not wait for the printer (an offline
+# printer must not block the config entry), so an entity depending on one of
+# these would otherwise never be created until the next restart that happens to
+# race the right way. The first appearance of any of them fires a discovery pass.
+# targetBoxTemp is here because number.py gates the chamber control on it: a
+# printer that reports a chamber target but never a maximum (K2 Base) would
+# otherwise never fire a discovery pass, and the control would stay absent until
+# a restart happened to race the right way -- the very defect this list exists
+# to prevent.
+# Must stay in step with every gate that reads these from coord.data:
+# number.py promotes chamber *control* on targetBoxTemp/maxBoxTemp, and sensor.py
+# promotes the chamber *sensor* on boxTemp/targetBoxTemp/maxBoxTemp. A field that
+# gates an entity but does not appear here can never trigger the pass that would
+# create it.
+LATE_DISCOVERY_FIELDS: tuple[str, ...] = (
+    "boxsInfo",
+    "boxTemp",
+    "maxBoxTemp",
+    "targetBoxTemp",
+)
+
 # Notifications
 CONF_NOTIFY_DEVICE = "notify_device"
 CONF_NOTIFY_COMPLETED = "notify_completed"
 CONF_NOTIFY_ERROR = "notify_error"
 CONF_NOTIFY_MINUTES_TO_END = "notify_minutes_to_end"
 CONF_MINUTES_TO_END_VALUE = "minutes_to_end_value"
+
+# Grace window after a (re)start during which the printer's current state is only
+# captured as a baseline, never notified about. The printer keeps reporting the
+# last job's file name and 100% progress indefinitely, so without this every HA
+# restart fired a "print completed" notification (issue #112).
+NOTIFY_PRIME_GRACE_SECS = 10.0
+
+# Progress ceiling for re-arming the one-shot completion notification. The
+# printer rounds progress up to 100 a second before the job actually ends and
+# then reports 99 once more, so "progress fell below 100" on its own does not
+# mean a new job started -- treating it that way sent the completion
+# notification twice for every print. Only a drop clear of that jitter, or a
+# restart of the job clock, counts as a new cycle.
+NOTIFY_REARM_PROGRESS_MAX = 90
+
+# --- Multi-target delivery -------------------------------------------------- #
+# CONF_NOTIFY_DEVICE above held a single service name. It is still read, and is
+# never deleted, so that rolling back to an earlier release keeps a user's
+# target. coerce_targets() in notification_rules.py is the only thing that
+# should look at it.
+CONF_NOTIFY_TARGETS = "notify_targets"
+CONF_NOTIFY_LIVE = "notify_live"
+CONF_NOTIFY_ACTIONS = "notify_actions"
+CONF_NOTIFY_PREVIEW_IMAGE = "notify_preview_image"
+CONF_NOTIFY_CAMERA_SNAPSHOT = "notify_camera_snapshot"
+CONF_NOTIFY_TAP_PATH = "notify_tap_path"
+
+# Sentinel message that dismisses a notification (and ends a Live Activity)
+# carrying the same tag. It is only meaningful to the companion app: any other
+# notify platform would render it as visible body text, so it must never be
+# delivered to one.
+CLEAR_NOTIFICATION_MARKER = "clear_notification"
+
+# --- Live print card -------------------------------------------------------- #
+# Progress here is authoritative 0-100, not an estimate, so pushes are driven by
+# a monotonic milestone latch rather than a cap derived from the expected
+# duration. A print then costs at most 100/STEP progress pushes whether it runs
+# twenty minutes or forty hours, and the end-of-print 99->100->99->100 jitter
+# (see NOTIFY_REARM_PROGRESS_MAX) cannot produce a second push.
+NOTIFY_LIVE_MILESTONE_STEP = 5
+# The refresh cadence. Progress and the remaining estimate both move
+# continuously, and a milestone latch on its own left the card reading a stale
+# percentage for as long as it took to gain 5% -- twenty minutes or more on a
+# long print. So the card refreshes on a wall clock instead, and the milestone
+# only forces an *early* refresh when progress has moved a lot in little time.
+#
+# 300s is chosen against a hard external limit rather than taste: the companion
+# push relay allows 500 notifications per device per day (visible in its own
+# rate-limit log line). One printer at this cadence spends 12 an hour, so even a
+# 40-hour print stays inside the budget with room for a second printer.
+NOTIFY_LIVE_INTERVAL_SECS = 300.0
+# Floor under everything, including a forced refresh. Telemetry arrives several
+# times a second, so this is what stops a frame storm becoming a push storm.
+NOTIFY_LIVE_MIN_INTERVAL_SECS = 30.0
+# Pause and resume are deliberate user actions and must show up at once, so a
+# state change bypasses both intervals above. Safe because `decide()` requires
+# the derived state to have actually *changed*: a printer sitting in one state
+# cannot retrigger it, and only genuine flapping could, which is a printer
+# fault rather than something to paper over with a delay.
+NOTIFY_LIVE_TRANSITION_FLOOR_SECS = 0.0
+# Circuit breaker for pathological telemetry, not a design limit: at the
+# cadence above this is ~50 hours of printing, comfortably past any real job,
+# and the relay's own daily budget is the real ceiling.
+NOTIFY_LIVE_MAX_PUSHES_PER_JOB = 600
+# Apple hard-expires a Live Activity after eight hours. Past this the live-only
+# keys are dropped and the card degrades to a plain tagged notification, which
+# still updates in place. Android 16 progress notifications do not expire, so
+# this is an iOS-shaped limit we accept rather than work around -- restarting
+# the activity would burn a push-to-start slot and show a visibly new card.
+NOTIFY_LIVE_IOS_EXPIRY_SECS = 28800.0
+# No telemetry for this long means the printer is gone; clear the card.
+NOTIFY_LIVE_STALE_CLEAR_SECS = 90.0
+
+# Card colours by phase.
+NOTIFY_COLOR_PRINTING = "#03a9f4"
+NOTIFY_COLOR_PAUSED = "#ffa726"
+NOTIFY_COLOR_DONE = "#43a047"
+NOTIFY_COLOR_ERROR = "#e53935"
+
+# Android notification channel *names* are user-visible in the phone's settings,
+# so they live in strings.json like every other label. Splitting the terminal
+# and alert channels from the live one lets a user silence progress without
+# silencing failures.
+NOTIFY_CHANNEL_KEY_LIVE = "channel_live"
+NOTIFY_CHANNEL_KEY_DONE = "channel_finished"
+NOTIFY_CHANNEL_KEY_ALERT = "channel_alerts"
+# The "finishing soon" reminder is its own channel because it is the one
+# progress-related notification that should be able to make a sound while the
+# live card stays silent -- the whole point of it is to catch someone's
+# attention before the print ends.
+NOTIFY_CHANNEL_KEY_SOON = "channel_soon"
+
+# Joins the segments of a live-card body. Punctuation rather than prose, so it
+# stays here instead of in strings.json.
+NOTIFY_BODY_SEPARATOR = " · "
+
+# `preview_reason` values that mean the image entity would serve its 1x1
+# placeholder. Anything else -- including an unset value, which just means
+# nothing has asked the entity for bytes yet -- is worth attaching.
+PREVIEW_REASONS_UNUSABLE = ("not_printing", "fetch_failed")
+
+# --- Bus events ------------------------------------------------------------- #
+# Language-neutral, and fired whether or not any notify target is configured.
+# Notification bodies are composed in Python and therefore follow the *server*
+# language -- an integration is never told which user a notify call is for --
+# so these are the supported way to build your own text, in your own language,
+# with your own conditions.
+BUS_EVENT_PRINT_STARTED = "ha_creality_ws_print_started"
+BUS_EVENT_PRINT_FINISHED = "ha_creality_ws_print_finished"
+BUS_EVENT_PRINT_STOPPED = "ha_creality_ws_print_stopped"
+BUS_EVENT_PRINT_ERROR = "ha_creality_ws_print_error"
 
 CONF_POLLING_RATE = "polling_rate"
 DEFAULT_POLLING_RATE = 0  # Real-time

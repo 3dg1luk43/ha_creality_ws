@@ -1,5 +1,5 @@
 from __future__ import annotations
-from homeassistant.helpers.entity import DeviceInfo #type: ignore[import]
+from homeassistant.helpers.device_registry import DeviceInfo #type: ignore[import]
 from homeassistant.helpers.update_coordinator import CoordinatorEntity #type: ignore[import]
 
 from .const import DOMAIN, MFR, MODEL
@@ -45,19 +45,14 @@ class KEntity(CoordinatorEntity):
         Get cached device info from config entry (model, hostname, modelVersion).
         Returns None if not available.
         """
-        try:
-            entry_id = getattr(self.coordinator, '_config_entry_id', None)
-            if entry_id:
-                entry_obj = self.coordinator.hass.config_entries.async_get_entry(entry_id)
-                if entry_obj and entry_obj.data.get("_device_info_cached"):
-                    return {
-                        "model": entry_obj.data.get("_cached_model"),
-                        "hostname": entry_obj.data.get("_cached_hostname"),
-                        "modelVersion": entry_obj.data.get("_cached_model_version"),
-                    }
-        except Exception:
-            pass
-        return None
+        entry = self.coordinator.config_entry
+        if not entry or not entry.data.get("_device_info_cached"):
+            return None
+        return {
+            "model": entry.data.get("_cached_model"),
+            "hostname": entry.data.get("_cached_hostname"),
+            "modelVersion": entry.data.get("_cached_model_version"),
+        }
 
     def _get_cached_max_temps(self) -> dict[str, float | None]:
         """
@@ -65,19 +60,17 @@ class KEntity(CoordinatorEntity):
     Returns dict with max_bed_temp, max_nozzle_temp, max_box_temp keys.
         Falls back to live data if cached values are not available.
         """
-        try:
-            entry_id = getattr(self.coordinator, '_config_entry_id', None)
-            if entry_id:
-                entry_obj = self.coordinator.hass.config_entries.async_get_entry(entry_id)
-                if entry_obj and entry_obj.data.get("_device_info_cached"):
-                    return {
-                        "max_bed_temp": entry_obj.data.get("_cached_max_bed_temp"),
-                        "max_nozzle_temp": entry_obj.data.get("_cached_max_nozzle_temp"),
-                        # Prefer new chamber cache, fallback to legacy box cache
-                        "max_box_temp": entry_obj.data.get("_cached_max_chamber_temp", entry_obj.data.get("_cached_max_box_temp")),
-                    }
-        except Exception:
-            pass
+        entry = self.coordinator.config_entry
+        if entry and entry.data.get("_device_info_cached"):
+            return {
+                "max_bed_temp": entry.data.get("_cached_max_bed_temp"),
+                "max_nozzle_temp": entry.data.get("_cached_max_nozzle_temp"),
+                # Prefer the chamber cache, falling back to the legacy box one
+                # for entries cached by a pre-rename release.
+                "max_box_temp": entry.data.get(
+                    "_cached_max_chamber_temp", entry.data.get("_cached_max_box_temp")
+                ),
+            }
         
         # Fallback to live data if cached values are not available
         d = self.coordinator.data or {}
