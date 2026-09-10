@@ -209,9 +209,17 @@ def stringify_data(data: Mapping[str, Any] | None) -> dict[str, Any]:
     which is exactly what it did: every live-card push to a Galaxy S24 failed
     while the log said only "Error sending notification to S24".
 
-    Nesting is exempt, verified against a real device: ``actions`` (a list of
-    dicts, bools inside it and all) and ``push`` go through untouched. Only the
-    top level is rewritten.
+    Nesting is *not* uniformly exempt, which cost a release to learn. Measured
+    against a real Galaxy S24, one key at a time:
+
+    * ``actions`` -- a **list** of dicts -- is flattened into the same FCM map,
+      so a bool inside it is rejected exactly like a bool at the top level.
+      ``destructive: True`` on the Stop button was enough to lose every push.
+    * ``push`` and ``content_state`` -- plain **dicts** -- are not flattened.
+      They survive with real ints, and iOS wants them that way.
+
+    Hence the rule: scalars are coerced at the top level and inside dicts nested
+    in a *list*, while a dict value is passed through whole.
 
     ``None`` drops the key rather than sending the string "None", which the
     companion app would treat as a value.
@@ -220,14 +228,25 @@ def stringify_data(data: Mapping[str, Any] | None) -> dict[str, Any]:
     for key, value in (data or {}).items():
         if value is None:
             continue
-        if isinstance(value, bool):
-            # Lowercase: the companion app compares against "true"/"false".
-            out[key] = "true" if value else "false"
-        elif isinstance(value, (int, float)):
-            out[key] = str(value)
+        if isinstance(value, (list, tuple)):
+            out[key] = [
+                stringify_data(item) if isinstance(item, Mapping) else item
+                for item in value
+            ]
+        elif isinstance(value, Mapping):
+            out[key] = dict(value)
         else:
-            out[key] = value
+            out[key] = _scalar_to_str(value)
     return out
+
+
+def _scalar_to_str(value: Any) -> Any:
+    if isinstance(value, bool):
+        # Lowercase: the companion app compares against "true"/"false".
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return value
 
 
 # --------------------------------------------------------------------------- #
@@ -567,6 +586,8 @@ def build_live_payload(
     links: NotifyLinks | None = None,
     actions: list[dict[str, Any]] | None = None,
     refresh: bool = False,
+    job_name: str = "",
+    device_name: str = "",
 ) -> dict[str, Any]:
     """A live-card push.
 
@@ -609,6 +630,29 @@ def build_live_payload(
     else:
         # Tells iOS to begin a Live Activity rather than update one.
         data["activity"] = "start"
+
+    if live_update:
+        # What an iOS Live Activity actually renders from. `activity` alone only
+        # says "start one" -- with no state to draw, iOS falls back to an
+        # ordinary notification, and an ordinary iOS notification is dismissed
+        # by a tap with no key able to prevent it. That was the whole iOS
+        # symptom: a card that vanished when touched.
+        #
+        # A nested dict, so the FCM string rule does not apply to its values
+        # and these stay real numbers.
+        content: dict[str, Any] = {
+            "state": "paused" if paused else "printing",
+            "device": device_name or title,
+        }
+        pct_for_state = _clamp_progress(progress)
+        if pct_for_state is not None:
+            content["progress_pct"] = pct_for_state
+        if when is not None:
+            content["eta_timestamp"] = when
+        if job_name:
+            content["program"] = job_name
+            data["subtitle"] = job_name
+        data["content_state"] = content
 
     pct = _clamp_progress(progress)
     if pct is None:

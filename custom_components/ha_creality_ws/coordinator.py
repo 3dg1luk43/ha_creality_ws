@@ -1065,6 +1065,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # A card is already on the phone, so this push updates one rather
             # than starting one -- which is what makes it silent on iOS.
             refresh=self._live_card.card_active,
+            # For the iOS Live Activity's own rendered state.
+            job_name=display_filename(snap.filename) or snap.filename or "",
+            device_name=self._notify_title(),
         )
         self._notify_dispatch(
             payload, kind=f"live:{reason.value}", mobile_only=True

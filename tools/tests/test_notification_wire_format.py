@@ -11,9 +11,14 @@ which is also why a swiped-away card never came back. The rules here were
 established by sending real payloads to a real device and reading the relay's
 replies, so they are a record of observed behaviour rather than of the docs:
 
-    native int/bool at the top level      -> rejected
-    the same values as strings            -> accepted
-    nested list/dict (actions, push)      -> accepted untouched, bools and all
+    native int/bool at the top level        -> rejected
+    the same values as strings              -> accepted
+    bool inside a dict in `actions` (list)  -> rejected; the list is flattened
+    native int inside `push`/`content_state` (dict) -> accepted, not flattened
+
+The list/dict asymmetry is the part that is easy to get wrong, and did get
+wrong: `destructive: True` on the Stop button was enough to lose every push
+even after the top level had been cleaned up.
 """
 
 from custom_components.ha_creality_ws.notification_rules import stringify_data
@@ -37,18 +42,40 @@ def test_strings_pass_through_untouched():
     assert stringify_data(data) == data
 
 
-def test_nested_structures_are_left_alone():
-    """Verified on-device: the relay only validates the top level, so `actions`
-    keeps the real bools that iOS needs (`destructive`, `authenticationRequired`)
-    and a stringified "true" there would be wrong."""
-    actions = [
-        {"action": "CREALITY_STOP_AB", "title": "Stop", "destructive": True},
-    ]
+def test_bools_inside_actions_are_coerced_because_the_list_is_flattened():
+    """The correction that cost a release. `actions` is folded into the same FCM
+    map, so `destructive: True` is rejected exactly like a top-level bool --
+    and it silently took every push with it."""
+    out = stringify_data(
+        {
+            "actions": [
+                {
+                    "action": "CREALITY_STOP_AB",
+                    "title": "Stop",
+                    "destructive": True,
+                    "authenticationRequired": True,
+                }
+            ]
+        }
+    )
+    stop = out["actions"][0]
+    assert stop["destructive"] == "true"
+    assert stop["authenticationRequired"] == "true"
+    # The strings that were already fine are untouched.
+    assert stop["action"] == "CREALITY_STOP_AB"
+    assert stop["title"] == "Stop"
+
+
+def test_plain_dicts_keep_their_native_types():
+    """`push` and `content_state` are not flattened -- measured on-device with
+    real ints -- and iOS renders a Live Activity from the latter, so coercing
+    its numbers to strings would be the wrong fix."""
     push = {"interruption-level": "time-sensitive"}
-    out = stringify_data({"actions": actions, "push": push})
-    assert out["actions"] == actions
-    assert out["actions"][0]["destructive"] is True
+    content = {"state": "printing", "progress_pct": 42, "eta_timestamp": 1789012345}
+    out = stringify_data({"push": push, "content_state": content})
     assert out["push"] == push
+    assert out["content_state"]["progress_pct"] == 42
+    assert out["content_state"]["eta_timestamp"] == 1789012345
 
 
 def test_none_drops_the_key_rather_than_sending_the_word_none():
@@ -71,7 +98,10 @@ def test_no_native_scalar_survives_a_realistic_live_payload():
             "when": 1789012345,
             "alert_once": True,
             "importance": "low",
-            "actions": [{"action": "A", "title": "Pause"}],
+            "actions": [
+                {"action": "A", "title": "Pause"},
+                {"action": "B", "title": "Stop", "destructive": True},
+            ],
         }
     )
     offenders = {
@@ -80,6 +110,15 @@ def test_no_native_scalar_survives_a_realistic_live_payload():
         if isinstance(value, (bool, int, float))
     }
     assert offenders == {}, f"these would be rejected by the relay: {offenders}"
+    # And the same sweep through the flattened list, which is where the second
+    # round of rejections came from.
+    nested = {
+        f"actions[{i}].{k}": v
+        for i, entry in enumerate(out["actions"])
+        for k, v in entry.items()
+        if isinstance(v, (bool, int, float))
+    }
+    assert nested == {}, f"these would be rejected by the relay: {nested}"
 
 
 def test_empty_and_missing_data_are_both_empty_dicts():
