@@ -16,6 +16,7 @@ from conftest import fake_config_entry
 
 from custom_components.ha_creality_ws.coordinator import KCoordinator
 from custom_components.ha_creality_ws.notification_rules import (
+    ACTION_DISMISS,
     ACTION_PAUSE,
     ACTION_RESUME,
     ACTION_STOP,
@@ -37,6 +38,7 @@ LABELS = {
     ACTION_PAUSE: _STRINGS["action_pause"],
     ACTION_RESUME: _STRINGS["action_resume"],
     ACTION_STOP: _STRINGS["action_stop"],
+    ACTION_DISMISS: _STRINGS["action_dismiss"],
 }
 
 
@@ -96,26 +98,40 @@ def _snap(state="printing"):
 # --------------------------------------------------------------------------- #
 
 
-def test_buttons_are_off_by_default():
+def test_printer_controls_are_off_by_default_but_hide_survives():
+    """The card is posted with `persistent`, so a swipe cannot remove it. Hide
+    is therefore the only way out and must be offered whatever the user chose
+    about driving the printer -- a card with no way out is a trap."""
     coord = _coordinator(actions=False)
-    assert coord._notify_card_actions(_snap()) is None
+    titles = [a["title"] for a in coord._notify_card_actions(_snap())]
+    assert titles == ["Hide"]
 
 
 def test_a_printing_card_offers_pause_and_stop():
     coord = _coordinator()
     titles = [a["title"] for a in coord._notify_card_actions(_snap())]
-    assert titles == ["Pause", "Stop"]
+    assert titles == ["Pause", "Stop", "Hide"]
 
 
 def test_a_paused_card_offers_resume_instead_of_pause():
     coord = _coordinator()
     titles = [a["title"] for a in coord._notify_card_actions(_snap("paused"))]
-    assert titles == ["Resume", "Stop"]
+    assert titles == ["Resume", "Stop", "Hide"]
+
+
+def test_hide_is_not_destructive_so_it_cannot_be_read_as_stop():
+    """Hide takes the card off the screen and leaves the print running, so it
+    must not carry the styling that marks Stop as dangerous."""
+    hide = build_actions(paused=False, ids=action_ids("abc123"), labels=LABELS)[-1]
+    assert hide["action"].startswith("CREALITY_DISMISS_")
+    assert "destructive" not in hide
+    assert "authenticationRequired" not in hide
 
 
 def test_stop_is_guarded():
     """A mis-tap on a lock screen must not be able to end a 14-hour print."""
-    stop = build_actions(paused=False, ids=action_ids("abc123"), labels=LABELS)[-1]
+    buttons = build_actions(paused=False, ids=action_ids("abc123"), labels=LABELS)
+    stop = next(b for b in buttons if b["action"].startswith("CREALITY_STOP_"))
     assert stop["destructive"] is True
     assert stop["authenticationRequired"] is True
 
@@ -187,6 +203,27 @@ def test_stop_goes_through_the_same_path_as_the_stop_button(monkeypatch):
     )
     assert _handler_result(coord, coord._notify_action_ids()[ACTION_STOP]) is True
     assert seen == ["stop"]
+
+
+def test_hide_dismisses_the_card_without_touching_the_print(monkeypatch):
+    """The whole point of Hide: the notification goes, the print carries on. If
+    this ever reached a printer command it would be a very unwelcome surprise
+    for someone who just wanted their lock screen back."""
+    coord = _coordinator()
+    touched = []
+    for name in ("request_pause", "request_resume", "async_stop_print"):
+        monkeypatch.setattr(
+            coord, name, lambda _n=name: asyncio.sleep(0, result=touched.append(_n))
+        )
+    cleared = []
+    monkeypatch.setattr(
+        coord, "_clear_live_card", lambda **kw: cleared.append(kw)
+    )
+    assert _handler_result(coord, coord._notify_action_ids()[ACTION_DISMISS]) is True
+    assert touched == [], "Hide must not command the printer"
+    # finished=True, or the next telemetry frame would helpfully put the card
+    # straight back and the button would look broken.
+    assert cleared == [{"finished": True}]
 
 
 def test_another_printers_action_is_ignored(monkeypatch):

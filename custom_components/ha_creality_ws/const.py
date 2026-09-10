@@ -138,14 +138,30 @@ CLEAR_NOTIFICATION_MARKER = "clear_notification"
 # twenty minutes or forty hours, and the end-of-print 99->100->99->100 jitter
 # (see NOTIFY_REARM_PROGRESS_MAX) cannot produce a second push.
 NOTIFY_LIVE_MILESTONE_STEP = 5
-# iOS throttles frequent Live Activity updates and eventually drops them, so
-# this floor applies regardless of what changed.
+# The refresh cadence. Progress and the remaining estimate both move
+# continuously, and a milestone latch on its own left the card reading a stale
+# percentage for as long as it took to gain 5% -- twenty minutes or more on a
+# long print. So the card refreshes on a wall clock instead, and the milestone
+# only forces an *early* refresh when progress has moved a lot in little time.
+#
+# 300s is chosen against a hard external limit rather than taste: the companion
+# push relay allows 500 notifications per device per day (visible in its own
+# rate-limit log line). One printer at this cadence spends 12 an hour, so even a
+# 40-hour print stays inside the budget with room for a second printer.
+NOTIFY_LIVE_INTERVAL_SECS = 300.0
+# Floor under everything, including a forced refresh. Telemetry arrives several
+# times a second, so this is what stops a frame storm becoming a push storm.
 NOTIFY_LIVE_MIN_INTERVAL_SECS = 30.0
-# Pause/resume has to show up immediately, so it bypasses the interval above --
-# but not completely, or telemetry that flaps between two states would spam.
-NOTIFY_LIVE_TRANSITION_FLOOR_SECS = 5.0
-# Defensive only: the milestone latch already bounds pushes per job.
-NOTIFY_LIVE_MAX_PUSHES_PER_JOB = 60
+# Pause and resume are deliberate user actions and must show up at once, so a
+# state change bypasses both intervals above. Safe because `decide()` requires
+# the derived state to have actually *changed*: a printer sitting in one state
+# cannot retrigger it, and only genuine flapping could, which is a printer
+# fault rather than something to paper over with a delay.
+NOTIFY_LIVE_TRANSITION_FLOOR_SECS = 0.0
+# Circuit breaker for pathological telemetry, not a design limit: at the
+# cadence above this is ~50 hours of printing, comfortably past any real job,
+# and the relay's own daily budget is the real ceiling.
+NOTIFY_LIVE_MAX_PUSHES_PER_JOB = 600
 # Apple hard-expires a Live Activity after eight hours. Past this the live-only
 # keys are dropped and the card degrades to a plain tagged notification, which
 # still updates in place. Android 16 progress notifications do not expire, so
@@ -168,6 +184,11 @@ NOTIFY_COLOR_ERROR = "#e53935"
 NOTIFY_CHANNEL_KEY_LIVE = "channel_live"
 NOTIFY_CHANNEL_KEY_DONE = "channel_finished"
 NOTIFY_CHANNEL_KEY_ALERT = "channel_alerts"
+# The "finishing soon" reminder is its own channel because it is the one
+# progress-related notification that should be able to make a sound while the
+# live card stays silent -- the whole point of it is to catch someone's
+# attention before the print ends.
+NOTIFY_CHANNEL_KEY_SOON = "channel_soon"
 
 # Joins the segments of a live-card body. Punctuation rather than prose, so it
 # stays here instead of in strings.json.

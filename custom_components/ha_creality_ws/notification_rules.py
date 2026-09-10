@@ -39,6 +39,7 @@ from .const import (
     NOTIFY_LIVE_IOS_EXPIRY_SECS,
     NOTIFY_LIVE_MAX_PUSHES_PER_JOB,
     NOTIFY_LIVE_MILESTONE_STEP,
+    NOTIFY_LIVE_INTERVAL_SECS,
     NOTIFY_LIVE_MIN_INTERVAL_SECS,
     NOTIFY_LIVE_TRANSITION_FLOOR_SECS,
     NOTIFY_REARM_PROGRESS_MAX,
@@ -63,6 +64,7 @@ class PushReason(str, Enum):
     START = "start"
     TRANSITION = "transition"
     MILESTONE = "milestone"
+    REFRESH = "refresh"
     OVERRUN = "overrun"
 
 
@@ -317,6 +319,7 @@ class LiveCardState:
     last_state: str | None = None
     last_push_mono: float | None = None
     last_when: int | None = None
+    last_progress: int | None = None
     pushes_this_job: int = 0
     started_epoch: float | None = None
     overrun_pushed: bool = False
@@ -334,6 +337,7 @@ class LiveCardState:
         self.last_state = None
         self.last_push_mono = None
         self.last_when = None
+        self.last_progress = None
         self.pushes_this_job = 0
         self.started_epoch = None
         self.overrun_pushed = False
@@ -378,7 +382,22 @@ class LiveCardState:
             return None
 
         if _milestone_of(snap.progress) > self.milestone:
+            # Progress has moved a lot in little time, so refresh early rather
+            # than showing a percentage the user can see is behind.
             return PushReason.MILESTONE
+
+        if since is not None and since >= NOTIFY_LIVE_INTERVAL_SECS:
+            # The ordinary cadence. Without it the card only ever moved on a 5%
+            # boundary, which on a long print left the percentage and the
+            # remaining estimate visibly stale for twenty minutes at a time.
+            #
+            # Only when the card would actually read differently, though. A
+            # paused print holds its progress and has no countdown, so
+            # refreshing it repaints identical pixels -- and the relay allows
+            # only 500 pushes per device per day, so an idle repaint every five
+            # minutes is a real cost for no information.
+            if snap.progress != self.last_progress or self.last_when is not None:
+                return PushReason.REFRESH
 
         # The chronometer counts down on-device for free, but a jumpy
         # printLeftTime can leave it frozen at 0:00 while progress stays inside
@@ -413,6 +432,7 @@ class LiveCardState:
         # old deadline would make decide() see it expire and fire a second,
         # pointless overrun push -- once per later push, forever.
         self.last_when = when
+        self.last_progress = snap.progress
         self.overrun_pushed = reason is PushReason.OVERRUN
         milestone = _milestone_of(snap.progress)
         if milestone > self.milestone:
@@ -546,6 +566,7 @@ def build_live_payload(
     visuals: NotifyVisuals | None = None,
     links: NotifyLinks | None = None,
     actions: list[dict[str, Any]] | None = None,
+    refresh: bool = False,
 ) -> dict[str, Any]:
     """A live-card push.
 
@@ -567,9 +588,27 @@ def build_live_payload(
         "importance": "low",
         # Progress pushes only. Terminal pushes reuse this tag, and alert_once
         # there would update the card silently -- the "finished" ping would
-        # never sound. build_terminal_payload deliberately omits it.
+        # never sound. build_event_payload deliberately omits it.
         "alert_once": True,
+        # Android: survives a swipe. `sticky` alone only survives a *tap*, which
+        # is the distinction that made the card look dismissable. Both need a
+        # tag, which is set above. The Dismiss action is the deliberate way out;
+        # without it this would be a notification the user cannot get rid of.
+        "persistent": True,
+        "sticky": True,
     }
+    if refresh:
+        # iOS alerts on every push unless told otherwise, so a 5-minute refresh
+        # cadence buzzes the phone for the whole print. `alert_once` above is
+        # Android-only and does nothing here, so these are its iOS counterpart
+        # rather than a duplicate. Deliberately *not* set on the push that
+        # starts the card: that one is the "your print is now on the Lock
+        # Screen" cue and should be felt once.
+        data["silent"] = True
+        data["push"] = {"interruption-level": "passive"}
+    else:
+        # Tells iOS to begin a Live Activity rather than update one.
+        data["activity"] = "start"
 
     pct = _clamp_progress(progress)
     if pct is None:
@@ -619,14 +658,24 @@ def build_event_payload(
     group: str | None = None,
     visuals: NotifyVisuals | None = None,
     links: NotifyLinks | None = None,
+    ends_activity: bool = False,
 ) -> dict[str, Any]:
     """A job-lifecycle banner: completed, stopped, or finishing soon.
 
     Carries no ``live_update`` (it is not an activity) and, crucially, no
-    ``alert_once``. It shares the live card's tag family and would otherwise
-    replace the card silently -- the "print finished" ping would never sound.
-    Ending the activity itself is a separate ``clear_notification`` on the live
-    tag; a banner does not end one.
+    ``alert_once``: a terminal banner posted on the live card's own tag would
+    otherwise replace it *silently* and the "print finished" ping would never
+    sound.
+
+    ``ends_activity`` is for the terminal ones, which are posted on the live
+    tag so they replace the card in place. It adds ``activity: "end"`` to close
+    the iOS Live Activity, and it also clears the keys that made the card
+    undismissable -- otherwise the print would be over and the user would be
+    left with a notification they cannot swipe away.
+
+    No preceding ``clear_notification`` is sent on that path: dismissing and
+    then re-posting the same tag makes the card visibly flicker, and replacing
+    it by tag identity achieves the same end state in one push.
     """
     icon, color = _EVENT_STYLE.get(kind, _EVENT_STYLE[EVENT_COMPLETED])
     data: dict[str, Any] = {
@@ -638,6 +687,13 @@ def build_event_payload(
         "importance": "high",
         "push": {"interruption-level": "time-sensitive"},
     }
+    if ends_activity:
+        data["activity"] = "end"
+        # Explicitly false rather than omitted: these are being sent to replace
+        # a card that set them, and an omitted key does not undo one already
+        # applied to a live notification.
+        data["persistent"] = False
+        data["sticky"] = False
 
     pct = _clamp_progress(progress)
     if pct is not None:
@@ -713,6 +769,10 @@ def build_clear_payload(tag: str) -> dict[str, Any]:
 ACTION_PAUSE = "pause"
 ACTION_RESUME = "resume"
 ACTION_STOP = "stop"
+# The card is posted with `persistent`, so a swipe will not remove it. This is
+# the deliberate way out, and it must always be offered alongside that flag --
+# an undismissable notification with no dismiss button is a trap.
+ACTION_DISMISS = "dismiss"
 
 
 def action_ids(entry_key: str) -> dict[str, str]:
@@ -731,32 +791,58 @@ def action_ids(entry_key: str) -> dict[str, str]:
         ACTION_PAUSE: f"CREALITY_PAUSE_{suffix}",
         ACTION_RESUME: f"CREALITY_RESUME_{suffix}",
         ACTION_STOP: f"CREALITY_STOP_{suffix}",
+        ACTION_DISMISS: f"CREALITY_DISMISS_{suffix}",
     }
 
 
 def build_actions(
-    *, paused: bool, ids: Mapping[str, str], labels: Mapping[str, str]
+    *,
+    paused: bool,
+    ids: Mapping[str, str],
+    labels: Mapping[str, str],
+    controls: bool = True,
 ) -> list[dict[str, Any]]:
-    """Buttons for a live card: the useful one, plus Stop.
+    """Buttons for a live card: the useful one, Stop, and Dismiss.
 
     ``labels`` supplies the translated button titles, keyed by ACTION_*.
 
     Stop is marked destructive and authentication-required. A mis-tap on a lock
     screen must not be able to end a fourteen-hour print.
+
+    ``controls=False`` drops Pause/Resume and Stop, for the user who does not
+    want to drive the printer from a lock screen. Dismiss survives that: the
+    card is sent with ``persistent`` so a swipe cannot remove it, which makes
+    this the only way to get rid of it, and a card with no way out is a trap
+    rather than a feature. It hides the card without touching the print, which
+    is what distinguishes it from Stop.
     """
-    primary_key = ACTION_RESUME if paused else ACTION_PAUSE
-    primary_icon = "sfsymbols:play.circle" if paused else "sfsymbols:pause.circle"
-    return [
+    buttons: list[dict[str, Any]] = []
+    if controls:
+        primary_key = ACTION_RESUME if paused else ACTION_PAUSE
+        primary_icon = (
+            "sfsymbols:play.circle" if paused else "sfsymbols:pause.circle"
+        )
+        buttons.append(
+            {
+                "action": ids[primary_key],
+                "title": labels.get(primary_key, ""),
+                "icon": primary_icon,
+            }
+        )
+        buttons.append(
+            {
+                "action": ids[ACTION_STOP],
+                "title": labels.get(ACTION_STOP, ""),
+                "icon": "sfsymbols:stop.circle",
+                "destructive": True,
+                "authenticationRequired": True,
+            }
+        )
+    buttons.append(
         {
-            "action": ids[primary_key],
-            "title": labels.get(primary_key, ""),
-            "icon": primary_icon,
-        },
-        {
-            "action": ids[ACTION_STOP],
-            "title": labels.get(ACTION_STOP, ""),
-            "icon": "sfsymbols:stop.circle",
-            "destructive": True,
-            "authenticationRequired": True,
-        },
-    ]
+            "action": ids[ACTION_DISMISS],
+            "title": labels.get(ACTION_DISMISS, ""),
+            "icon": "sfsymbols:xmark.circle",
+        }
+    )
+    return buttons

@@ -32,6 +32,7 @@ from .notification_rules import (
     NotifyLinks,
     NotifyVisuals,
     PushReason,
+    ACTION_DISMISS,
     ACTION_PAUSE,
     ACTION_RESUME,
     ACTION_STOP,
@@ -73,6 +74,7 @@ from .const import (
     NOTIFY_CHANNEL_KEY_ALERT,
     NOTIFY_CHANNEL_KEY_DONE,
     NOTIFY_CHANNEL_KEY_LIVE,
+    NOTIFY_CHANNEL_KEY_SOON,
     NOTIFY_LIVE_STALE_CLEAR_SECS,
     NOTIFY_PRIME_GRACE_SECS,
     PREVIEW_REASONS_UNUSABLE,
@@ -1011,7 +1013,14 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # `_notified_completed`, so nothing else would ever re-arm it and
                 # the same file could never show a card again.
                 finished = snap.progress is not None and snap.progress >= 100
-                self._clear_live_card(finished=finished)
+                # A terminal banner is posted on this same tag moments later and
+                # replaces the card in place, so dismissing it here would only
+                # make it flicker. When the user has those notifications turned
+                # off, nothing is coming and the sentinel is the only thing that
+                # will ever take the card off their phone.
+                self._clear_live_card(
+                    finished=finished, send=not self._notify_completed
+                )
             return
 
         now_mono = self.hass.loop.time()
@@ -1053,6 +1062,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             visuals=self._notify_media(include_snapshot=False),
             links=self._notify_links(),
             actions=self._notify_card_actions(snap),
+            # A card is already on the phone, so this push updates one rather
+            # than starting one -- which is what makes it silent on iOS.
+            refresh=self._live_card.card_active,
         )
         self._notify_dispatch(
             payload, kind=f"live:{reason.value}", mobile_only=True
@@ -1073,20 +1085,27 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return self._t("status_starting")
         return self._t("status_finishing")
 
-    def _clear_live_card(self, *, finished: bool = False) -> None:
+    def _clear_live_card(self, *, finished: bool = False, send: bool = True) -> None:
         """End the live activity.
 
-        A same-tag banner does not end one, so this sentinel is the only way.
+        A same-tag banner does not end one, so this sentinel is the only way to
+        dismiss a card that no notification will replace.
+
+        `send=False` retires the state without dismissing anything, for the one
+        case where a terminal banner is about to be posted on the same tag: it
+        replaces the card by tag identity, and clearing first would dismiss and
+        immediately re-create it, which the user sees as a flicker.
+
         Deliberately not called on unload: `options_update_listener` reloads the
         entry on *any* options change, and clearing there would dismiss and
-        re-create the card every time the user toggles something unrelated --
-        visibly flickering, and burning an iOS push-to-start slot each time.
+        re-create the card every time the user toggles something unrelated.
         """
-        self._notify_dispatch(
-            build_clear_payload(f"{self._notify_tag_base()}_live"),
-            kind="live:clear",
-            mobile_only=True,
-        )
+        if send:
+            self._notify_dispatch(
+                build_clear_payload(f"{self._notify_tag_base()}_live"),
+                kind="live:clear",
+                mobile_only=True,
+            )
         if finished:
             self._live_card.finish()
         else:
@@ -1130,9 +1149,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return action_ids(self.entry_id or self.client._host)
 
     def _notify_card_actions(self, snap: LiveSnapshot) -> list[dict[str, Any]] | None:
-        """Buttons for the live card, or None when the user has not asked for them."""
-        if not self._notify_actions:
-            return None
+        """Buttons for the live card.
+
+        Never None. The printer controls are opt-in, but the card is posted with
+        `persistent` so a swipe will not remove it -- which means Dismiss has to
+        be there whatever the user chose, or the notification could not be got
+        rid of at all.
+        """
         return build_actions(
             paused=snap.activity_state == "paused",
             ids=self._notify_action_ids(),
@@ -1140,7 +1163,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ACTION_PAUSE: self._t("action_pause"),
                 ACTION_RESUME: self._t("action_resume"),
                 ACTION_STOP: self._t("action_stop"),
+                ACTION_DISMISS: self._t("action_dismiss"),
             },
+            controls=self._notify_actions,
         )
 
     async def async_handle_notification_action(self, action: str) -> bool:
@@ -1160,6 +1185,12 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self.request_resume()
         elif action == ids[ACTION_STOP]:
             await self.async_stop_print()
+        elif action == ids[ACTION_DISMISS]:
+            # The card is sent with `persistent`, so a swipe will not shift it
+            # and this is the user's only way out. It hides the card and leaves
+            # the print alone -- and `finish()` rather than `clear()` so the
+            # next frame does not helpfully put it straight back.
+            self._clear_live_card(finished=True)
         else:
             return False
         _LOGGER.info("Handled live-card action %s", action)
@@ -1337,9 +1368,33 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 visuals=self._notify_media(include_snapshot=True),
                 links=links,
             )
-        else:
+        elif kind == EVENT_SOON:
+            # Its own tag and channel. On the shared `_event` tag the completion
+            # banner replaced this reminder minutes later, so the one
+            # notification whose whole purpose is "go and look at the printer"
+            # was the one that vanished. It now sits alongside the live card
+            # instead, and being a separate channel it can make a sound while
+            # the card stays quiet.
             payload = build_event_payload(
-                tag=f"{tag_base}_event",
+                tag=f"{tag_base}_soon",
+                title=title,
+                message=message,
+                kind=kind,
+                channel=self._t(NOTIFY_CHANNEL_KEY_SOON),
+                progress=self._notify_progress(),
+                group=tag_base,
+                # No bed snapshot: the print is not finished, and the preview
+                # already says what is on the plate.
+                visuals=self._notify_media(include_snapshot=False),
+                links=links,
+            )
+        else:
+            # Terminal. Posted on the live card's own tag so it *replaces* the
+            # card in place rather than arriving beside a card that has to be
+            # dismissed separately -- and with no preceding clear, which would
+            # make it visibly flicker.
+            payload = build_event_payload(
+                tag=f"{tag_base}_live",
                 title=title,
                 message=message,
                 kind=kind,
@@ -1348,6 +1403,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 group=tag_base,
                 visuals=self._notify_media(include_snapshot=True),
                 links=links,
+                ends_activity=True,
             )
 
         self._notify_dispatch(payload, kind=kind)

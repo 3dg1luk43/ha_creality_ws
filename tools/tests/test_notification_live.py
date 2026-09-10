@@ -6,7 +6,9 @@ exercised without sleeping.
 """
 
 import asyncio
+import json
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -15,11 +17,19 @@ from conftest import fake_config_entry
 
 from custom_components.ha_creality_ws.const import (
     CLEAR_NOTIFICATION_MARKER,
+    NOTIFY_LIVE_INTERVAL_SECS,
     NOTIFY_LIVE_MILESTONE_STEP,
     NOTIFY_LIVE_MIN_INTERVAL_SECS,
     NOTIFY_LIVE_STALE_CLEAR_SECS,
 )
 from custom_components.ha_creality_ws.coordinator import KCoordinator
+
+_STRINGS = json.loads(
+    (
+        Path(__file__).resolve().parents[2]
+        / "custom_components/ha_creality_ws/strings.json"
+    ).read_text(encoding="utf-8")
+)["common"]
 
 
 class Clock:
@@ -128,11 +138,22 @@ def _printing(progress=10, **kw):
 
 
 def _live(payloads):
-    """Live-card *pushes*. The dismiss sentinel shares the tag, so exclude it."""
+    """Live-card progress *pushes*.
+
+    Three different things now ride the `_live` tag, because replacing a
+    notification in place requires reusing its tag: the card itself, the
+    terminal banner that supersedes it, and the dismiss sentinel.
+
+    Selecting on `activity != "end"` rather than on the presence of
+    `live_update`, because past Apple's eight-hour ceiling the card deliberately
+    drops `live_update` and degrades to a plain tagged notification -- still
+    very much the card, and still under test here.
+    """
     return [
         p
         for p in payloads
         if p["data"]["tag"].endswith("_live")
+        and p["data"].get("activity") != "end"
         and p["message"] != CLEAR_NOTIFICATION_MARKER
     ]
 
@@ -142,7 +163,25 @@ def _clears(payloads):
 
 
 def _events(payloads):
-    return [p for p in payloads if p["data"]["tag"].endswith("_event")]
+    """Lifecycle banners: the terminal ones, plus the finishing-soon reminder.
+
+    Terminal banners land on the live tag (they replace the card) and are told
+    apart by `activity: "end"`; the reminder has its own tag so it can sit
+    alongside the card rather than clobbering it.
+    """
+    return [
+        p
+        for p in payloads
+        if p["message"] != CLEAR_NOTIFICATION_MARKER
+        and (
+            p["data"].get("activity") == "end"
+            or p["data"]["tag"].endswith("_soon")
+        )
+    ]
+
+
+def _soon(payloads):
+    return [p for p in payloads if p["data"]["tag"].endswith("_soon")]
 
 
 # --------------------------------------------------------------------------- #
@@ -273,11 +312,10 @@ def test_finishing_ends_the_activity_and_then_announces_it():
     coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
     payloads = _frame(coord, hass, **_printing(100, printLeftTime=0))
 
-    # The activity has to be ended with the sentinel; a same-tag banner does not
-    # end one. And the banner lands on its own tag, so it survives.
-    clears = _clears(payloads)
-    assert len(clears) == 1
-    assert clears[0]["data"]["tag"].endswith("_live")
+    # No dismiss sentinel: the banner is posted on the card's own tag and
+    # replaces it. Clearing first would dismiss and immediately re-create the
+    # notification, which the user sees as a flicker.
+    assert _clears(payloads) == []
 
     events = _events(payloads)
     assert len(events) == 1
@@ -529,7 +567,9 @@ def test_stopping_and_reprinting_the_same_file_shows_a_card_again():
     # state 4 is "stopped": job over, but nowhere near 100%.
     coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
     stopped = _frame(coord, hass, **_printing(30, state=4))
-    assert len(_clears(stopped)) == 1
+    # The banner replaces the card rather than a sentinel dismissing it.
+    assert len(_events(stopped)) == 1
+    assert _clears(stopped) == []
     assert coord._live_card.job_finished is False, "a stop must not retire the card"
 
     coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
@@ -588,7 +628,10 @@ def test_a_pause_clears_the_countdown_deadline():
     _frame(coord, hass, **_printing(42, state=5, printLeftTime=60))
     assert coord._live_card.last_when is None
 
-    # Long past the old deadline, and still nothing to say.
+    # Long past the old deadline, and still nothing to say. Also past the
+    # refresh cadence, which must stay quiet too: a paused print holds its
+    # progress and has no countdown, so a repaint would be identical pixels
+    # charged against the relay's daily budget.
     coord.hass.loop.advance(600)
     assert _live(_frame(coord, hass, **_printing(42, state=5, printLeftTime=60))) == []
 
@@ -607,7 +650,7 @@ def test_a_stopped_print_says_so_instead_of_the_card_just_vanishing():
     coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
 
     payloads = _frame(coord, hass, **_printing(30, state=4))
-    assert len(_clears(payloads)) == 1, "the card is still dismissed"
+    assert _clears(payloads) == [], "the banner replaces the card in place"
 
     events = _events(payloads)
     assert len(events) == 1
@@ -669,3 +712,125 @@ def test_stopping_then_reprinting_announces_the_next_stop_too():
     events = _events(_frame(coord, hass, **_printing(2, printJobTime=6, state=4)))
     assert len(events) == 1
     assert "stopped at 2%" in events[0]["message"]
+
+
+# --------------------------------------------------------------------------- #
+# Dismissal, cadence and coexistence
+# --------------------------------------------------------------------------- #
+
+
+def test_the_card_cannot_be_swiped_away():
+    """`sticky` alone only survives a *tap*. Surviving a swipe needs
+    `persistent`, and that distinction is why the card looked dismissable."""
+    coord, hass = _coordinator()
+    data = _live(_frame(coord, hass, **_printing(5)))[0]["data"]
+    assert data["persistent"] == "true"
+    assert data["sticky"] == "true"
+
+
+def test_an_undismissable_card_always_carries_a_way_out():
+    """The invariant that keeps `persistent` honest. Printer controls are
+    opt-in, but if the card can survive a swipe and offers no button, the user
+    has a notification they cannot remove by any means."""
+    for actions in (True, False):
+        coord, hass = _coordinator()
+        coord._notify_actions = actions
+        data = _live(_frame(coord, hass, **_printing(5)))[0]["data"]
+        assert data["persistent"] == "true"
+        ids = [a["action"] for a in data["actions"]]
+        assert any(i.startswith("CREALITY_DISMISS_") for i in ids), actions
+
+
+def test_the_first_push_alerts_and_later_ones_do_not():
+    """iOS alerts per push unless told otherwise, so a refresh cadence would
+    buzz the phone for the whole print. `alert_once` is Android-only and does
+    nothing there. The push that *starts* the card stays audible: it is the
+    "your print is on the Lock Screen" cue."""
+    coord, hass = _coordinator()
+    start = _live(_frame(coord, hass, **_printing(5)))[0]["data"]
+    assert "silent" not in start
+    assert "push" not in start
+    assert start["activity"] == "start"
+
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    refresh = _live(_frame(coord, hass, **_printing(10)))[0]["data"]
+    assert refresh["silent"] == "true"
+    # Nested, so it is exempt from the FCM string rule and stays a real dict.
+    assert refresh["push"] == {"interruption-level": "passive"}
+    assert "activity" not in refresh
+
+
+def test_progress_refreshes_on_the_clock_not_only_on_a_milestone():
+    """The card used to move only on a 5% boundary, so on a long print the
+    percentage and the remaining estimate sat visibly stale for twenty minutes
+    at a time."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(10))
+    # Well past the refresh cadence but inside the same 5% bucket.
+    coord.hass.loop.advance(NOTIFY_LIVE_INTERVAL_SECS + 1)
+    pushes = _live(_frame(coord, hass, **_printing(11)))
+    assert len(pushes) == 1
+    assert pushes[0]["data"]["progress"] == "11"
+
+
+def test_the_finishing_soon_reminder_sits_beside_the_card():
+    """It used to share the `_event` tag with the completion banner, so the one
+    notification whose entire purpose is "go and look at the printer" was the
+    one that got replaced minutes later."""
+    coord, hass = _coordinator()
+    coord._notify_minutes_to_end = True
+    coord._minutes_to_end_value = 5
+    _frame(coord, hass, **_printing(80))
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+
+    payloads = _frame(coord, hass, **_printing(81, printLeftTime=120))
+    soon = _soon(payloads)
+    assert len(soon) == 1
+    # Its own tag, so neither notification can replace the other...
+    assert soon[0]["data"]["tag"] != f"{coord._notify_tag_base()}_live"
+    # ...and its own channel, so it can make a sound while the card stays quiet.
+    assert soon[0]["data"]["channel"] == _STRINGS["channel_soon"]
+    assert soon[0]["data"]["channel"] != _STRINGS["channel_live"]
+
+
+def test_the_terminal_banner_replaces_the_card_and_frees_it():
+    """Posted on the card's own tag so it supersedes it in place, and it has to
+    undo `persistent`: the print is over, so a notification the user cannot
+    swipe away would be left behind for good."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(50))
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+
+    payloads = _frame(coord, hass, **_printing(100, printLeftTime=0))
+    done = _events(payloads)
+    assert len(done) == 1
+    data = done[0]["data"]
+    assert data["tag"] == f"{coord._notify_tag_base()}_live"
+    assert data["activity"] == "end"
+    assert data["persistent"] == "false"
+    assert data["sticky"] == "false"
+    # No alert_once, or replacing the card would happen silently and the
+    # "finished" ping would never sound.
+    assert "alert_once" not in data
+
+
+def test_a_card_the_user_hid_does_not_come_straight_back():
+    """Hide has to stick. The next telemetry frame arrives within a second, and
+    re-creating the card there would make the button look broken."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(42))
+    ids = coord._notify_action_ids()
+    asyncio.get_event_loop().run_until_complete(
+        coord.async_handle_notification_action(ids["dismiss"])
+    )
+    # Drain rather than discard: the dismiss itself queues a send, and dropping
+    # the coroutine unawaited would leak it into the next test as a warning.
+    pending, hass.tasks = hass.tasks, []
+    if pending:
+        asyncio.get_event_loop().run_until_complete(asyncio.gather(*pending))
+    hass.calls.clear()
+
+    for step in range(1, 6):
+        coord.hass.loop.advance(NOTIFY_LIVE_INTERVAL_SECS + 1)
+        assert _live(_frame(coord, hass, **_printing(42 + step))) == []
+

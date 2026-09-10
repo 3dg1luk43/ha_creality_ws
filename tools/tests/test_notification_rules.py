@@ -376,15 +376,60 @@ def test_a_state_change_bypasses_the_interval_floor():
     )
 
 
-def test_a_flapping_state_is_still_floored():
+def test_a_pause_is_pushed_with_no_delay_at_all():
+    """Pausing is a deliberate act performed at the printer or in the app, and
+    the card is where the user looks to see it took effect. This used to sit
+    behind a five-second floor meant to absorb flapping telemetry; that made a
+    real pause feel broken, and the per-job cap below is the better place to
+    bound a printer that genuinely flaps.
+    """
     state = LiveCardState()
     snap = _snap(progress=42)
     state.record_push(
         reason=PushReason.START, snap=snap, now_mono=0.0, now_epoch=1_700_000_000.0, when=None
     )
+    assert NOTIFY_LIVE_TRANSITION_FLOOR_SECS == 0.0
+    # Same instant as the push that started the card.
     assert (
-        state.decide(snap=_snap("paused", 42), now_mono=0.5, now_epoch=1_700_000_000.0) is None
+        state.decide(snap=_snap("paused", 42), now_mono=0.0, now_epoch=1_700_000_000.0)
+        is PushReason.TRANSITION
     )
+
+
+def test_a_state_that_has_not_changed_does_not_retrigger():
+    """What stops an immediate transition push becoming a push per frame: the
+    derived state has to actually differ from the one last sent."""
+    state = LiveCardState()
+    snap = _snap("paused", 42)
+    state.record_push(
+        reason=PushReason.TRANSITION, snap=snap, now_mono=0.0,
+        now_epoch=1_700_000_000.0, when=None,
+    )
+    for tick in range(1, 30):
+        assert (
+            state.decide(snap=snap, now_mono=tick * 0.1, now_epoch=1_700_000_000.0)
+            is None
+        )
+
+
+def test_pathological_flapping_is_bounded_by_the_per_job_cap():
+    """With no transition floor the cap is the only thing standing between a
+    printer that flaps every frame and the relay's daily push budget."""
+    state = LiveCardState()
+    pushes = 0
+    for tick in range(NOTIFY_LIVE_MAX_PUSHES_PER_JOB * 2):
+        snap = _snap("paused" if tick % 2 else "printing", 42)
+        reason = state.decide(
+            snap=snap, now_mono=tick * 0.05, now_epoch=1_700_000_000.0
+        )
+        if reason is None:
+            continue
+        pushes += 1
+        state.record_push(
+            reason=reason, snap=snap, now_mono=tick * 0.05,
+            now_epoch=1_700_000_000.0, when=None,
+        )
+    assert pushes == NOTIFY_LIVE_MAX_PUSHES_PER_JOB
 
 
 def test_an_expired_chronometer_is_replaced_exactly_once():
@@ -425,6 +470,7 @@ _DIRTY_LIVE_CARD_STATE = {
     "last_state": "printing",
     "last_push_mono": 123.0,
     "last_when": 1_700_000_060,
+    "last_progress": 42,
     "pushes_this_job": 7,
     "started_epoch": 1_700_000_000.0,
     "overrun_pushed": True,
