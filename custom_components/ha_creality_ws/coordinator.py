@@ -121,6 +121,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._notify_camera_snapshot = True
         self._notify_tap_path = ""
         self._live_card = LiveCardState()
+        # Notifications retired in state but not yet taken off the phone.
+        # Settled at the end of the frame: the card's debt is cancelled if a
+        # terminal banner went out to replace it, the reminder's never is,
+        # because nothing else shares its tag. Neither is dropped while
+        # undeliverable -- it stays owed until there is somewhere to send it.
+        self._card_dismiss_owed = False
+        self._soon_dismiss_owed = False
         # Notification text is translated at runtime; None until loaded.
         self._notify_strings: dict[str, str] | None = None
         # (platform, unique suffix) -> entity id. Populated lazily: the
@@ -601,21 +608,35 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # beginning, so the started latch is closed rather than armed. Same
         # for a job the printer is still reporting as stopped.
         self._notified_started = True
-        self._notified_stopped = (
-            derive_activity_state(
-                d,
-                power_off=self.power_is_off(),
-                available=self.available,
-                paused_flag=self._paused_flag,
-            )
-            == "stopped"
+        primed_state = derive_activity_state(
+            d,
+            power_off=self.power_is_off(),
+            available=self.available,
+            paused_flag=self._paused_flag,
         )
+        self._notified_stopped = primed_state == "stopped"
 
         # The card is baselined too, or a restart would push a live activity for
         # a print that finished last week -- issue #112 reincarnated as a push.
         # Milestone comes off the progress we can actually see so the first real
         # push is a start, not a redundant milestone.
         self._live_card.reset_for_new_job(progress=prog_val)
+
+        # A card outlives the process. `card_active` is in-memory, so after a
+        # restart nothing knows one is still on a phone -- and `notifier_tick`
+        # only acts on a card it believes exists, so it will not tidy up either.
+        # A print that finished while Home Assistant was down therefore left a
+        # card reading "42%" that nothing would ever remove.
+        #
+        # Only when no resync is coming: if the printer is mid-job the START
+        # push below replaces the card in place, and dismissing it first would
+        # flicker and spend an iOS push-to-start slot for nothing.
+        if self._notify_live and primed_state not in BUSY_PRINT_STATES:
+            self._notify_dispatch(
+                build_clear_payload(f"{self._notify_tag_base()}_live"),
+                kind="live:clear:adopt",
+                mobile_only=True,
+            )
 
         _LOGGER.debug(
             "Notification baseline captured: file=%s progress=%s completed=%s "
@@ -830,6 +851,23 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # The estimate jumped back up by more than the slack; re-arm.
                 self._notified_minutes_to_end = False
 
+        # 5) Settle any dismissal still owed. Every terminal banner above
+        # cancels the debt, because it lands on the card's tag and replaces it.
+        # Anything left here means the card was retired with nothing to take its
+        # place, and the sentinel is the only thing that will.
+        # Left owed rather than dropped when there is nowhere to deliver it: a
+        # target configured later still has a card to take away.
+        if deliver and self._card_dismiss_owed:
+            self._card_dismiss_owed = False
+            self._clear_live_card(finished=self._live_card.job_finished)
+        if deliver and self._soon_dismiss_owed:
+            self._soon_dismiss_owed = False
+            self._notify_dispatch(
+                build_clear_payload(f"{self._notify_tag_base()}_soon"),
+                kind="soon:clear",
+                mobile_only=True,
+            )
+
     def _reset_for_new_job(self, prog_val: int) -> None:
         """Re-arm the per-job notification latches for a new job.
 
@@ -1013,14 +1051,21 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # `_notified_completed`, so nothing else would ever re-arm it and
                 # the same file could never show a card again.
                 finished = snap.progress is not None and snap.progress >= 100
-                # A terminal banner is posted on this same tag moments later and
-                # replaces the card in place, so dismissing it here would only
-                # make it flicker. When the user has those notifications turned
-                # off, nothing is coming and the sentinel is the only thing that
-                # will ever take the card off their phone.
-                self._clear_live_card(
-                    finished=finished, send=not self._notify_completed
-                )
+                # Retire the state but send nothing yet. A terminal banner is
+                # usually posted on this same tag moments later and replaces the
+                # card in place, so dismissing here would only make it flicker.
+                #
+                # "Usually" is why this is a debt rather than a prediction: it
+                # used to key off the *option*, but the banner is also gated on
+                # its own one-shot latch. A job whose completion had already
+                # been announced -- the printer reports 100% forever, so any
+                # restart re-latches it -- produced neither a banner nor a
+                # dismissal, and the card sat on the phone for good.
+                self._card_dismiss_owed = True
+                # The reminder is on its own tag, so no banner will ever
+                # supersede it and it always needs taking away by hand.
+                self._soon_dismiss_owed = self._notified_minutes_to_end
+                self._clear_live_card(finished=finished, send=False)
             return
 
         now_mono = self.hass.loop.time()
@@ -1408,6 +1453,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 links=links,
                 ends_activity=True,
             )
+            # This lands on the card's tag and supersedes it, so no sentinel is
+            # owed any more.
+            self._card_dismiss_owed = False
 
         self._notify_dispatch(payload, kind=kind)
 

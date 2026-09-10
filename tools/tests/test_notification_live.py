@@ -409,7 +409,12 @@ def test_a_job_that_finished_before_startup_never_gets_a_card():
     coord._notify_completed = True
     # Not primed: the first frame is a baseline, not an event.
     payloads = _frame(coord, hass, **_printing(100, printLeftTime=0))
-    assert payloads == []
+    # No card and no announcement -- but a dismissal is expected and is the
+    # point of the adopt-clear: a card can outlive the process, so startup has
+    # to assume one might be on a phone and take it away.
+    assert _live(payloads) == []
+    assert _events(payloads) == []
+    assert [c["message"] for c in _clears(payloads)] == [CLEAR_NOTIFICATION_MARKER]
     assert coord._live_card.card_active is False
 
 
@@ -691,7 +696,9 @@ def test_a_print_already_stopped_at_startup_is_not_announced():
     coord._notify_completed = True
     coord._notify_live = True
 
-    assert _frame(coord, hass, **_printing(30, state=4)) == []
+    payloads = _frame(coord, hass, **_printing(30, state=4))
+    assert _live(payloads) == []
+    assert _events(payloads) == [], "last week's cancellation must stay quiet"
     assert coord._notified_stopped is True
     coord.hass.loop.advance(1)
     assert _events(_frame(coord, hass, **_printing(30, state=4))) == []
@@ -834,3 +841,122 @@ def test_a_card_the_user_hid_does_not_come_straight_back():
         coord.hass.loop.advance(NOTIFY_LIVE_INTERVAL_SECS + 1)
         assert _live(_frame(coord, hass, **_printing(42 + step))) == []
 
+
+# --------------------------------------------------------------------------- #
+# Orphaned cards -- every way a card can be left stranded on a phone
+# --------------------------------------------------------------------------- #
+
+
+def test_a_job_whose_completion_was_already_announced_still_loses_its_card():
+    """The reported bug. The printer reports 100% forever, so any restart
+    re-latches the completion -- and the card was then retired with neither a
+    banner nor a dismissal, leaving a stale percentage on the phone for good.
+
+    The dismissal is a debt settled at the end of the frame rather than a guess
+    about who will pay it.
+    """
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(50))
+    assert coord._live_card.card_active is True
+
+    # Completion already announced for this job.
+    coord._notified_completed = True
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    payloads = _frame(coord, hass, **_printing(100, printLeftTime=0))
+
+    assert _events(payloads) == [], "no second announcement"
+    assert len(_clears(payloads)) == 1, "the card must still be taken away"
+    assert coord._live_card.card_active is False
+
+
+def test_a_stop_already_announced_still_loses_its_card():
+    """Same hole, reached through the stopped path rather than completion."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(30))
+    coord._notified_stopped = True
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+
+    payloads = _frame(coord, hass, **_printing(30, state=4))
+    assert _events(payloads) == []
+    assert len(_clears(payloads)) == 1
+
+
+def test_a_card_that_outlived_the_process_is_taken_away_at_startup():
+    """`card_active` lives in memory only, so after a restart nothing knows a
+    card is still on a phone -- and `notifier_tick` will not tidy it up either,
+    because it only acts on a card it believes exists. A print that ended while
+    Home Assistant was down left one stranded indefinitely."""
+    hass = HassStub()
+    coord = _build(hass)
+    coord._notify_targets = ["notify.mobile_app_pixel"]
+    coord._notify_live = True
+    coord._notify_completed = True
+
+    # First frame ever: an idle printer still reporting the finished job.
+    payloads = _frame(coord, hass, **_printing(100, printLeftTime=0))
+    assert len(_clears(payloads)) == 1
+    assert _live(payloads) == []
+
+
+def test_adopting_a_running_print_replaces_the_card_rather_than_clearing_it():
+    """The other half of that: mid-job the resync push supersedes the card in
+    place, so dismissing first would flicker and burn an iOS push-to-start
+    slot for nothing."""
+    hass = HassStub()
+    coord = _build(hass)
+    coord._notify_targets = ["notify.mobile_app_pixel"]
+    coord._notify_live = True
+    coord._notify_completed = True
+
+    _frame(coord, hass, **_printing(42))          # baseline, silent
+    coord.hass.loop.advance(1)
+    payloads = _frame(coord, hass, **_printing(43))
+    assert _clears(payloads) == [], "no dismissal while a job is running"
+    assert len(_live(payloads)) == 1
+
+
+def test_the_finishing_soon_reminder_is_taken_away_when_the_job_ends():
+    """It has its own tag so it can sit beside the card, which also means
+    nothing else will ever remove it. A phone reading "finishing in 30 minutes"
+    for a print that already ended is worse than never having warned."""
+    coord, hass = _coordinator()
+    coord._notify_minutes_to_end = True
+    coord._minutes_to_end_value = 30
+    _frame(coord, hass, **_printing(80, printLeftTime=600))
+    assert coord._notified_minutes_to_end is True
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+
+    payloads = _frame(coord, hass, **_printing(100, printLeftTime=0))
+    cleared_tags = {c["data"]["tag"] for c in _clears(payloads)}
+    assert f"{coord._notify_tag_base()}_soon" in cleared_tags
+
+
+def test_no_dismissal_is_sent_when_there_was_never_a_reminder():
+    """The clear is only worth a push if a reminder actually went out."""
+    coord, hass = _coordinator()
+    coord._notify_minutes_to_end = False
+    _frame(coord, hass, **_printing(50))
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+
+    payloads = _frame(coord, hass, **_printing(100, printLeftTime=0))
+    tags = {c["data"]["tag"] for c in _clears(payloads)}
+    assert f"{coord._notify_tag_base()}_soon" not in tags
+
+
+def test_the_reminder_is_cleared_even_with_completion_notifications_off():
+    """The soon-clear used to live inside the terminal-banner path, so a user
+    who wanted the reminder but not the completion ping kept a stale
+    "finishing soon" forever -- the one combination where nothing ran."""
+    coord, hass = _coordinator()
+    coord._notify_completed = False
+    coord._notify_minutes_to_end = True
+    coord._minutes_to_end_value = 30
+    _frame(coord, hass, **_printing(80, printLeftTime=600))
+    assert coord._notified_minutes_to_end is True
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+
+    payloads = _frame(coord, hass, **_printing(100, printLeftTime=0))
+    tags = {c["data"]["tag"] for c in _clears(payloads)}
+    assert f"{coord._notify_tag_base()}_soon" in tags
+    # ...and the card still goes, since no banner is coming to replace it.
+    assert f"{coord._notify_tag_base()}_live" in tags
