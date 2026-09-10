@@ -105,6 +105,33 @@ def coerce_targets(options: Mapping[str, Any]) -> list[str]:
     return out
 
 
+# Companion platforms with no live-card surface at all. macOS has neither an
+# iOS-style Live Activity nor an Android progress notification, so a live push
+# there is an ordinary banner that cannot be updated in place -- one every
+# refresh interval, none of which supersede the last.
+LIVE_INCAPABLE_OS = frozenset({"macos"})
+
+
+def is_live_capable(os_name: str | None) -> bool:
+    """Whether this companion platform can render the live card.
+
+    Unknown platforms count as capable: a target we failed to identify should
+    still get its notifications rather than be silently skipped.
+    """
+    if not os_name:
+        return True
+    return os_name.strip().lower() not in LIVE_INCAPABLE_OS
+
+
+def notify_service_slug(target: str | None) -> str:
+    """The device-name slug embedded in a `notify.mobile_app_<slug>` target."""
+    if not target:
+        return ""
+    service = target.split(".", 1)[1] if "." in target else target
+    prefix = "mobile_app_"
+    return service[len(prefix):] if service.startswith(prefix) else ""
+
+
 def is_mobile_target(target: str | None) -> bool:
     """Whether a notify target is a companion-app service.
 

@@ -124,3 +124,57 @@ def test_no_native_scalar_survives_a_realistic_live_payload():
 def test_empty_and_missing_data_are_both_empty_dicts():
     assert stringify_data(None) == {}
     assert stringify_data({}) == {}
+
+
+# --------------------------------------------------------------------------- #
+# The self-check that makes a rejection attributable
+# --------------------------------------------------------------------------- #
+
+
+def test_the_guard_names_every_offending_key(caplog):
+    """Home Assistant swallows the relay's rejection -- it never reaches the
+    integration, and what it logs is a bare "Error sending notification to
+    <device>" with the reason only at DEBUG. So this class of bug is invisible
+    from here by construction, and twice survived a release for that reason.
+    The warning cannot prevent the rejection; it makes it attributable."""
+    import logging
+
+    from custom_components.ha_creality_ws.coordinator import _warn_on_unsendable
+
+    with caplog.at_level(logging.WARNING):
+        _warn_on_unsendable(
+            {
+                "tag": "fine",
+                "progress": 42,
+                "live_update": True,
+                "actions": [{"action": "A", "title": "Stop", "destructive": True}],
+            },
+            "notify.mobile_app_s24",
+        )
+    assert "progress" in caplog.text
+    assert "live_update" in caplog.text
+    # The nested one is the half that was missed the first time round.
+    assert "actions[0].destructive" in caplog.text
+    assert "notify.mobile_app_s24" in caplog.text
+
+
+def test_the_guard_stays_quiet_for_a_conforming_payload(caplog):
+    import logging
+
+    from custom_components.ha_creality_ws.coordinator import _warn_on_unsendable
+
+    with caplog.at_level(logging.WARNING):
+        _warn_on_unsendable(
+            stringify_data(
+                {
+                    "tag": "t",
+                    "progress": 42,
+                    "live_update": True,
+                    "push": {"interruption-level": "passive"},
+                    "actions": [{"action": "A", "title": "Stop", "destructive": True}],
+                }
+            ),
+            "notify.mobile_app_s24",
+        )
+    assert caplog.text == ""
+

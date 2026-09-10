@@ -960,3 +960,98 @@ def test_the_reminder_is_cleared_even_with_completion_notifications_off():
     assert f"{coord._notify_tag_base()}_soon" in tags
     # ...and the card still goes, since no banner is coming to replace it.
     assert f"{coord._notify_tag_base()}_live" in tags
+
+
+# --------------------------------------------------------------------------- #
+# Platform capability, resolved alerts, payload conformance
+# --------------------------------------------------------------------------- #
+
+
+def _with_devices(coord, hass, devices):
+    """Teach the stub which companion platform is behind each notify target."""
+    entries = [
+        SimpleNamespace(data={"device_name": name, "os_name": os_name})
+        for name, os_name in devices
+    ]
+    hass.config_entries.async_entries = lambda domain=None: entries
+    coord._target_os_cache.clear()
+
+
+def test_a_mac_is_not_sent_a_live_card_it_cannot_render():
+    """macOS has neither an iOS Live Activity nor an Android progress
+    notification, so every refresh would land as another ordinary banner that
+    supersedes nothing -- twelve an hour for the length of the print."""
+    coord, hass = _coordinator(
+        targets=("notify.mobile_app_s24", "notify.mobile_app_macbookairlukas")
+    )
+    _with_devices(coord, hass, [("S24", "Android"), ("MacBookAirLukas", "macOS")])
+
+    pushes = _live(_frame(coord, hass, **_printing(5)))
+    assert len(pushes) == 1, "only the Android phone gets the card"
+
+
+def test_phones_of_both_platforms_still_get_the_card():
+    coord, hass = _coordinator(
+        targets=("notify.mobile_app_s24", "notify.mobile_app_iphone_15_pro")
+    )
+    _with_devices(coord, hass, [("S24", "Android"), ("iPhone 15 PRO", "iOS")])
+    assert len(_live(_frame(coord, hass, **_printing(5)))) == 2
+
+
+def test_an_unidentified_target_is_given_the_benefit_of_the_doubt():
+    """Failing to resolve a platform must not silently mute a real phone."""
+    coord, hass = _coordinator(targets=("notify.mobile_app_mystery",))
+    _with_devices(coord, hass, [])
+    assert len(_live(_frame(coord, hass, **_printing(5)))) == 1
+
+
+def test_the_finishing_soon_reminder_still_reaches_the_mac():
+    """It is an ordinary banner, which macOS renders perfectly well -- the
+    exclusion is about the live card specifically, not about the device."""
+    coord, hass = _coordinator(
+        targets=("notify.mobile_app_s24", "notify.mobile_app_macbookairlukas")
+    )
+    _with_devices(coord, hass, [("S24", "Android"), ("MacBookAirLukas", "macOS")])
+    coord._notify_minutes_to_end = True
+    coord._minutes_to_end_value = 30
+    assert len(_soon(_frame(coord, hass, **_printing(80, printLeftTime=600)))) == 2
+
+
+def test_a_recovered_printer_has_its_alert_taken_away():
+    """A lock screen still reading "filament runout" after the user reloaded is
+    actively misleading, and nothing else shares that tag to supersede it."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(40, materialStatus=1))
+    assert coord._alert_showing is True
+
+    coord.hass.loop.advance(1)
+    payloads = _frame(coord, hass, **_printing(41, materialStatus=0))
+    tags = {c["data"]["tag"] for c in _clears(payloads)}
+    assert f"{coord._notify_tag_base()}_alert" in tags
+    assert coord._alert_showing is False
+
+
+def test_one_condition_resolving_does_not_dismiss_the_others_alert():
+    """Errors and runouts share a tag, so clearing on the first to resolve
+    would take away an alert that is still true."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(40, materialStatus=1, err={"errcode": 521, "key": 1}))
+    coord.hass.loop.advance(1)
+
+    # Runout resolved, error still live.
+    payloads = _frame(
+        coord, hass, **_printing(41, materialStatus=0, err={"errcode": 521, "key": 1})
+    )
+    tags = {c["data"]["tag"] for c in _clears(payloads)}
+    assert f"{coord._notify_tag_base()}_alert" not in tags
+    assert coord._alert_showing is True
+
+
+def test_nothing_is_dismissed_when_no_alert_was_ever_shown():
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(40))
+    coord.hass.loop.advance(1)
+    payloads = _frame(coord, hass, **_printing(41))
+    tags = {c["data"]["tag"] for c in _clears(payloads)}
+    assert f"{coord._notify_tag_base()}_alert" not in tags
+

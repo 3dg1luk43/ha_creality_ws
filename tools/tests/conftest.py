@@ -211,6 +211,26 @@ def _dt_utcnow():
 
 dt_mod.utcnow = _dt_utcnow
 util_mod.dt = dt_mod
+
+
+def _slugify(text: str, *, separator: str = "_") -> str:
+    """Home Assistant's slugify, close enough for the one thing we use it for.
+
+    `mobile_app` names its notify service after the slugified device name, and
+    the coordinator slugifies the name back to identify a target's platform.
+    Real HA uses the `slugify` package; this reproduces the behaviour the
+    matching depends on -- lowercase, non-alphanumerics collapsed to one
+    separator, no leading or trailing separator. The cases that matter are
+    pinned in test_notification_dispatch: "iPhone 15 PRO", "MacBookAirLukas"
+    and "Galaxy Watch7 (LFMA)".
+    """
+    import re as _re
+
+    out = _re.sub(r"[^a-z0-9]+", separator, str(text).lower())
+    return out.strip(separator)
+
+
+util_mod.slugify = _slugify
 sys.modules["homeassistant.util"] = util_mod
 sys.modules["homeassistant.util.dt"] = dt_mod
 ha_mod.util = util_mod

@@ -11,6 +11,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession  # type
 from homeassistant.helpers.dispatcher import async_dispatcher_send  # type: ignore[import]
 from homeassistant.helpers import entity_registry as er  # type: ignore[import]
 from homeassistant.helpers.translation import async_get_translations  # type: ignore[import]
+from homeassistant.util import slugify  # type: ignore[import]
 from .ws_client import KClient
 from .utils import (
     BUSY_PRINT_STATES,
@@ -47,7 +48,9 @@ from .notification_rules import (
     coerce_targets,
     compute_when,
     display_filename,
+    is_live_capable,
     is_mobile_target,
+    notify_service_slug,
     is_new_job_cycle,
     sanitize_tag,
     stringify_data,
@@ -89,6 +92,42 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _warn_on_unsendable(data: dict[str, Any], target: str) -> None:
+    """Complain in our own log if a payload cannot survive the push relay.
+
+    Android delivery is an FCM data message whose values must be strings, and
+    a single stray int or bool makes the relay reject the *whole* push. Home
+    Assistant catches that failure internally -- it never reaches us, and what
+    it logs is a bare "Error sending notification to <device>" with the reason
+    only at DEBUG. So the defect is invisible from here by construction, and it
+    twice survived a release for exactly that reason.
+
+    This cannot prevent the rejection; it makes it attributable. A grep-able
+    line naming the offending keys beats bisecting a payload against a phone,
+    which is how both of those bugs were eventually found.
+    """
+    offenders = [
+        key for key, value in data.items() if isinstance(value, (bool, int, float))
+    ]
+    offenders += [
+        f"{key}[{index}].{inner}"
+        for key, value in data.items()
+        if isinstance(value, (list, tuple))
+        for index, entry in enumerate(value)
+        if isinstance(entry, dict)
+        for inner, inner_value in entry.items()
+        if isinstance(inner_value, (bool, int, float))
+    ]
+    if offenders:
+        _LOGGER.warning(
+            "Notification payload for %s carries non-string value(s) %s; the "
+            "push relay will reject the whole message. This is a bug in the "
+            "integration -- please report it",
+            target,
+            ", ".join(sorted(offenders)),
+        )
+
+
 class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator to manage connection and data for the printer."""
     def __init__(self, hass, host: str, power_switch: str | None = None, config_entry=None):
@@ -128,12 +167,19 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # undeliverable -- it stays owed until there is somewhere to send it.
         self._card_dismiss_owed = False
         self._soon_dismiss_owed = False
+        # An error or runout alert is on a phone. Errors and runouts share one
+        # tag, so this is deliberately not two flags: whichever condition
+        # resolves last is the one that gets to take the alert away.
+        self._alert_showing = False
         # Notification text is translated at runtime; None until loaded.
         self._notify_strings: dict[str, str] | None = None
         # (platform, unique suffix) -> entity id. Populated lazily: the
         # platforms are forwarded after this coordinator exists, so nothing
         # can be resolved here.
         self._entity_id_cache: dict[tuple[str, str], str] = {}
+        # notify target -> companion `os_name`. Resolved lazily; a target the
+        # user has just added would not be in a cache built at setup.
+        self._target_os_cache: dict[str, str | None] = {}
         self._notify_completed = False
         self._notify_error = False
         self._notify_minutes_to_end = False
@@ -197,6 +243,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # A rename or a disabled entity invalidates these, and an options
         # change is the one moment we know we are being re-read.
         self._entity_id_cache.clear()
+        self._target_os_cache.clear()
         self._notify_strings = None
         self._notify_completed = options.get(CONF_NOTIFY_COMPLETED, False)
         self._notify_error = options.get(CONF_NOTIFY_ERROR, False)
@@ -635,7 +682,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._notify_dispatch(
                 build_clear_payload(f"{self._notify_tag_base()}_live"),
                 kind="live:clear:adopt",
-                mobile_only=True,
+                live_only=True,
             )
 
         _LOGGER.debug(
@@ -830,6 +877,20 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         elif not is_runout and self._notified_filament_runout:
             # Reset once the user has reloaded.
             self._notified_filament_runout = False
+
+        # 3b) Both conditions clear again: take the alert off the phone. The
+        # printer recovering is exactly when a lock screen still reading
+        # "filament runout" becomes actively misleading -- and because the two
+        # share a tag, this waits for *both*, or resolving one would dismiss
+        # the other's alert.
+        if self._alert_showing and code == 0 and not is_runout:
+            self._alert_showing = False
+            if deliver:
+                self._notify_dispatch(
+                    build_clear_payload(f"{self._notify_tag_base()}_alert"),
+                    kind="alert:clear",
+                    mobile_only=True,
+                )
 
         # 4) Minutes to end
         # Nothing to compare against until the printer reports a remaining time.
@@ -1115,7 +1176,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             device_name=self._notify_title(),
         )
         self._notify_dispatch(
-            payload, kind=f"live:{reason.value}", mobile_only=True
+            payload, kind=f"live:{reason.value}", live_only=True
         )
         self._live_card.record_push(
             reason=reason,
@@ -1152,7 +1213,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._notify_dispatch(
                 build_clear_payload(f"{self._notify_tag_base()}_live"),
                 kind="live:clear",
-                mobile_only=True,
+                live_only=True,
             )
         if finished:
             self._live_card.finish()
@@ -1416,6 +1477,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 visuals=self._notify_media(include_snapshot=True),
                 links=links,
             )
+            self._alert_showing = True
         elif kind == EVENT_SOON:
             # Its own tag and channel. On the shared `_event` tag the completion
             # banner replaced this reminder minutes later, so the one
@@ -1491,12 +1553,36 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         value = safe_float(progress)
         return None if value is None else int(value)
 
+    def _target_os(self, target: str) -> str | None:
+        """The companion `os_name` behind a notify target, or None if unknown.
+
+        `mobile_app` names its notify service after the slugified device name,
+        so the entry can be found by slugifying it back. Matching on that rather
+        than guessing from the service name, because "macbookairlukas" is not
+        distinguishable from a phone by inspection.
+        """
+        if target in self._target_os_cache:
+            return self._target_os_cache[target]
+
+        slug = notify_service_slug(target)
+        found: str | None = None
+        if slug:
+            entries = getattr(self.hass.config_entries, "async_entries", None)
+            for entry in (entries("mobile_app") if entries else ()):
+                data = getattr(entry, "data", None) or {}
+                if slugify(str(data.get("device_name", ""))) == slug:
+                    found = data.get("os_name")
+                    break
+        self._target_os_cache[target] = found
+        return found
+
     def _notify_dispatch(
         self,
         payload: dict[str, Any],
         *,
         kind: str = "event",
         mobile_only: bool = False,
+        live_only: bool = False,
     ) -> None:
         """Fan a payload out to every configured target without blocking.
 
@@ -1512,10 +1598,21 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         sent_to = 0
         for target in targets:
-            if mobile_only and not is_mobile_target(target):
+            if (mobile_only or live_only) and not is_mobile_target(target):
                 # Live-card keys are meaningless to anything but the companion
                 # app, so a progress push has nothing to say to these.
                 _LOGGER.debug("Skipping %s push for non-mobile target %s", kind, target)
+                continue
+            if live_only and not is_live_capable(self._target_os(target)):
+                # macOS has no live-card surface, so every refresh would arrive
+                # as another ordinary banner that supersedes nothing -- twelve
+                # an hour for the length of the print.
+                _LOGGER.debug(
+                    "Skipping %s push for %s: %s cannot render a live card",
+                    kind,
+                    target,
+                    self._target_os(target),
+                )
                 continue
             sent_to += 1
             self.hass.async_create_task(self._async_deliver_one(target, payload))
@@ -1606,6 +1703,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Only the mobile branch reaches here with data still attached,
                 # and that is the one the FCM string rule applies to.
                 service_data["data"] = stringify_data(data)
+                _warn_on_unsendable(service_data["data"], target)
             await self.hass.services.async_call(domain, service, service_data)
         except Exception:  # pylint: disable=broad-except
             # One unreachable phone must not starve the others.

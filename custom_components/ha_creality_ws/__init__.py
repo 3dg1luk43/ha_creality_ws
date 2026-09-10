@@ -32,6 +32,12 @@ from homeassistant.helpers.event import (  # type: ignore[import]
 import voluptuous as vol  # type: ignore[import]
 from homeassistant.helpers import config_validation as cv, entity_registry as er, device_registry as dr # type: ignore[import]
 from homeassistant.helpers.aiohttp_client import async_get_clientsession # type: ignore[import]
+from .notification_rules import (
+    build_clear_payload,
+    coerce_targets,
+    is_mobile_target,
+    sanitize_tag,
+)
 from homeassistant.components.persistent_notification import (  # type: ignore[import]
     async_create as pn_async_create,
     async_dismiss as pn_async_dismiss,
@@ -962,6 +968,51 @@ async def options_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> No
         except Exception as exc:
             _LOGGER.error("Unexpected error during reload: %s", exc)
             return
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Take this printer's notifications off every phone as it is deleted.
+
+    Unload deliberately leaves them alone, because `options_update_listener`
+    reloads the entry on any options change and dismissing there would make the
+    card flicker every time an unrelated setting is toggled. Removal is the one
+    teardown that is not a reload, and it is final: nothing will ever push to
+    these tags again, so a live card left behind would sit on a phone showing a
+    printer that no longer exists in Home Assistant.
+
+    Runs after the coordinator is gone, so it works from the entry alone.
+    """
+    targets = coerce_targets(entry.options)
+    if not targets:
+        return
+
+    tag_base = sanitize_tag(f"{DOMAIN}_{entry.entry_id}")
+    payloads = [
+        build_clear_payload(f"{tag_base}_{suffix}")
+        for suffix in ("live", "soon", "alert")
+    ]
+
+    for target in targets:
+        # The dismiss marker renders as literal body text anywhere but the
+        # companion app, so a non-mobile target must never receive one.
+        if not is_mobile_target(target) or "." not in target:
+            continue
+        domain, service = target.split(".", 1)
+        for payload in payloads:
+            try:
+                await hass.services.async_call(
+                    domain,
+                    service,
+                    {"message": payload["message"], "data": payload["data"]},
+                )
+            except Exception:  # pylint: disable=broad-except
+                # A phone that has since been removed must not stop the others,
+                # and this is the last chance to tidy up either way.
+                _LOGGER.debug(
+                    "Could not dismiss notifications on %s during removal",
+                    target,
+                    exc_info=True,
+                )
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     coord: KCoordinator = hass.data[DOMAIN][entry.entry_id]
