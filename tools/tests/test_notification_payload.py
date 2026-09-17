@@ -17,6 +17,7 @@ from conftest import fake_config_entry
 
 from homeassistant.helpers import entity_registry as er_mod
 
+from custom_components.ha_creality_ws.const import CLEAR_NOTIFICATION_MARKER
 from custom_components.ha_creality_ws.coordinator import KCoordinator
 
 TAG_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -96,7 +97,12 @@ def _flush(hass):
     if pending:
         asyncio.get_event_loop().run_until_complete(asyncio.gather(*pending))
     calls, hass.calls = hass.calls, []
-    return calls
+    # Dismiss sentinels are filtered out. A terminal banner is now preceded by
+    # one on the same tag -- posting the banner alone left an ongoing Android
+    # card stuck on its last percentage -- and these tests are about the content
+    # of the notification, not the sequence that delivers it. See
+    # test_notification_live for the ordering itself.
+    return [c for c in calls if c[2].get("message") != CLEAR_NOTIFICATION_MARKER]
 
 
 def _emit(coord, hass, kind="completed", message="done"):

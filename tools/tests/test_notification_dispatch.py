@@ -411,8 +411,14 @@ def test_the_filename_in_a_message_is_basenamed():
         "printProgress": 100,
     }
     _run(coord._check_notifications({}))
-    calls = _flush(hass)
-    assert calls[0][2]["message"] == "Print 3DBenchy.gcode completed successfully!"
+    # The banner is preceded by a dismiss sentinel on the same tag, so pick the
+    # notification rather than the first call.
+    bodies = [
+        c[2]["message"]
+        for c in _flush(hass)
+        if c[2]["message"] != CLEAR_NOTIFICATION_MARKER
+    ]
+    assert bodies == ["Print 3DBenchy.gcode completed successfully!"]
 
 
 def test_a_new_file_fires_the_started_event():

@@ -1491,7 +1491,10 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 message=message,
                 kind=kind,
                 channel=self._t(NOTIFY_CHANNEL_KEY_SOON),
-                progress=self._notify_progress(),
+                # No progress bar. With one it renders as a second live card
+                # sitting under the real one -- same title, same bar, no way to
+                # tell at a glance which is the card that keeps updating.
+                progress=None,
                 group=tag_base,
                 # No bed snapshot: the print is not finished, and the preview
                 # already says what is on the plate.
@@ -1515,9 +1518,18 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 links=links,
                 ends_activity=True,
             )
-            # This lands on the card's tag and supersedes it, so no sentinel is
-            # owed any more.
+            # Dismiss the card first, then post this in its place, both on the
+            # same tag and in that order.
+            #
+            # Replacing it by tag identity alone was the earlier design and it
+            # left the card stuck: a `live_update` notification is an ongoing
+            # one on Android, and posting an ordinary banner over it does not
+            # take it down -- a print that had finished minutes ago sat at 95%
+            # while its own completion notice was delivered successfully. A
+            # brief flicker is a small price for the card actually going away.
             self._card_dismiss_owed = False
+            self._replace_card_with(payload, kind=kind)
+            return
 
         self._notify_dispatch(payload, kind=kind)
 
@@ -1575,6 +1587,43 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     break
         self._target_os_cache[target] = found
         return found
+
+    def _replace_card_with(self, payload: dict[str, Any], *, kind: str) -> None:
+        """Dismiss the live card and post `payload` in its place, in that order.
+
+        One task per target, each awaiting the dismissal before the banner.
+        Dispatching them as two independent tasks would leave the order to the
+        event loop, and a dismissal that landed second would take the banner
+        down with it -- turning a stuck card into no notification at all.
+
+        Still never awaited from here: `ws_client` awaits `_on_message` inline
+        in its receive loop, so blocking on an HTTPS round trip would let
+        `last_rx_monotonic()` go stale and flip every entity unavailable.
+        """
+        clear = build_clear_payload(f"{self._notify_tag_base()}_live")
+        targets = [t for t in self._notify_targets if is_mobile_target(t)]
+        for target in targets:
+            self.hass.async_create_task(
+                self._async_replace_one(target, clear, payload)
+            )
+        _LOGGER.info(
+            "Notification dispatched (%s, replacing the card) to %d target(s)",
+            kind,
+            len(targets),
+        )
+        # Non-mobile targets cannot carry a tag, so there is no card to replace
+        # there -- they just get the banner.
+        for target in self._notify_targets:
+            if not is_mobile_target(target):
+                self.hass.async_create_task(
+                    self._async_deliver_one(target, payload)
+                )
+
+    async def _async_replace_one(
+        self, target: str, clear: dict[str, Any], payload: dict[str, Any]
+    ) -> None:
+        await self._async_deliver_one(target, clear)
+        await self._async_deliver_one(target, payload)
 
     def _notify_dispatch(
         self,

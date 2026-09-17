@@ -312,10 +312,13 @@ def test_finishing_ends_the_activity_and_then_announces_it():
     coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
     payloads = _frame(coord, hass, **_printing(100, printLeftTime=0))
 
-    # No dismiss sentinel: the banner is posted on the card's own tag and
-    # replaces it. Clearing first would dismiss and immediately re-create the
-    # notification, which the user sees as a flicker.
-    assert _clears(payloads) == []
+    # The card is dismissed and the banner posted in its place, in that order
+    # and on the same tag. Relying on tag identity alone left an ongoing
+    # Android card stuck on its last percentage while its own completion notice
+    # was delivered successfully.
+    assert len(_clears(payloads)) == 1
+    assert _clears(payloads)[0]["data"]["tag"].endswith("_live")
+    assert len(_events(payloads)) == 1
 
     events = _events(payloads)
     assert len(events) == 1
@@ -572,9 +575,8 @@ def test_stopping_and_reprinting_the_same_file_shows_a_card_again():
     # state 4 is "stopped": job over, but nowhere near 100%.
     coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
     stopped = _frame(coord, hass, **_printing(30, state=4))
-    # The banner replaces the card rather than a sentinel dismissing it.
     assert len(_events(stopped)) == 1
-    assert _clears(stopped) == []
+    assert len(_clears(stopped)) == 1
     assert coord._live_card.job_finished is False, "a stop must not retire the card"
 
     coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
@@ -655,7 +657,7 @@ def test_a_stopped_print_says_so_instead_of_the_card_just_vanishing():
     coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
 
     payloads = _frame(coord, hass, **_printing(30, state=4))
-    assert _clears(payloads) == [], "the banner replaces the card in place"
+    assert len(_clears(payloads)) == 1, "the card is dismissed, then replaced"
 
     events = _events(payloads)
     assert len(events) == 1
@@ -1054,4 +1056,49 @@ def test_nothing_is_dismissed_when_no_alert_was_ever_shown():
     payloads = _frame(coord, hass, **_printing(41))
     tags = {c["data"]["tag"] for c in _clears(payloads)}
     assert f"{coord._notify_tag_base()}_alert" not in tags
+
+
+def test_the_card_is_dismissed_before_the_banner_not_after():
+    """Order is the whole point. Posting the banner alone left an ongoing
+    Android card stuck on its last percentage; dismissing *after* it would take
+    the banner down too, turning a stuck card into no notification at all.
+
+    Both go out as one task per target so the event loop cannot interleave them.
+    """
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(50))
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+
+    coord.data = {"hostname": "K1C", **_printing(100, printLeftTime=0)}
+    asyncio.get_event_loop().run_until_complete(coord._check_notifications({}))
+    pending, hass.tasks = hass.tasks, []
+    asyncio.get_event_loop().run_until_complete(asyncio.gather(*pending))
+
+    sequence = [c[2]["message"] for c in hass.calls]
+    assert sequence[0] == CLEAR_NOTIFICATION_MARKER
+    assert sequence[1] != CLEAR_NOTIFICATION_MARKER
+    assert len(sequence) == 2
+
+
+def test_the_countdown_direction_is_set_or_android_counts_upwards():
+    """`chronometer` with `when` in the future counts *up* without this, which
+    renders as an elapsed time from a moment that has not happened -- a card
+    reading "04:27" for a print with four and a half hours left."""
+    coord, hass = _coordinator()
+    data = _live(_frame(coord, hass, **_printing(20, printLeftTime=3600)))[0]["data"]
+    assert data["chronometer"] == "true"
+    assert data["countdown"] == "true"
+    assert int(data["when"]) > 1_700_000_000
+
+
+def test_the_soon_reminder_has_no_progress_bar():
+    """With one it renders as a second live card under the real one: same
+    title, same bar, nothing to say which is the one still updating."""
+    coord, hass = _coordinator()
+    coord._notify_minutes_to_end = True
+    coord._minutes_to_end_value = 30
+    soon = _soon(_frame(coord, hass, **_printing(80, printLeftTime=600)))[0]["data"]
+    assert "progress" not in soon
+    assert "progress_max" not in soon
+    assert "progress_indeterminate" not in soon
 

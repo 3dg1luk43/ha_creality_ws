@@ -137,7 +137,13 @@ CLEAR_NOTIFICATION_MARKER = "clear_notification"
 # duration. A print then costs at most 100/STEP progress pushes whether it runs
 # twenty minutes or forty hours, and the end-of-print 99->100->99->100 jitter
 # (see NOTIFY_REARM_PROGRESS_MAX) cannot produce a second push.
-NOTIFY_LIVE_MILESTONE_STEP = 5
+# Every whole percent. The step used to be 5, which is what made the card
+# visibly jump 15 -> 20 -> 25 while the printer was reporting every value in
+# between. Progress is 0-100, so this bounds a job at ~100 progress pushes
+# however long it runs -- inside the relay's 500-per-device-per-day budget for
+# roughly four prints a day, and the floor below keeps a fast print from
+# spending them all at once.
+NOTIFY_LIVE_MILESTONE_STEP = 1
 # The refresh cadence. Progress and the remaining estimate both move
 # continuously, and a milestone latch on its own left the card reading a stale
 # percentage for as long as it took to gain 5% -- twenty minutes or more on a
