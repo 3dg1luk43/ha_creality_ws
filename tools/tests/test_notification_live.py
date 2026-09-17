@@ -728,13 +728,19 @@ def test_stopping_then_reprinting_announces_the_next_stop_too():
 # --------------------------------------------------------------------------- #
 
 
-def test_the_card_cannot_be_swiped_away():
-    """`sticky` alone only survives a *tap*. Surviving a swipe needs
-    `persistent`, and that distinction is why the card looked dismissable."""
+def test_the_card_relies_on_live_update_alone_to_stay_put():
+    """On Android 16 `live_update` pins the card to the shade and lock screen,
+    and a pinned card is not swipeable. `persistent` and `importance: low`
+    appeared to drop it back to an ordinary ongoing notification, which Android
+    14+ explicitly does let the user swipe -- so the key meant to prevent a
+    swipe was the thing enabling one. Matches ha_washdata, which is not
+    dismissable on the same handset and sends none of the three."""
     coord, hass = _coordinator()
     data = _live(_frame(coord, hass, **_printing(5)))[0]["data"]
-    assert data["persistent"] == "true"
-    assert data["sticky"] == "true"
+    assert data["live_update"] == "true"
+    assert data["alert_once"] == "true"
+    for key in ("persistent", "sticky", "importance"):
+        assert key not in data, key
 
 
 def test_an_undismissable_card_always_carries_a_way_out():
@@ -745,7 +751,6 @@ def test_an_undismissable_card_always_carries_a_way_out():
         coord, hass = _coordinator()
         coord._notify_actions = actions
         data = _live(_frame(coord, hass, **_printing(5)))[0]["data"]
-        assert data["persistent"] == "true"
         ids = [a["action"] for a in data["actions"]]
         assert any(i.startswith("CREALITY_DISMISS_") for i in ids), actions
 
@@ -816,8 +821,6 @@ def test_the_terminal_banner_replaces_the_card_and_frees_it():
     data = done[0]["data"]
     assert data["tag"] == f"{coord._notify_tag_base()}_live"
     assert data["activity"] == "end"
-    assert data["persistent"] == "false"
-    assert data["sticky"] == "false"
     # No alert_once, or replacing the card would happen silently and the
     # "finished" ping would never sound.
     assert "alert_once" not in data

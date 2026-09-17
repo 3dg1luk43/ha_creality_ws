@@ -633,18 +633,26 @@ def build_live_payload(
         "tag": sanitize_tag(tag),
         "notification_icon": "mdi:pause-circle" if paused else "mdi:printer-3d-nozzle",
         "channel": channel,
-        "importance": "low",
         # Progress pushes only. Terminal pushes reuse this tag, and alert_once
         # there would update the card silently -- the "finished" ping would
         # never sound. build_event_payload deliberately omits it.
         "alert_once": True,
-        # Android: survives a swipe. `sticky` alone only survives a *tap*, which
-        # is the distinction that made the card look dismissable. Both need a
-        # tag, which is set above. The Dismiss action is the deliberate way out;
-        # without it this would be a notification the user cannot get rid of.
-        "persistent": True,
-        "sticky": True,
     }
+    # Deliberately absent: `persistent`, `sticky` and `importance`.
+    #
+    # On Android 16 `live_update` is what produces a Live Update -- a card
+    # pinned to the top of the shade and the lock screen with a status bar
+    # chip -- and a pinned card is not swipeable. Adding `persistent` and
+    # `importance: low` appeared to drop it back to an ordinary ongoing
+    # notification instead, which Android 14+ explicitly *does* let the user
+    # swipe away ("persistent notifications will be dismissable except when
+    # the device is locked"). So the key meant to stop a swipe was the thing
+    # enabling one.
+    #
+    # This mirrors ha_washdata, whose live card is not dismissable on the same
+    # handset and which sends `live_update` and `alert_once` and none of these
+    # three -- its `sticky` option is off. Quietness is `alert_once` on Android
+    # and `silent` on iOS below, not a lowered importance.
     if refresh:
         # iOS alerts on every push unless told otherwise, so a 5-minute refresh
         # cadence buzzes the phone for the whole print. `alert_once` above is
@@ -738,15 +746,11 @@ def build_event_payload(
     otherwise replace it *silently* and the "print finished" ping would never
     sound.
 
-    ``ends_activity`` is for the terminal ones, which are posted on the live
-    tag so they replace the card in place. It adds ``activity: "end"`` to close
-    the iOS Live Activity, and it also clears the keys that made the card
-    undismissable -- otherwise the print would be over and the user would be
-    left with a notification they cannot swipe away.
-
-    No preceding ``clear_notification`` is sent on that path: dismissing and
-    then re-posting the same tag makes the card visibly flicker, and replacing
-    it by tag identity achieves the same end state in one push.
+    ``ends_activity`` marks the terminal ones, which are posted on the live tag
+    and close the iOS Live Activity with ``activity: "end"``. The card is
+    dismissed first and this posted in its place -- see ``_replace_card_with``
+    -- because an ongoing Android notification is not taken down by an ordinary
+    banner arriving on the same tag.
     """
     icon, color = _EVENT_STYLE.get(kind, _EVENT_STYLE[EVENT_COMPLETED])
     data: dict[str, Any] = {
@@ -760,11 +764,6 @@ def build_event_payload(
     }
     if ends_activity:
         data["activity"] = "end"
-        # Explicitly false rather than omitted: these are being sent to replace
-        # a card that set them, and an omitted key does not undo one already
-        # applied to a live notification.
-        data["persistent"] = False
-        data["sticky"] = False
 
     pct = _clamp_progress(progress)
     if pct is not None:
