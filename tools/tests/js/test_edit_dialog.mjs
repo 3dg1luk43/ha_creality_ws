@@ -29,7 +29,7 @@ const ATTRS = {
 };
 
 /** A card with one editable slot; `calls` records every service call. */
-async function setup({ attributes = ATTRS, color = "#ffffff", status = "idle" } = {}) {
+async function setup({ attributes = ATTRS, color = "#ffffff", status = "idle", filament } = {}) {
   const { KCFSCard } = loadCard();
   const card = new KCFSCard();
   card.setConfig({
@@ -39,7 +39,7 @@ async function setup({ attributes = ATTRS, color = "#ffffff", status = "idle" } 
   });
   const calls = [];
   const states = {
-    ...slotEntities(1, 0, { color, attributes }),
+    ...slotEntities(1, 0, { color, attributes, filament }),
     "sensor.printer_print_status": { state: status, attributes: {} },
   };
   card.hass = makeHass(states, {
@@ -266,6 +266,41 @@ test("the name field prefills the bare material name, not the display label", as
   const haForm = form.children.find((c) => c.tagName === "HA-FORM");
   assert.equal(haForm.data.name, "Hyper PLA", "the dialog prefills the bare name");
   assert.equal(haForm.data.vendor, "Creality");
+});
+
+test("an unavailable sensor state does not prefill as the material name", async () => {
+  // `slot.name` is the filament sensor's *state*, so an entity with no value
+  // reads back as the literal "unknown". Type is the only required field, so a
+  // user who fills that in and saves an otherwise untouched form was writing
+  // "unknown" to the spool as its material name.
+  const { card, calls } = await setup({
+    filament: "unknown",
+    attributes: { type: "PLA", box_id: 1, slot_id: 0 },
+  });
+  const slot = card._findSlot(SLOT);
+  assert.equal(slot.name, "unknown", "the state really is the sentinel");
+
+  const form = card._renderEditForm(slot, () => {});
+  const haForm = form.children.find((c) => c.tagName === "HA-FORM");
+  assert.equal(haForm.data.name, "", "the sentinel must not prefill the field");
+
+  await card._saveMaterial(slot, { ...haForm.data, color: "#00ff00" });
+  assert.ok(!("name" in saved(calls)), "and must not reach the printer");
+});
+
+test("every unavailable sentinel is stripped from the prefill", async () => {
+  // The display path guards all three; the dialog used to check only "-".
+  for (const sentinel of ["unknown", "unavailable", "-"]) {
+    const { card } = await setup({
+      filament: sentinel,
+      attributes: { type: sentinel, vendor: sentinel, name: sentinel, box_id: 1, slot_id: 0 },
+    });
+    const form = card._renderEditForm(card._findSlot(SLOT), () => {});
+    const haForm = form.children.find((c) => c.tagName === "HA-FORM");
+    assert.equal(haForm.data.type, "", `type must not prefill ${sentinel}`);
+    assert.equal(haForm.data.name, "", `name must not prefill ${sentinel}`);
+    assert.equal(haForm.data.vendor, "", `vendor must not prefill ${sentinel}`);
+  }
 });
 
 test("a save round-trip does not accumulate the vendor in the name", async () => {

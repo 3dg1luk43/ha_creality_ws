@@ -178,16 +178,42 @@ test("the unit selector switches the displayed CFS", async () => {
 });
 
 test("an unparseable unit index is ignored", async () => {
-  const { card } = await setup();
-  card._selectedCFS = 0;
-  // Guard against a malformed data-cfs leaving the card on a nonexistent unit.
-  const fake = { dataset: { cfs: "not-a-number" } };
+  // Two units, so the selector actually renders: a single-unit card emits no
+  // .unit-btn at all, and the `if (buttons.length)` guard this used to have let
+  // the test pass without ever clicking anything.
+  const { card } = await setup({
+    config: {
+      box0_slot0_filament: SLOT,
+      box1_slot0_filament: "sensor.printer_cfs_box_2_slot_0_filament",
+    },
+    entities: registry({
+      "sensor.printer_cfs_box_2_slot_0_filament": {
+        device_id: "dev_a", platform: "ha_creality_ws",
+      },
+    }),
+  });
+  card.hass = makeHass({
+    ...slotEntities(1, 0, { attributes: ATTRS }),
+    ...slotEntities(2, 0, { attributes: { ...ATTRS, box_id: 2 } }),
+    [STATUS]: { state: "idle", attributes: {} },
+  }, { entities: registry({
+    "sensor.printer_cfs_box_2_slot_0_filament": {
+      device_id: "dev_a", platform: "ha_creality_ws",
+    },
+  }) });
+
   const buttons = find(card, ".unit-btn");
-  if (buttons.length) {
-    buttons[0].dataset.cfs = fake.dataset.cfs;
-    click(buttons[0]);
-  }
-  assert.equal(card._selectedCFS, 0);
+  assert.ok(buttons.length >= 2, `two units expected, got ${buttons.length}`);
+
+  // Start on the second unit, so falling back to 0 would be visible either way.
+  click(buttons[1]);
+  assert.equal(card._selectedCFS, 1);
+
+  // A malformed data-cfs must leave the selection alone, not move the card to
+  // a nonexistent unit.
+  buttons[0].dataset.cfs = "not-a-number";
+  click(buttons[0]);
+  assert.equal(card._selectedCFS, 1, "a NaN index must not change the selection");
 });
 
 let failed = 0;

@@ -2032,10 +2032,22 @@ class KCFSCard extends HTMLElement {
       container.appendChild(warn);
     }
 
+    // `slot.name` is a sensor *state*, so an entity with no value reads back as
+    // the literal "unknown" -- and the type field is the only required one, so
+    // filling that in and saving an otherwise untouched form wrote "unknown"
+    // to the spool as its material name. Same sentinel set the display path
+    // uses, rather than the "-" check this had.
+    const clean = (value) => {
+      const text = String(value ?? "").trim();
+      return text && !["unknown", "unavailable", "-"].includes(text.toLowerCase())
+        ? text
+        : "";
+    };
+
     const values = {
-      type: slot.type && slot.type !== "-" ? slot.type : "",
-      name: slot.materialName || (slot.name && slot.name !== "-" ? slot.name : ""),
-      vendor: slot.vendor || "",
+      type: clean(slot.type),
+      name: clean(slot.materialName) || clean(slot.name),
+      vendor: clean(slot.vendor),
       min_temp: slot.minTemp ?? undefined,
       max_temp: slot.maxTemp ?? undefined,
       pressure: slot.pressure ?? undefined,

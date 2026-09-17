@@ -150,10 +150,8 @@ def _sensor_platform():
 
         mod.SensorEntity = _SensorEntity
         install_stub_module(__name__, "homeassistant.components.sensor", mod)
-    entity_mod = sys.modules["homeassistant.helpers.entity"]
-    if not hasattr(entity_mod, "EntityCategory"):
-        entity_mod.EntityCategory = MagicMock()
-
+    # EntityCategory comes from the shared conftest stub. This used to install a
+    # MagicMock here when it was missing, which `restore_stubs` cannot undo.
     from custom_components.ha_creality_ws.sensor import async_setup_entry
 
     return async_setup_entry

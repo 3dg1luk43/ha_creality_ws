@@ -1,3 +1,4 @@
+import enum
 import sys
 from pathlib import Path
 import types
@@ -356,8 +357,25 @@ class DeviceInfo:
 class Entity:
     pass
 
+class EntityCategory(str, enum.Enum):
+    """The real one is a StrEnum on helpers.entity; sensor.py reads
+    `EntityCategory.DIAGNOSTIC` at class-definition time.
+
+    Defined here rather than left to individual suites: two of them used to bolt
+    a `MagicMock` onto this shared module when the attribute was missing, and
+    `restore_stubs` only puts back `sys.modules` entries -- never an attribute on
+    a module it did not replace. The mock then outlived the suite that installed
+    it, and a later assertion against a category compared truthy against
+    anything.
+    """
+
+    CONFIG = "config"
+    DIAGNOSTIC = "diagnostic"
+
+
 helpers_entity_mod.DeviceInfo = DeviceInfo
 helpers_entity_mod.Entity = Entity
+helpers_entity_mod.EntityCategory = EntityCategory
 setattr(helpers_mod, "entity", helpers_entity_mod)
 sys.modules["homeassistant.helpers.entity"] = helpers_entity_mod
 

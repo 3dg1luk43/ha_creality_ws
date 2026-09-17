@@ -16,6 +16,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
+# A `skipif` marker is evaluated *after* collection, so it cannot protect the
+# module-level `config_flow` import below -- and config_flow does `import
+# voluptuous as vol`, so without it this module raised a collection error
+# instead of skipping, which is the opposite of what the docstring promises.
+pytest.importorskip("voluptuous", reason="voluptuous is not installed")
+
 requires_voluptuous = pytest.mark.skipif(
     importlib.util.find_spec("voluptuous") is None,
     reason="voluptuous is not installed",

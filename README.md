@@ -94,7 +94,7 @@ If auto-detection doesn't choose your preferred stream, you can force it under t
   - `mjpeg` - Force direct MJPEG stream
   - `webrtc` - Force WebRTC streaming
 
-If your Home Assistant version is older than 2025.11, WebRTC requires an external go2rtc (>= 1.9.11). Set its URL/port in the integration options.
+Native WebRTC works out of the box: the bundled go2rtc in every supported core (2026.7+) is new enough for Creality's streams. The go2rtc host/port fields in the options exist for pointing the integration at a stand-alone go2rtc instead, and for the RTSP port its stream pipeline uses.
 
 ### Dependencies
 
@@ -105,8 +105,8 @@ The integration automatically installs the following Python packages:
 **Camera Dependencies:**
 - **K1 family & Ender 3 V3 family cameras**: No additional dependencies required (MJPEG streaming)
 - **K2 family cameras (WebRTC):**
-  - Native WebRTC out of the box is supported only on **Home Assistant Core 2025.11+** (bundled go2rtc version compatible with Creality).
-  - If you're on an older Home Assistant release, configure an external **go2rtc >= 1.9.11** and point the integration to it via the Options dialog (host/port).
+  - Native WebRTC is available on every supported core, since the 2026.7 minimum is already past the 2025.11 release that bundled a Creality-compatible go2rtc.
+  - Pointing the integration at a stand-alone **go2rtc >= 1.9.11** is still possible via the Options dialog (host/port), but it is no longer required.
 
 ---
 

@@ -143,7 +143,10 @@ def is_mobile_target(target: str | None) -> bool:
     if not target:
         return False
     service = target.split(".", 1)[1] if "." in target else target
-    return service.startswith("mobile_app")
+    # The full `mobile_app_` prefix, matching `notify_service_slug`: a bare
+    # `startswith("mobile_app")` also claims `notify.mobile_application_*`,
+    # which would then be handed companion-only `data` and reject the call.
+    return service.startswith("mobile_app_")
 
 
 # --------------------------------------------------------------------------- #

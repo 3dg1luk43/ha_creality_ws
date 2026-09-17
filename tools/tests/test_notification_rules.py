@@ -107,6 +107,11 @@ def test_coerce_targets(options, expected):
         ("mobile_app_pixel", True),
         ("", False),
         (None, False),
+        # Not the companion app: only the full `mobile_app_` prefix counts, or
+        # these get companion-only `data` and reject the whole call.
+        ("notify.mobile_application_relay", False),
+        ("notify.mobile_apps", False),
+        ("notify.mobile_app", False),
     ],
 )
 def test_is_mobile_target(target, expected):
