@@ -640,19 +640,22 @@ def build_live_payload(
     }
     # Deliberately absent: `persistent`, `sticky` and `importance`.
     #
-    # On Android 16 `live_update` is what produces a Live Update -- a card
-    # pinned to the top of the shade and the lock screen with a status bar
-    # chip -- and a pinned card is not swipeable. Adding `persistent` and
-    # `importance: low` appeared to drop it back to an ordinary ongoing
-    # notification instead, which Android 14+ explicitly *does* let the user
-    # swipe away ("persistent notifications will be dismissable except when
-    # the device is locked"). So the key meant to stop a swipe was the thing
-    # enabling one.
+    # Not because they make the card swipeable, but because they do not stop
+    # it. The card is swipeable on Android 16 either way -- tested on a real
+    # handset with and without `persistent`, and again with the action buttons
+    # removed, and it can be swiped away in every combination. The companion's
+    # own documentation says as much: "starting in Android 14 persistent
+    # notifications will be dismissable except when the device is locked".
     #
-    # This mirrors ha_washdata, whose live card is not dismissable on the same
-    # handset and which sends `live_update` and `alert_once` and none of these
-    # three -- its `sticky` option is off. Quietness is `alert_once` on Android
-    # and `silent` on iOS below, not a lowered importance.
+    # So an unswipeable card is not something this payload can ask for, and
+    # these three were only ever asking. `importance: low` additionally
+    # requested a minimised presentation, which is the opposite of what a live
+    # card wants. Quietness comes from `alert_once` on Android and `silent` on
+    # iOS below.
+    #
+    # The Hide action is therefore the way out of the card, not a fallback for
+    # one. If a future Android or companion release does offer a genuine pin,
+    # `persistent` plus a `tag` is where to look first.
     if refresh:
         # iOS alerts on every push unless told otherwise, so a 5-minute refresh
         # cadence buzzes the phone for the whole print. `alert_once` above is

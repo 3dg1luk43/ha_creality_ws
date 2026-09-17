@@ -728,13 +728,16 @@ def test_stopping_then_reprinting_announces_the_next_stop_too():
 # --------------------------------------------------------------------------- #
 
 
-def test_the_card_relies_on_live_update_alone_to_stay_put():
-    """On Android 16 `live_update` pins the card to the shade and lock screen,
-    and a pinned card is not swipeable. `persistent` and `importance: low`
-    appeared to drop it back to an ordinary ongoing notification, which Android
-    14+ explicitly does let the user swipe -- so the key meant to prevent a
-    swipe was the thing enabling one. Matches ha_washdata, which is not
-    dismissable on the same handset and sends none of the three."""
+def test_the_card_does_not_ask_for_things_that_do_not_work():
+    """A live card cannot be made unswipeable on Android 16. Tested on a real
+    handset with `persistent`, without it, and with the action buttons removed:
+    swipeable in every combination, which matches the companion documentation
+    ("starting in Android 14 persistent notifications will be dismissable
+    except when the device is locked").
+
+    So these three are omitted because they achieve nothing here, and
+    `importance: low` actively asked for the minimised presentation a live card
+    does not want. Hide is the way out of the card."""
     coord, hass = _coordinator()
     data = _live(_frame(coord, hass, **_printing(5)))[0]["data"]
     assert data["live_update"] == "true"
