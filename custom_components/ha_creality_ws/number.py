@@ -48,9 +48,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
         has_box_control = entry.data.get(
             "_cached_has_chamber_control", entry.data.get("_cached_has_box_control", False)
         )
-        if not has_box_control and (
-            "targetBoxTemp" in coord.data or "maxBoxTemp" in coord.data
-        ):
+        # `targetBoxTemp` only, matching the promotion in __init__.py: there,
+        # `maxBoxTemp` promotes the chamber *sensor* (:317) and only
+        # `targetBoxTemp` promotes the *control* (:314). Accepting `maxBoxTemp`
+        # here conflated the two, so a K1-family printer -- chamber sensor, no
+        # chamber control, and it does report a maximum -- was given a target
+        # control whose setter sends a `boxTempControl` it cannot honour.
+        if not has_box_control and "targetBoxTemp" in coord.data:
             has_box_control = True
         if not has_box_control:
             return []

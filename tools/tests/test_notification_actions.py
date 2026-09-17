@@ -99,9 +99,10 @@ def _snap(state="printing"):
 
 
 def test_printer_controls_are_off_by_default_but_hide_survives():
-    """The card is posted with `persistent`, so a swipe cannot remove it. Hide
-    is therefore the only way out and must be offered whatever the user chose
-    about driving the printer -- a card with no way out is a trap."""
+    """A swipe only clears the notification on screen; the next refresh re-posts
+    it under the same tag. Hide is therefore the only way to retire the card for
+    the rest of the print, and must be offered whatever the user chose about
+    driving the printer -- a card with no way out is a trap."""
     coord = _coordinator(actions=False)
     titles = [a["title"] for a in coord._notify_card_actions(_snap())]
     assert titles == ["Hide"]

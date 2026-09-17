@@ -452,6 +452,42 @@ def test_a_cached_maximum_alone_does_not_imply_chamber_control(monkeypatch):
     )
 
 
+def test_live_max_box_temp_alone_does_not_imply_chamber_control(monkeypatch):
+    """The same rule as the cached maximum, for the value arriving in telemetry.
+
+    `maxBoxTemp` is a chamber *sensor* signal: __init__.py promotes the sensor on
+    it (:317) and promotes the control only on `targetBoxTemp` (:314). The
+    K1 family reports a chamber maximum of 80 with no settable chamber -- see the
+    simulator's `box_sensor` models -- so accepting it here handed those printers
+    a target control whose setter sends a `boxTempControl` they cannot honour.
+    """
+    coord = _bare_coord(monkeypatch, {"boxTemp": 31.0, "maxBoxTemp": 80.0})
+    run = _run_number_setup(coord, {"_cached_has_chamber_control": False})
+
+    assert "BoxTargetNumber" not in [type(e).__name__ for e in run.added], (
+        "a live chamber maximum must not create the control"
+    )
+    run.fire_discovery()
+    run.flush()
+    assert "BoxTargetNumber" not in [type(e).__name__ for e in run.added], (
+        "nor on the late pass"
+    )
+
+
+def test_a_k2_base_still_gets_its_chamber_control_from_the_capability(monkeypatch):
+    """The fix must not cost the K2 Base its control.
+
+    Its WS feed pops `targetBoxTemp`, so the control is gated on the cached
+    capability plus a maximum rather than on the target field being present.
+    """
+    coord = _bare_coord(monkeypatch, {"boxTemp": 31.0, "maxBoxTemp": 80.0})
+    run = _run_number_setup(coord, {"_cached_has_chamber_control": True})
+
+    assert "BoxTargetNumber" in [type(e).__name__ for e in run.added], (
+        "a K2-family printer keeps its chamber control"
+    )
+
+
 def test_deferred_entity_adds_are_dropped_after_unload(monkeypatch):
     """`call_soon` cannot be cancelled, and unloading does not unschedule it.
 

@@ -1260,10 +1260,10 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _notify_card_actions(self, snap: LiveSnapshot) -> list[dict[str, Any]] | None:
         """Buttons for the live card.
 
-        Never None. The printer controls are opt-in, but the card is posted with
-        `persistent` so a swipe will not remove it -- which means Dismiss has to
-        be there whatever the user chose, or the notification could not be got
-        rid of at all.
+        Never None. The printer controls are opt-in, but a swipe only clears
+        the notification on screen and the next refresh re-posts it under the
+        same tag -- which means Dismiss has to be there whatever the user chose,
+        or the card could not be retired for the rest of the print.
         """
         return build_actions(
             paused=snap.activity_state == "paused",
