@@ -213,12 +213,12 @@ Configure under **Settings → Devices & Services → Creality → Configure →
 
 Pick **one or more** notify targets. Both kinds work:
 
-- `notify.mobile_app_*` — the Home Assistant companion app. Only these can show the live print card, the G‑code preview, action buttons or a tap target.
-- Anything else (`notify.signal_messenger`, `notify.persistent_notification`, a notify *entity*, …) — receives the **message and title only**.
+- `notify.mobile_app_*` -- the Home Assistant companion app. Only these can show the live print card, the G‑code preview, action buttons or a tap target.
+- Anything else (`notify.signal_messenger`, `notify.persistent_notification`, a notify *entity*, …) -- receives the **message and title only**.
 
 That split is deliberate rather than a limitation: several notify platforms reject payload keys they do not recognise and fail the whole call, `notify.send_message` has no payload field at all, and the image URLs below only authenticate from inside the companion app.
 
-If you previously set the single **Notification Device**, it is migrated automatically the first time the integration loads — there is nothing to do. The old setting is left on disk, so downgrading keeps working.
+If you previously set the single **Notification Device**, it is migrated automatically the first time the integration loads -- there is nothing to do. The old setting is left on disk, so downgrading keeps working.
 
 ### The live print card
 
@@ -231,13 +231,13 @@ Enable **Live print card**. During a print you get one card that updates in plac
 
 It ends by itself when the print finishes, and is replaced by a completion notification carrying a **camera snapshot** of the bed. A print that is cancelled or aborted gets its own notification saying where it stopped, rather than the card simply vanishing.
 
-**Notify when a print ends** covers both outcomes — finished *and* stopped. Being told a print completed is only half the story if you are not also told when it didn't.
+**Notify when a print ends** covers both outcomes -- finished *and* stopped. Being told a print completed is only half the story if you are not also told when it didn't.
 
-**Requirements:** Home Assistant **2026.7.0 or newer** (this is the integration's minimum), plus **iOS 17.2+** or **Android 16+**. On older phones the same notification still arrives and still replaces itself in place — you lose the timer and the bar, not the notification.
+**Requirements:** Home Assistant **2026.7.0 or newer** (this is the integration's minimum), plus **iOS 17.2+** or **Android 16+**. On older phones the same notification still arrives and still replaces itself in place -- you lose the timer and the bar, not the notification.
 
 **Update rate.** The card is pushed on a state change (start, pause, resume, finish) and every 5% of progress, never more often than once every 30 seconds. That is not a compromise: iOS throttles frequent Live Activity updates and eventually drops them, and the countdown needs no pushes at all because it runs on the phone.
 
-**Long prints.** iOS ends any Live Activity after **8 hours** — an Apple limit, not something an app can extend. Past that the card keeps updating as an ordinary notification, with the remaining time written into the text instead of shown as a timer, and you still get the completion notification. Android has no such limit.
+**Long prints.** iOS ends any Live Activity after **8 hours** -- an Apple limit, not something an app can extend. Past that the card keeps updating as an ordinary notification, with the remaining time written into the text instead of shown as a timer, and you still get the completion notification. Android has no such limit.
 
 ### Tapping the notification
 
@@ -250,8 +250,8 @@ Set **Dashboard path to open on tap** to something like `/lovelace/printer`. It 
 
 ### Pictures
 
-- **G‑code preview** — used as the notification icon. Skipped when the printer has no preview to serve, rather than sending the placeholder, which renders as an empty grey box.
-- **Camera snapshot** — attached when a print ends or fails. Skipped on printers whose camera cannot produce a still image at all: K2‑family cameras using direct WebRTC signalling have no snapshot endpoint, so there is nothing to attach.
+- **G‑code preview** -- used as the notification icon. Skipped when the printer has no preview to serve, rather than sending the placeholder, which renders as an empty grey box.
+- **Camera snapshot** -- attached when a print ends or fails. Skipped on printers whose camera cannot produce a still image at all: K2‑family cameras using direct WebRTC signalling have no snapshot endpoint, so there is nothing to attach.
 
 ### Buttons
 
@@ -259,7 +259,7 @@ Set **Dashboard path to open on tap** to something like `/lovelace/printer`. It 
 
 ### Language
 
-Notification text is translated — messages, status labels, button captions and the Android notification-channel names all come from the integration's translation files.
+Notification text is translated -- messages, status labels, button captions and the Android notification-channel names all come from the integration's translation files.
 
 It follows the **server** language (**Settings → System → General**), not each person's profile language. That is not an oversight: an integration is never told which user a `notify` call is for, so the server language is the only one available to it. For a household that needs different languages per person, use the bus events below.
 
@@ -271,12 +271,12 @@ The integration fires plain bus events whether or not you configure a notify tar
 |---|---|
 | `ha_creality_ws_print_started` | a new job appears |
 | `ha_creality_ws_print_finished` | progress reaches 100% |
-| `ha_creality_ws_print_stopped` | a job ends without finishing — cancelled, or aborted by the printer |
+| `ha_creality_ws_print_stopped` | a job ends without finishing -- cancelled, or aborted by the printer |
 | `ha_creality_ws_print_error` | the printer reports a new error code |
 
 Each carries `entry_id`, `host`, `device_name`, `filename`, `progress`, `layer`, `total_layers`, `left_seconds` and `err_code`.
 
-This is the supported way to get notification text in a language other than your server's. An integration is never told *which user* a notification is for, so any message it composes itself can only follow the Home Assistant server language — build your own text in an automation instead.
+This is the supported way to get notification text in a language other than your server's. An integration is never told *which user* a notification is for, so any message it composes itself can only follow the Home Assistant server language -- build your own text in an automation instead.
 
 ---
 
@@ -409,7 +409,7 @@ so two genuinely identical spools still produce the same key.
 
 `box_id` and `slot_id` are the printer's own ids, which is what `set_cfs_material`
 needs to address a slot. Not every printer reports `min_temp`/`max_temp`/`pressure` on
-every slot — CFS box slots often omit them where the external slot has them — so treat
+every slot -- CFS box slots often omit them where the external slot has them -- so treat
 `null` as "unknown", not as zero.
 
 ### CFS Card
@@ -457,7 +457,7 @@ range and pressure advance. Saving calls
 printer to re-report, so the tile updates once the change has actually landed.
 
 - The dialog states which **box and slot** it will write to. If the card cannot
-  get that from the printer it says the target was inferred — check it before saving.
+  get that from the printer it says the target was inferred -- check it before saving.
 - Editing is **disabled while the printer is busy** (printing, paused, processing
   or self-testing).
 - A card whose entities come from **more than one printer** cannot edit, because
@@ -507,7 +507,7 @@ existing tag association is preserved.
 Other things worth knowing:
 
 - `box_id` is the printer's own id, not a position on the card. Read it from the
-  `box_id` attribute of any slot sensor — it is usually `1` for the first CFS unit.
+  `box_id` attribute of any slot sensor -- it is usually `1` for the first CFS unit.
 - `color` is a **six-digit hex string**, not an RGB list. Multi-colour spools
   cannot be written and must be left empty.
 - `max_temp` must not be below `min_temp`; the service rejects the call rather

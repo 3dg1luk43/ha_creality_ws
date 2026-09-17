@@ -524,8 +524,8 @@ class KPrinterCard extends HTMLElement {
 
   connectedCallback() {
     // The card may be re-attached without setConfig firing again (e.g. when Lovelace
-    // moves the element between containers). _render() — which normally wires up the
-    // telemetry observer — only runs from setConfig/hass paths, so reinstate the
+    // moves the element between containers). _render() -- which normally wires up the
+    // telemetry observer -- only runs from setConfig/hass paths, so reinstate the
     // observer here whenever a previously-rendered card returns to the DOM.
     if (this._root) {
       this._setupTelemetrySizeObserver();
@@ -603,7 +603,7 @@ class KPrinterCard extends HTMLElement {
     const lastDispatch = _lastCardRebuildDispatch.get(cardKey) || 0;
     // Defer the _cardSize update until the throttle clears: otherwise a throttled
     // call would record the new size locally without telling Lovelace, and the
-    // next measurement would short-circuit on the equality check above — leaving
+    // next measurement would short-circuit on the equality check above -- leaving
     // the rebuild permanently suppressed.
     if (now - lastDispatch < LL_REBUILD_MIN_INTERVAL_MS) return;
     _lastCardRebuildDispatch.set(cardKey, now);
@@ -688,11 +688,11 @@ class KPrinterCard extends HTMLElement {
     const gObj = (eid) => this._hass?.states?.[eid];
     const gNum = (eid) => Number(g(eid));
     const fmtState = (st) => {
-      if (!st) return "—";
+      if (!st) return "-";
       const v = st.state;
-      if (v === undefined || v === null) return "—";
+      if (v === undefined || v === null) return "-";
       const s = String(v);
-      if (s === "unknown" || s === "unavailable") return "—";
+      if (s === "unknown" || s === "unavailable") return "-";
       // Prefer HA's built-in formatter to honor per-entity precision and units
       if (this._hass && typeof this._hass.formatEntityState === 'function') {
         try { return this._hass.formatEntityState(st); } catch (_) { }
@@ -851,14 +851,14 @@ class KPrinterCard extends HTMLElement {
     this._root.getElementById("bed").textContent = bedStr;
     this._root.getElementById("box").textContent = boxStr;
     this._root.getElementById("time").textContent = fmtTimeLeft(timeLeft);
-    this._root.getElementById("layers").textContent = `${layer || "—"}/${totalLayers || "—"}`;
+    this._root.getElementById("layers").textContent = `${layer || "-"}/${totalLayers || "-"}`;
 
     // Toggle Chamber Temp visibility.
     // Hide when explicitly hidden, when no chamber entity is configured, or when
     // the configured entity does not exist in HA (printers without a chamber,
     // e.g. Ender 3 V3 KE) so we don't render a stray thermometer icon that
     // offsets the adjacent telemetry. A configured-but-unavailable entity stays
-    // visible and shows "—", matching the nozzle/bed pills.
+    // visible and shows "-", matching the nozzle/bed pills.
     const boxPill = this._root.getElementById("box-pill");
     if (boxPill) {
       const boxConfigured = Boolean(this._cfg.box) && Boolean(this._hass?.states?.[this._cfg.box]);

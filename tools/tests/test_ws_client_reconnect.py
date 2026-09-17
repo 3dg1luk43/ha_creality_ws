@@ -124,7 +124,7 @@ def _make_failing_connect(call_counter: list[int], exc: Exception | None = None)
 
 
 # ---------------------------------------------------------------------------
-# Test 1 — force_connect=True, power ON  →  connect IS attempted
+# Test 1 -- force_connect=True, power ON  →  connect IS attempted
 # ---------------------------------------------------------------------------
 def test_force_connect_attempts_connection_when_power_on():
     """With _force_connect=True and power ON, the loop must call websockets.connect."""
@@ -163,7 +163,7 @@ def test_force_connect_attempts_connection_when_power_on():
 
 
 # ---------------------------------------------------------------------------
-# Test 2 — force_connect=True, power OFF  →  connect is NOT attempted
+# Test 2 -- force_connect=True, power OFF  →  connect is NOT attempted
 # ---------------------------------------------------------------------------
 def test_force_connect_skips_connection_when_power_off():
     """With _force_connect=True but power OFF, the loop must NOT attempt to connect."""
@@ -198,7 +198,7 @@ def test_force_connect_skips_connection_when_power_off():
 
 
 # ---------------------------------------------------------------------------
-# Test 3 — force_connect=False, power ON  →  connect IS attempted normally
+# Test 3 -- force_connect=False, power ON  →  connect IS attempted normally
 # ---------------------------------------------------------------------------
 def test_normal_loop_connects_when_power_on():
     """Baseline: without any force flag, a normal loop iteration attempts to connect."""

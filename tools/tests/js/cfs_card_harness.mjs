@@ -306,7 +306,7 @@ export function makeHass(states = {}, extra = {}) {
     states,
     language: "en",
     locale: { language: "en" },
-    formatEntityState: (st) => String(st?.state ?? "—"),
+    formatEntityState: (st) => String(st?.state ?? "-"),
     ...extra,
   };
 }

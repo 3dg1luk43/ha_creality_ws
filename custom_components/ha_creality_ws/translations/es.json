@@ -184,9 +184,9 @@
       "active_filament_slot": { "name": "Ranura de filamento activa" },
       "cfs_box_temp": { "name": "Temperatura de la caja CFS {box_id}" },
       "cfs_box_humidity": { "name": "Humedad de la caja CFS {box_id}" },
-      "cfs_slot_filament": { "name": "Filamento — caja CFS {box_id}, ranura {slot}" },
-      "cfs_slot_color": { "name": "Color — caja CFS {box_id}, ranura {slot}" },
-      "cfs_slot_percent": { "name": "Restante — caja CFS {box_id}, ranura {slot}" },
+      "cfs_slot_filament": { "name": "Filamento (caja CFS {box_id}, ranura {slot})" },
+      "cfs_slot_color": { "name": "Color (caja CFS {box_id}, ranura {slot})" },
+      "cfs_slot_percent": { "name": "Restante (caja CFS {box_id}, ranura {slot})" },
       "cfs_ext_filament": { "name": "Filamento externo CFS" },
       "cfs_ext_color": { "name": "Color externo CFS" },
       "cfs_ext_percent": { "name": "Restante externo CFS" }

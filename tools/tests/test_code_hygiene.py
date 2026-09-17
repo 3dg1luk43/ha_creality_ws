@@ -49,3 +49,48 @@ def test_no_unexpected_cloud_urls():
             if not any(sub in m for sub in ALLOWED_HOST_SUBSTRINGS):
                 suspicious.append(m)
     assert not suspicious, f"Unexpected external URLs found: {suspicious}"
+
+
+def test_no_em_dashes_anywhere():
+    """House rule: no em dash (U+2014) in the repository.
+
+    Enforced rather than trusted because it is invisible in review -- an em
+    dash and a double hyphen look near-identical in a diff, and the character
+    arrives easily from pasted prose or a model's own output.
+
+    The replacement depends on what the dash was doing. In prose it is ` -- `,
+    matching the comment style used throughout. Where a card renders a dash as
+    its placeholder for an unknown value it is a plain `-`, because that string
+    is also compared by equality in several places and the two must agree. In
+    user-visible copy neither substitution reads well, so those were reworded
+    instead: reach for a semicolon or a comma rather than pasting `--` into
+    something a user will read.
+    """
+    import subprocess
+
+    tracked = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "-z"],
+        capture_output=True, check=True,
+    ).stdout.split(b"\0")
+
+    offenders = []
+    for rel in tracked:
+        if not rel:
+            continue
+        path = ROOT / rel.decode()
+        if not path.is_file():
+            continue
+        try:
+            body = path.read_bytes()
+        except OSError:
+            continue
+        if b"\xe2\x80\x94" not in body:
+            continue
+        for number, line in enumerate(body.split(b"\n"), 1):
+            if b"\xe2\x80\x94" in line:
+                offenders.append(
+                    f"{rel.decode()}:{number}: "
+                    f"{line.decode('utf-8', 'replace').strip()[:80]}"
+                )
+
+    assert not offenders, "em dashes found:\n" + "\n".join(offenders)

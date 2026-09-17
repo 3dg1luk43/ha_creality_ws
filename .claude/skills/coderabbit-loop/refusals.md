@@ -91,9 +91,16 @@ will re-flag it next round.
   hassfest tests are a model of that validator built by reading its source. A
   green `pytest` does not prove `strings.json` passes.
 - **Do not hand-edit generated or vendored card assets.** Fix the source.
-
-Note that em dashes are used freely in this repo's prose and comments, unlike its
-sibling project. Do not "fix" them.
+- **No em dash characters (U+2014) anywhere in the repo.** Enforced by
+  `tools/tests/test_code_hygiene.py::test_no_em_dashes_anywhere`, because the
+  character is invisible in review: an em dash and a double hyphen look
+  near-identical in a diff, and it arrives easily from pasted prose. The
+  replacement depends on the job the dash was doing - ` -- ` in prose and
+  comments, a plain `-` where a card renders a placeholder for an unknown value
+  (that string is compared by equality in several places, so the spellings must
+  agree), and a rewording in user-visible copy, where neither substitution reads
+  well. A finding asking to "restore proper typography" is refused. Arrows are
+  fine.
 
 ## Typical DEFER territory
 

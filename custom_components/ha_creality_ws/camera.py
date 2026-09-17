@@ -782,7 +782,7 @@ class CrealityWebRTCCamera(_BaseCamera):
             # If stream exists, verify its configured source matches expected.
             # streams.list() returns dict[str, Stream] where Stream is a
             # dataclass with `producers: list[Producer]` (each Producer has
-            # `.url`). It is NOT a dict and has no `sources` field — treating
+            # `.url`). It is NOT a dict and has no `sources` field -- treating
             # it as one used to raise AttributeError on every call and trigger
             # an endless delete/recreate loop (issue #88, 0.9.4 comment).
             if not recreate_needed and stream_name in streams:

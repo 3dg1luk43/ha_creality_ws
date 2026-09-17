@@ -53,7 +53,7 @@ def teardown_module(_module):
 
 def test_ensure_stream_configured_uses_creality_format():
     import asyncio
-    # K2 signaling uses Creality's JSON-wrapped SDP, not raw WHEP — the
+    # K2 signaling uses Creality's JSON-wrapped SDP, not raw WHEP -- the
     # `#format=creality` fragment must remain on the go2rtc source. See #87/#88.
 
     mock_go2rtc_client = MagicMock()

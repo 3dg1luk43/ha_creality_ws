@@ -226,7 +226,7 @@ const CFS_TRANSLATIONS = {
     toast_preset_saved: "Preset “{name}” saved",
     toast_preset_deleted: "Preset “{name}” deleted",
     toast_preset_name_required: "Give the preset a name first",
-    hint_delete_preset: "Dashed swatches are your own presets — right-click one to delete it.",
+    hint_delete_preset: "Dashed swatches are your own presets; right-click one to delete it.",
     btn_edit: "Edit material",
     tooltip_edit_locked: "Editing is disabled while the printer is busy",
     tooltip_multicolour_readonly: "Multi-colour spools cannot be edited",
@@ -248,7 +248,7 @@ const CFS_TRANSLATIONS = {
     toast_colour_invalid: "Colour must be six hex digits, for example #06c84f",
     toast_type_required: "Material type is required",
     toast_external_not_supported: "This printer does not report a box id for the external spool, so it cannot be edited",
-    warn_box_id_guessed: "The target box was inferred from the card layout — check it matches the printer before saving",
+    warn_box_id_guessed: "The target box was inferred from the card layout; check it matches the printer before saving",
     toast_no_device: "Could not identify the printer for this card. Check the entities in the card configuration.",
     toast_multiple_devices: "This card mixes entities from more than one printer, so material editing is disabled.",
     toast_printer_busy: "Cannot edit material while the printer is busy",
@@ -272,7 +272,7 @@ class KCFSCard extends HTMLElement {
 
   static _sanitizeColor(value) {
     const raw = String(value || "").trim();
-    if (!raw || ["unknown", "unavailable", "—"].includes(raw.toLowerCase())) {
+    if (!raw || ["unknown", "unavailable", "-"].includes(raw.toLowerCase())) {
       return "#cccccc";
     }
     const hex = raw.startsWith("#") ? raw.slice(1) : raw;
@@ -362,7 +362,7 @@ class KCFSCard extends HTMLElement {
   }
 
   static _getHumidityColor(humidityStr) {
-    if (!humidityStr || humidityStr === "—") return '#64b5f6'; // default blue
+    if (!humidityStr || humidityStr === "-") return '#64b5f6'; // default blue
 
     const match = String(humidityStr).match(/(\d+\.?\d*)/);
     if (!match) return '#64b5f6';
@@ -1196,11 +1196,11 @@ class KCFSCard extends HTMLElement {
     const states = this._hass.states || {};
     const gObj = (eid) => (eid ? states?.[eid] : undefined);
     const fmtState = (st) => {
-      if (!st) return "—";
+      if (!st) return "-";
       const v = st.state;
-      if (v === undefined || v === null) return "—";
+      if (v === undefined || v === null) return "-";
       const s = String(v);
-      if (s === "unknown" || s === "unavailable") return "—";
+      if (s === "unknown" || s === "unavailable") return "-";
       if (this._hass && typeof this._hass.formatEntityState === "function") {
         try { return this._hass.formatEntityState(st); } catch (_) { }
       }
@@ -1431,8 +1431,8 @@ class KCFSCard extends HTMLElement {
 
     const bays = slots.map((slot) => {
       if (!slot) return '<div class="bay"></div>';
-      const safeType = slot.type && !["unknown", "unavailable", "—", "-"].includes(String(slot.type).toLowerCase()) ? slot.type : "—";
-      const hasFilament = safeType !== "—";
+      const safeType = slot.type && !["unknown", "unavailable", "-"].includes(String(slot.type).toLowerCase()) ? slot.type : "-";
+      const hasFilament = safeType !== "-";
       const pct = hasFilament && slot.percent !== null ? Math.round(slot.percent) : 0;
       return `
         <div class="bay" data-eid="${esc(slot.entity_id)}">
@@ -1447,8 +1447,8 @@ class KCFSCard extends HTMLElement {
     }).join('');
 
     const env = [];
-    if (box?.temp && box.temp !== "—") env.push(`<span class="env-temp">${esc(box.temp)}</span>`);
-    if (box?.humidity && box.humidity !== "—") {
+    if (box?.temp && box.temp !== "-") env.push(`<span class="env-temp">${esc(box.temp)}</span>`);
+    if (box?.humidity && box.humidity !== "-") {
       env.push(`<span class="env-hum" style="color: ${esc(box.humidityColor)}">${esc(box.humidity)}</span>`);
     }
 
@@ -1492,8 +1492,8 @@ class KCFSCard extends HTMLElement {
     // Header with environment info
     let envInfo = '';
     if (selectedBox) {
-      const tempStr = selectedBox.temp !== "—" ? selectedBox.temp : '';
-      const humStr = selectedBox.humidity !== "—" ? selectedBox.humidity : '';
+      const tempStr = selectedBox.temp !== "-" ? selectedBox.temp : '';
+      const humStr = selectedBox.humidity !== "-" ? selectedBox.humidity : '';
 
       if (tempStr || humStr) {
         const tempHtml = tempStr ? `<span class="env-temp">${esc(tempStr)}</span>` : '';
@@ -1525,12 +1525,12 @@ class KCFSCard extends HTMLElement {
     // External section
     let externalSection = '';
     if (external) {
-      const safeType = external.type && !["unknown", "unavailable", "—", "-"].includes(String(external.type).toLowerCase()) ? external.type : "—";
-      const safeName = external.name && !["unknown", "unavailable", "—", "-"].includes(String(external.name).toLowerCase()) ? external.name : "—";
-      const hasFilament = safeType !== "—" && safeName !== "—";
+      const safeType = external.type && !["unknown", "unavailable", "-"].includes(String(external.type).toLowerCase()) ? external.type : "-";
+      const safeName = external.name && !["unknown", "unavailable", "-"].includes(String(external.name).toLowerCase()) ? external.name : "-";
+      const hasFilament = safeType !== "-" && safeName !== "-";
       const pct = hasFilament && external.percent !== null ? external.percent : 0;
-      const percentTextDisplay = hasFilament ? (external.percentText || '—') : '—';
-      const displayName = hasFilament ? `${safeName} ${safeType}` : '—';
+      const percentTextDisplay = hasFilament ? (external.percentText || '-') : '-';
+      const displayName = hasFilament ? `${safeName} ${safeType}` : '-';
       externalSection = `
         <div class="external-section">
           <div class="external-normal" data-eid="${esc(external.entity_id)}">
@@ -1580,11 +1580,11 @@ class KCFSCard extends HTMLElement {
    */
   _renderExternalCompact(external) {
     if (!external) return '';
-    const safeType = external.type && !["unknown", "unavailable", "—", "-"].includes(String(external.type).toLowerCase()) ? external.type : "—";
-    const safeName = external.name && !["unknown", "unavailable", "—", "-"].includes(String(external.name).toLowerCase()) ? external.name : "—";
-    const hasFilament = safeType !== "—" && safeName !== "—";
-    const percentTextDisplay = hasFilament ? (external.percentText || '—') : '—';
-    const displayName = hasFilament ? `${safeName} ${safeType}` : '—';
+    const safeType = external.type && !["unknown", "unavailable", "-"].includes(String(external.type).toLowerCase()) ? external.type : "-";
+    const safeName = external.name && !["unknown", "unavailable", "-"].includes(String(external.name).toLowerCase()) ? external.name : "-";
+    const hasFilament = safeType !== "-" && safeName !== "-";
+    const percentTextDisplay = hasFilament ? (external.percentText || '-') : '-';
+    const displayName = hasFilament ? `${safeName} ${safeType}` : '-';
     return `
       <div class="external-section">
         <div class="external-compact" data-eid="${esc(external.entity_id)}">
@@ -1600,8 +1600,8 @@ class KCFSCard extends HTMLElement {
   }
 
   _renderCFSRow(box) {
-    const tempStr = box.temp !== "—" ? box.temp : '';
-    const humStr = box.humidity !== "—" ? box.humidity : '';
+    const tempStr = box.temp !== "-" ? box.temp : '';
+    const humStr = box.humidity !== "-" ? box.humidity : '';
 
     let envHtml = '';
     if (tempStr || humStr) {
@@ -1666,14 +1666,14 @@ class KCFSCard extends HTMLElement {
 
     const isActive = slot.selected === 1 || slot.selected === true;
     const color = slot.color || '#cccccc';
-    const safeType = slot.type && !["unknown", "unavailable", "—", "-"].includes(String(slot.type).toLowerCase()) ? slot.type : "—";
-    const safeName = slot.name && !["unknown", "unavailable", "—", "-"].includes(String(slot.name).toLowerCase()) ? slot.name : "—";
+    const safeType = slot.type && !["unknown", "unavailable", "-"].includes(String(slot.type).toLowerCase()) ? slot.type : "-";
+    const safeName = slot.name && !["unknown", "unavailable", "-"].includes(String(slot.name).toLowerCase()) ? slot.name : "-";
 
-    // If no filament (type is "—" or name is "—"), show 0% regardless of actual value
-    const hasFilament = safeType !== "—" && safeName !== "—";
+    // If no filament (type is "-" or name is "-"), show 0% regardless of actual value
+    const hasFilament = safeType !== "-" && safeName !== "-";
     const pct = hasFilament && slot.percent !== null ? slot.percent : 0;
     const pctDisplay = hasFilament && slot.percent !== null ? Math.round(slot.percent) : 0;
-    const percentTextDisplay = hasFilament ? (slot.percentText || '—') : '—';
+    const percentTextDisplay = hasFilament ? (slot.percentText || '-') : '-';
 
     const badge = isActive ? '<div class="status-badge"></div>' : '';
 
@@ -1699,18 +1699,18 @@ class KCFSCard extends HTMLElement {
 
     if (!slot) {
       if (showType) {
-        return `<div class="spool-mini-wrapper"><div class="spool-mini" style="--spool-color: #333; --spool-pct: 0%"><span>—</span></div><div class="spool-mini-type">—</div></div>`;
+        return `<div class="spool-mini-wrapper"><div class="spool-mini" style="--spool-color: #333; --spool-pct: 0%"><span>-</span></div><div class="spool-mini-type">-</div></div>`;
       }
-      return `<div class="spool-mini" style="--spool-color: #333; --spool-pct: 0%"><span>—</span></div>`;
+      return `<div class="spool-mini" style="--spool-color: #333; --spool-pct: 0%"><span>-</span></div>`;
     }
 
     const isActive = slot.selected === 1 || slot.selected === true;
     const color = slot.color || '#cccccc';
-    const safeType = slot.type && !["unknown", "unavailable", "—", "-"].includes(String(slot.type).toLowerCase()) ? slot.type : "—";
-    const safeName = slot.name && !["unknown", "unavailable", "—", "-"].includes(String(slot.name).toLowerCase()) ? slot.name : null;
+    const safeType = slot.type && !["unknown", "unavailable", "-"].includes(String(slot.type).toLowerCase()) ? slot.type : "-";
+    const safeName = slot.name && !["unknown", "unavailable", "-"].includes(String(slot.name).toLowerCase()) ? slot.name : null;
 
-    // If no filament (type is "—" or name is empty/dash), show 0% regardless of actual value
-    const hasFilament = safeType !== "—" && safeName !== null;
+    // If no filament (type is "-" or name is empty/dash), show 0% regardless of actual value
+    const hasFilament = safeType !== "-" && safeName !== null;
     const pct = hasFilament && slot.percent !== null ? slot.percent : 0;
     const pctDisplay = hasFilament && slot.percent !== null ? Math.round(slot.percent) : 0;
 
@@ -2033,8 +2033,8 @@ class KCFSCard extends HTMLElement {
     }
 
     const values = {
-      type: slot.type && slot.type !== "—" ? slot.type : "",
-      name: slot.materialName || (slot.name && slot.name !== "—" ? slot.name : ""),
+      type: slot.type && slot.type !== "-" ? slot.type : "",
+      name: slot.materialName || (slot.name && slot.name !== "-" ? slot.name : ""),
       vendor: slot.vendor || "",
       min_temp: slot.minTemp ?? undefined,
       max_temp: slot.maxTemp ?? undefined,

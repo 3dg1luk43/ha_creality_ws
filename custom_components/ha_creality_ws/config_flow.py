@@ -223,7 +223,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Top-level options menu (the hub each section returns to).
 
         Each settings group is its own step so its form is rebuilt fresh from the
-        working copy every time it is opened — Home Assistant cannot re-render a
+        working copy every time it is opened -- Home Assistant cannot re-render a
         single step when a dropdown changes, so conditional fields (e.g. the
         custom camera URL) would otherwise show stale based on the saved mode.
 

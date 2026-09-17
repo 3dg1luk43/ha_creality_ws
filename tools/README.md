@@ -30,12 +30,12 @@ Features
 CFS material writes
 
 `{"method":"set","params":{"modifyMaterial":{...}}}` updates the stored slot, so the
-next `boxsInfo` request reflects the change — that round trip is what makes
+next `boxsInfo` request reflects the change -- that round trip is what makes
 `ha_creality_ws.set_cfs_material` testable without CFS hardware.
 
 - Addressed by `boxId` (matching `materialBoxs[].id`) and `id` (matching `materials[].id`)
 - **Merges** rather than replaces: a key that is absent from the payload keeps the
-  value the slot already has. This matters most for `rfid` — writing an empty
+  value the slot already has. This matters most for `rfid` -- writing an empty
   string would erase a real tag association, so the integration omits the key
   instead
 - Writable keys: `type`, `name`, `vendor`, `color`, `minTemp`, `maxTemp`, `pressure`, `rfid`
@@ -86,10 +86,10 @@ Test-control endpoints (not present on real printers)
 These pin telemetry on demand so a scenario can be reached instantly instead of
 waiting out a simulated print.
 
-- `POST /test/set` — force telemetry fields; `null` clears one field
-- `POST /test/reset` — drop all forced fields
-- `POST /test/cfs` — replace a CFS box's slot list: `{"box_id": 1, "materials": [...]}`
-- `GET /test/state` — the exact snapshot currently being streamed
+- `POST /test/set` -- force telemetry fields; `null` clears one field
+- `POST /test/reset` -- drop all forced fields
+- `POST /test/cfs` -- replace a CFS box's slot list: `{"box_id": 1, "materials": [...]}`
+- `GET /test/state` -- the exact snapshot currently being streamed
 
 ```bash
 # park the printer at 100% with an error and a filament runout
