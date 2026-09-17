@@ -410,9 +410,14 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if its integration is not loaded right now, so opening this step while a
         phone's integration is down does not quietly drop it on save.
         """
+        # `send_message` is the generic action for notify *entities*: it takes an
+        # `entity_id`, so offering it as a destination gives the user a target
+        # that dispatch can only fail on. The entities themselves come from
+        # `async_entity_ids` below, which is the form that works.
         candidates: list[str] = [
             f"notify.{name}"
             for name in self.hass.services.async_services().get("notify", {})
+            if name != "send_message"
         ]
         try:
             candidates.extend(self.hass.states.async_entity_ids("notify"))

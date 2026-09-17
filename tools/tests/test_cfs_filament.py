@@ -101,6 +101,24 @@ def test_spool_key_ignores_a_non_hex_colour():
     assert build_spool_key(rfid="001001", color="unknown") == "001001"
 
 
+@pytest.mark.parametrize("color,expected", [
+    ("#1234", "001001_1234"),
+    ("#12345", "001001_12345"),
+])
+def test_spool_key_keeps_an_odd_length_hex_token(color, expected):
+    """A hex token of an unrecognised length stays in the key deliberately.
+
+    `normalize_color_hex` returns it untouched (that is its documented contract
+    for unexpected formats), and the key's whole job is to tell two spools of
+    the same material apart by colour -- issue #117. Requiring a 3 or 6 digit
+    length here would drop the token instead, so two spools differing only by a
+    malformed colour would collapse back to the same key, which is the exact
+    collision this function exists to prevent. Non-hex sentinels are a different
+    case and *are* excluded; see the test above.
+    """
+    assert build_spool_key(rfid="001001", color=color) == expected
+
+
 def test_spool_key_uses_the_material_name_when_vendor_is_absent():
     assert build_spool_key(material_type="PETG", name="PETG", color="#1b04ae") == "petg_1b04ae"
 

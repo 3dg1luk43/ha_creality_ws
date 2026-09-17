@@ -372,6 +372,33 @@ def test_an_already_stored_target_stays_offered_when_its_integration_is_down():
 
 
 @requires_voluptuous
+def test_the_generic_send_message_action_is_not_offered_as_a_target():
+    """`notify.send_message` takes an `entity_id`, so it can only ever fail.
+
+    It appears in the notify service registry alongside the per-device legacy
+    services, and `_async_deliver_one` would call it with no entity target.
+    """
+    from homeassistant.helpers import selector as stubbed_selector
+
+    handler = _handler({})
+    handler.hass.services.async_services = lambda: {
+        "notify": {
+            "send_message": None,
+            "mobile_app_pixel": None,
+            "persistent_notification": None,
+        }
+    }
+    stubbed_selector.SelectOptionDict.reset_mock()
+    handler._notify_target_options([])
+    offered = [
+        call.kwargs["value"]
+        for call in stubbed_selector.SelectOptionDict.call_args_list
+    ]
+    assert "notify.send_message" not in offered
+    assert offered == ["notify.mobile_app_pixel", "notify.persistent_notification"]
+
+
+@requires_voluptuous
 def test_the_offered_targets_are_deduplicated_and_sorted():
     from homeassistant.helpers import selector as stubbed_selector
 

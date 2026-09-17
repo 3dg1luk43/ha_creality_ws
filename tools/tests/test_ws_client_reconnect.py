@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-from conftest import drop_stub_module, restore_stubs
+from conftest import drop_stub_module, install_stub_module, restore_stubs
 
 # ---------------------------------------------------------------------------
 # Bootstrap: make sure the real ws_client module is importable without HA
@@ -35,7 +35,9 @@ for mod_name in [
     "homeassistant.helpers.dispatcher",
 ]:
     if mod_name not in sys.modules:
-        sys.modules[mod_name] = types.ModuleType(mod_name)
+        # Through the helper, so `restore_stubs` below can undo it. A direct
+        # `sys.modules` write is invisible to it and outlives this module.
+        install_stub_module(__name__, mod_name, types.ModuleType(mod_name))
 
 # Stub out websockets and its submodules so the real package isn't required.
 # Only substitute when it is genuinely absent: the tests below patch via
@@ -58,7 +60,7 @@ if "websockets" not in sys.modules and importlib.util.find_spec("websockets") is
     _ws_exceptions.ConnectionClosedOK = ConnectionClosedOK
     _ws_exceptions.ConnectionClosed = ConnectionClosed
     _ws_stub.exceptions = _ws_exceptions
-    sys.modules["websockets.exceptions"] = _ws_exceptions
+    install_stub_module(__name__, "websockets.exceptions", _ws_exceptions)
 
     # websockets.client (referenced in type annotation)
     _ws_client_sub = types.ModuleType("websockets.client")
@@ -68,9 +70,9 @@ if "websockets" not in sys.modules and importlib.util.find_spec("websockets") is
 
     _ws_client_sub.ClientConnection = ClientConnection
     _ws_stub.client = _ws_client_sub
-    sys.modules["websockets.client"] = _ws_client_sub
+    install_stub_module(__name__, "websockets.client", _ws_client_sub)
 
-    sys.modules["websockets"] = _ws_stub
+    install_stub_module(__name__, "websockets", _ws_stub)
 
 # Now import the real module
 import importlib.util

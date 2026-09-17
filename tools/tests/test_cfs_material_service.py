@@ -290,6 +290,9 @@ def _device(*entry_ids):
 
 IDLE = {"printFileName": "", "state": 0}
 PRINTING = {"printFileName": "a.gcode", "state": 1, "printProgress": 42}
+# Printing, but carrying an error code the printer never cleared. The display
+# state for this is "error", which is *not* in BUSY_PRINT_STATES.
+PRINTING_WITH_STALE_ERROR = {**PRINTING, "err": {"errcode": 512}}
 
 
 # --------------------------------------------------------------------------- #
@@ -401,6 +404,30 @@ def test_a_busy_second_printer_blocks_before_the_first_is_written(integration):
             "device_id": ["d1", "d2"], "box_id": 1, "slot_id": 0, "type": "PLA",
         })
     assert idle.client.sent == [], "the idle printer must not have been written"
+
+
+@requires_voluptuous
+def test_a_stale_error_code_does_not_unlock_a_printing_printer(integration):
+    """A guard on the *display* state lets a write through mid-print.
+
+    `derive_print_state` returns "error" for any non-zero `err.errcode`,
+    including one the printer never clears, and "error" is not in
+    BUSY_PRINT_STATES -- so the printer is still printing but the guard sees a
+    state it does not consider busy. `KCoordinator._job_state` avoids this by
+    using the activity state, and its docstring records the same failure mode
+    for the pause path.
+    """
+    module, _, ServiceValidationError = integration
+    coord = FakeCoordinator("erroring-one", PRINTING_WITH_STALE_ERROR)
+    hass, services, _ = _make_hass(
+        integration, {"e1": coord}, {"d": _device("e1")},
+    )
+    _register(integration, hass)
+    with pytest.raises(ServiceValidationError, match="printing"):
+        _call_service(integration, hass, services, {
+            "device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA",
+        })
+    assert coord.client.sent == [], "nothing may reach a printing printer"
 
 
 @requires_voluptuous

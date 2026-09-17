@@ -356,6 +356,47 @@ test("device-supplied values are escaped before reaching innerHTML", async () =>
   );
 });
 
+test("a CSS declaration in a reported colour cannot add a second property", async () => {
+  // HTML escaping alone would not stop this: a semicolon is not escaped, so a
+  // colour of `red; background-image: url(...)` interpolated into a style
+  // attribute would parse as two declarations. The defence is that no reported
+  // colour reaches `style` unvalidated -- `_sanitizeColor` is a whitelist that
+  // only ever returns "#cccccc" or "#" plus 3 or 6 hex digits.
+  const payload = "red; background-image: url(https://example.invalid/x.png)";
+  const { card } = await setup({ color: payload, attributes: { ...ATTRS } });
+  const slot = card._findSlot(SLOT);
+
+  assert.equal(slot.color, "#cccccc", "an unparseable colour collapses to the default");
+
+  const boxes = [{
+    id: 1,
+    slots: [slot, slot, slot, slot],
+    temp: "20",
+    humidity: "30",
+    // Not telemetry: _getHumidityColor returns one of four literals. Passing the
+    // payload here asserts the renderers do not trust it either.
+    humidityColor: payload,
+  }];
+  const external = { ...slot };
+  const rendered = {
+    spoolCard: card._renderSpoolCard(slot),
+    spoolMini: card._renderSpoolMini(slot),
+    boxMode: card._renderBoxMode(boxes, external),
+    normalMode: card._renderNormalMode(boxes, external),
+    compactMode: card._renderCompactMode(boxes, external),
+  };
+  for (const [where, html] of Object.entries(rendered)) {
+    assert.ok(
+      !html.includes("background-image"),
+      `${where}: a second CSS declaration reached the style attribute`,
+    );
+    assert.ok(
+      !/style="[^"]*url\(/.test(html),
+      `${where}: a url() reached the style attribute`,
+    );
+  }
+});
+
 test("the edit dialog announces itself and closes on Escape", async () => {
   const { card } = await setup();
   card._showEditDialog(SLOT);

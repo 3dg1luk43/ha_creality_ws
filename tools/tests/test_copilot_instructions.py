@@ -48,11 +48,13 @@ def test_preview_reason_list_matches_the_image_entity():
 
 
 def test_referenced_paths_exist():
-    """A layout map that names deleted files sends readers to the wrong place."""
-    for rel in (
-        "custom_components/ha_creality_ws/light.py",
-        "tools/test_files/deploy_to_ha.sh",
-    ):
+    """A layout map that names deleted files sends readers to the wrong place.
+
+    Only paths that are actually committed belong here. `tools/test_files/` is
+    gitignored (.gitignore:7), so the deploy script in it exists on a maintainer's
+    machine and in no clone -- asserting it exists passes locally and fails in CI.
+    """
+    for rel in ("custom_components/ha_creality_ws/light.py",):
         assert (ROOT / rel).exists(), f"{rel} is referenced but missing"
     text = inst.read_text()
     assert "ha_creality_ws/switch.py" not in text, "the switch platform was removed"

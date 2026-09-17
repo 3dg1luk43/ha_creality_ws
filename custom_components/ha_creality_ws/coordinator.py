@@ -1295,10 +1295,11 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         elif action == ids[ACTION_STOP]:
             await self.async_stop_print()
         elif action == ids[ACTION_DISMISS]:
-            # The card is sent with `persistent`, so a swipe will not shift it
-            # and this is the user's only way out. It hides the card and leaves
-            # the print alone -- and `finish()` rather than `clear()` so the
-            # next frame does not helpfully put it straight back.
+            # A swipe only removes the notification that is on screen; the
+            # next live-card refresh posts it again under the same tag. This
+            # retires the card for the rest of the print instead, which is
+            # what a user asking to be rid of it means -- and `finish()`
+            # rather than `clear()` so the next frame does not put it back.
             self._clear_live_card(finished=True)
         else:
             return False

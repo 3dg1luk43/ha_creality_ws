@@ -361,6 +361,10 @@ class KCFSCard extends HTMLElement {
     return Math.max(0, Math.min(100, n));
   }
 
+  // Returns one of four literals, never telemetry -- but the consumers run the
+  // result through _sanitizeColor anyway. HTML escaping does not neutralise a
+  // semicolon, so any value interpolated into a `style` attribute would parse a
+  // second declaration; the whitelist is what makes that unreachable.
   static _getHumidityColor(humidityStr) {
     if (!humidityStr || humidityStr === "-") return '#64b5f6'; // default blue
 
@@ -1449,7 +1453,7 @@ class KCFSCard extends HTMLElement {
     const env = [];
     if (box?.temp && box.temp !== "-") env.push(`<span class="env-temp">${esc(box.temp)}</span>`);
     if (box?.humidity && box.humidity !== "-") {
-      env.push(`<span class="env-hum" style="color: ${esc(box.humidityColor)}">${esc(box.humidity)}</span>`);
+      env.push(`<span class="env-hum" style="color: ${KCFSCard._sanitizeColor(box.humidityColor)}">${esc(box.humidity)}</span>`);
     }
 
     return `
@@ -1497,7 +1501,7 @@ class KCFSCard extends HTMLElement {
 
       if (tempStr || humStr) {
         const tempHtml = tempStr ? `<span class="env-temp">${esc(tempStr)}</span>` : '';
-        const humHtml = humStr ? `<span class="env-hum" style="color: ${esc(selectedBox.humidityColor)}">${esc(humStr)}</span>` : '';
+        const humHtml = humStr ? `<span class="env-hum" style="color: ${KCFSCard._sanitizeColor(selectedBox.humidityColor)}">${esc(humStr)}</span>` : '';
         const separator = tempStr && humStr ? ' <span style="color: var(--divider-color)">•</span> ' : '';
         envInfo = `<div class="env-info">${tempHtml}${separator}${humHtml}</div>`;
       }
@@ -1608,7 +1612,7 @@ class KCFSCard extends HTMLElement {
       envHtml = `
         <div class="env-mini">
           ${tempStr ? `<div class="temp">${esc(tempStr)}</div>` : ''}
-          ${humStr ? `<div class="hum" style="color: ${esc(box.humidityColor)}">${esc(humStr)}</div>` : ''}
+          ${humStr ? `<div class="hum" style="color: ${KCFSCard._sanitizeColor(box.humidityColor)}">${esc(humStr)}</div>` : ''}
         </div>
       `;
     }

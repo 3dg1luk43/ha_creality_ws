@@ -68,7 +68,7 @@ from .utils import (
     BUSY_PRINT_STATES,
     ModelDetection,
     build_modify_material_payload,
-    derive_print_state,
+    derive_activity_state,
 )
 
 
@@ -599,7 +599,13 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
         # The card guards this too, but automations and Developer Tools do not go
         # through the card.
         for coord in targets:
-            state = derive_print_state(
+            # The *activity* state, matching `KCoordinator._job_state`: the
+            # display state reports "error" for any non-zero `err.errcode`,
+            # including one the printer never clears, and "error" is not in
+            # BUSY_PRINT_STATES -- so a printer that was printing with a stale
+            # code sailed through this guard and took a modifyMaterial write
+            # mid-print, which is the exact thing being guarded against.
+            state = derive_activity_state(
                 coord.data or {},
                 power_off=coord.power_is_off(),
                 available=coord.available,

@@ -165,14 +165,18 @@ are CRLF; most tests are LF. Any Python rewrite (`Path.write_text`, a regex pass
 normalises to LF and turns a two-line fix into a three-thousand-line diff.
 
 ```bash
-# After edits, restore any file whose HEAD version was CRLF:
-for f in $(git diff --name-only HEAD); do
-  case "$f" in *.py|*.json|*.js|*.md) ;; *) continue ;; esac
-  git show "HEAD:$f" 2>/dev/null | grep -qU $'\r' && python3 -c "
-import pathlib; p=pathlib.Path('$f'); d=p.read_bytes()
-n=d.replace(b'\r\n',b'\n').replace(b'\n',b'\r\n')
-p.write_bytes(n) if n!=d else None"
-done
+# After edits, restore any file whose HEAD version was CRLF.
+# The path is passed as argv and read from sys.argv, never interpolated into the
+# Python source: a file name containing a quote would otherwise be parsed as
+# code, and `-z` plus `read -d ''` keeps names with spaces in one piece.
+while IFS= read -r -d '' f; do
+  case "$f" in *.py|*.json|*.js|*.mjs|*.md) ;; *) continue ;; esac
+  git show "HEAD:$f" 2>/dev/null | grep -qU $'\r' || continue
+  python3 -c 'import pathlib, sys
+p = pathlib.Path(sys.argv[1]); d = p.read_bytes()
+n = d.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+p.write_bytes(n) if n != d else None' "$f"
+done < <(git diff -z --name-only HEAD)
 git diff --stat   # confirm the diff is the size you intended
 ```
 

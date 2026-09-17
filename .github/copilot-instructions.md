@@ -28,7 +28,7 @@ These instructions tell GitHub Copilot Chat how to work in this repo. Assume cha
 - `custom_components/ha_creality_ws/utils.py` – Helpers (numeric coercion, parsing, model detection)
 - `custom_components/ha_creality_ws/services.yaml` – Custom HA services
 - `custom_components/ha_creality_ws/manifest.json` – HA manifest (requirements, version, zeroconf)
-- `tools/test_files/deploy_to_ha.sh` – Dev-to-HA deploy script with backup and restart
+- `tools/test_files/deploy_to_ha.sh` – Dev-to-HA deploy script with backup and restart (gitignored; local only)
 
 ## Design anchors to preserve
 
@@ -117,7 +117,7 @@ Use `ModelDetection` which reads both `model` and `modelVersion` codes.
 
 - Lint: **nothing is configured**. `pyproject.toml` holds only `[tool.pytest.ini_options]`, there is no `ruff.toml`/`.flake8`/`.pylintrc`, and no workflow runs a linter. A `.ruff_cache/` directory is someone's ad-hoc run, not repo configuration. Do not describe a formatting change as needed to pass a lint check.
 - Manual validation: run HA with the component and observe logs/telemetry
-- Deployment: `tools/test_files/deploy_to_ha.sh --run` syncs to the HA test instance
+- Deployment: `tools/test_files/deploy_to_ha.sh --run` syncs to the HA test instance. `tools/test_files/` is gitignored, so this script is a local maintainer helper and is not present in a clone.
  - Diagnostic samples: sample WebSocket diagnostic JSONs are stored under `tools/test_files/ws_diagnostic_dumps/` for reference when adding or validating fields
 
 ## PR checklist (for Copilot-generated changes)

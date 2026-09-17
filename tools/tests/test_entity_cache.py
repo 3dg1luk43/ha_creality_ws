@@ -103,6 +103,31 @@ def test_a_pre_rename_entry_still_yields_a_chamber_limit():
     assert ent._get_cached_max_temps()["max_box_temp"] == 55
 
 
+def test_a_missing_chamber_max_falls_back_to_live_telemetry():
+    """`_device_info_cached` is not proof that every max was captured.
+
+    It is set as soon as the model is known, but `maxBoxTemp` is a late-discovery
+    field, so an entry can carry the flag with no chamber max in it. Returning
+    the cached `None` hid the value the printer was already reporting and pinned
+    the chamber target to number.py's 60 degree default.
+    """
+    partial = {k: v for k, v in CACHED.items() if "max_chamber" not in k and "max_box" not in k}
+    ent = _entity(entry=fake_config_entry(data=partial), data=LIVE)
+    temps = ent._get_cached_max_temps()
+    assert temps["max_box_temp"] == 33, "the live chamber max must not be masked"
+    # The fields that *are* cached still win over live values.
+    assert temps["max_bed_temp"] == 100
+    assert temps["max_nozzle_temp"] == 300
+
+
+def test_an_explicitly_null_cached_max_falls_back_too():
+    """The cache writer stores `d.get("maxBoxTemp", <previous>)`, so the key can
+    be present and `None` rather than absent."""
+    nulled = {**CACHED, "_cached_max_chamber_temp": None, "_cached_max_box_temp": None}
+    ent = _entity(entry=fake_config_entry(data=nulled), data=LIVE)
+    assert ent._get_cached_max_temps()["max_box_temp"] == 33
+
+
 def test_max_temps_fall_back_to_live_telemetry_without_a_cache():
     ent = _entity(entry=fake_config_entry(data={}), data=LIVE)
     assert ent._get_cached_max_temps() == {

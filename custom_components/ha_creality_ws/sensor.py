@@ -1074,28 +1074,40 @@ class KMaxTempSensor(KEntity, SensorEntity):
         return True
 
     def _read_cached_or_live(self) -> float | None:
-        # From entry cache
+        """The cached capability constant, or the live one when it is missing.
+
+        Per *field*: `_device_info_cached` is set as soon as the model is known,
+        while `maxBoxTemp` arrives by late discovery, so an entry can carry the
+        flag with no chamber max in it. Returning the cached `None` there hid a
+        value the printer was already reporting.
+        """
+        # Live telemetry, used as the fallback for whichever field is uncached.
+        d = self.coordinator.data or {}
+        if self._key == "max_nozzle_temp":
+            live = d.get("maxNozzleTemp")
+        elif self._key == "max_bed_temp":
+            live = d.get("maxBedTemp")
+        elif self._key == "max_box_temp":
+            live = d.get("maxBoxTemp")
+        else:
+            return None
+
         entry = self.coordinator.config_entry
         if entry and entry.data.get("_device_info_cached"):
             if self._key == "max_nozzle_temp":
-                return entry.data.get("_cached_max_nozzle_temp")
-            if self._key == "max_bed_temp":
-                return entry.data.get("_cached_max_bed_temp")
-            if self._key == "max_box_temp":
+                cached = entry.data.get("_cached_max_nozzle_temp")
+            elif self._key == "max_bed_temp":
+                cached = entry.data.get("_cached_max_bed_temp")
+            else:
                 # Prefer the chamber cache, falling back to the legacy box one
                 # for entries cached by a pre-rename release.
-                return entry.data.get(
+                cached = entry.data.get(
                     "_cached_max_chamber_temp", entry.data.get("_cached_max_box_temp")
                 )
-        # Live telemetry fallback
-        d = self.coordinator.data or {}
-        if self._key == "max_nozzle_temp":
-            return d.get("maxNozzleTemp")
-        if self._key == "max_bed_temp":
-            return d.get("maxBedTemp")
-        if self._key == "max_box_temp":
-            return d.get("maxBoxTemp")
-        return None
+            if cached is not None:
+                return cached
+
+        return live
 
     @property
     def native_value(self) -> float | None:

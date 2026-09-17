@@ -533,10 +533,17 @@ class NotifyVisuals:
 
     Both are relative ``/api/...`` paths, which the companion app fetches with
     its own credentials -- no token and no signed path needed. The caller is
-    responsible for the gating: ``preview_url`` must be ``None`` unless the image
-    entity reports ``preview_reason == "ok"``, and ``snapshot_url`` unless the
-    camera reports ``snapshot_supported``. Both entities otherwise serve a 1x1
-    placeholder, which renders as an empty grey box.
+    responsible for the gating: ``preview_url`` must be ``None`` when the image
+    entity reports a ``preview_reason`` in ``PREVIEW_REASONS_UNUSABLE``, and
+    ``snapshot_url`` unless the camera reports ``snapshot_supported``. Both
+    entities otherwise serve a 1x1 placeholder, which renders as an empty grey
+    box.
+
+    Deliberately *not* ``preview_reason == "ok"``: the attribute is only set once
+    something has asked the image entity for bytes, so an unset value means "not
+    tried yet" rather than "no good", and requiring ``"ok"`` would drop the
+    preview from the first notification of every print. See
+    ``KCoordinator._notify_media``, which is the only producer.
     """
 
     preview_url: str | None = None
@@ -845,9 +852,11 @@ def build_clear_payload(tag: str) -> dict[str, Any]:
 ACTION_PAUSE = "pause"
 ACTION_RESUME = "resume"
 ACTION_STOP = "stop"
-# The card is posted with `persistent`, so a swipe will not remove it. This is
-# the deliberate way out, and it must always be offered alongside that flag --
-# an undismissable notification with no dismiss button is a trap.
+# A swipe only clears the notification currently on screen: the next live-card
+# refresh re-posts it under the same tag. This is the way to retire the card for
+# the rest of the print, so it must always be offered -- a card that comes back
+# every 30 seconds with no way to stop it is a trap. See `build_live_payload`
+# for why `persistent` is not what makes this necessary.
 ACTION_DISMISS = "dismiss"
 
 
@@ -886,11 +895,11 @@ def build_actions(
     screen must not be able to end a fourteen-hour print.
 
     ``controls=False`` drops Pause/Resume and Stop, for the user who does not
-    want to drive the printer from a lock screen. Dismiss survives that: the
-    card is sent with ``persistent`` so a swipe cannot remove it, which makes
-    this the only way to get rid of it, and a card with no way out is a trap
-    rather than a feature. It hides the card without touching the print, which
-    is what distinguishes it from Stop.
+    want to drive the printer from a lock screen. Dismiss survives that: a swipe
+    only removes the notification on screen, and the next refresh posts it again
+    under the same tag, so Dismiss is the only way to retire the card for the
+    rest of the print. It leaves the print alone, which is what distinguishes it
+    from Stop.
     """
     buttons: list[dict[str, Any]] = []
     if controls:
