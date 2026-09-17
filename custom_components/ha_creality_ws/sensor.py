@@ -1006,22 +1006,31 @@ async def async_setup_entry(hass, entry, async_add_entities):
     cached = coord.config_entry.data if coord.config_entry else None
 
     def _cached_or_live(key: str):
-        if cached and (key in cached or f"_cached_{key}" in cached):
-            # keys in entry use _cached_max_* naming; coordinator/live uses max* keys
-            if key == "max_bed_temp":
-                return cached.get("_cached_max_bed_temp")
-            if key == "max_nozzle_temp":
-                return cached.get("_cached_max_nozzle_temp")
-            if key == "max_box_temp":
-                return cached.get("_cached_max_chamber_temp", cached.get("_cached_max_box_temp"))
+        """The cached limit, or the live one when the cache has no value for it.
+
+        Per field, matching `KMaxTempSensor._read_cached_or_live` and
+        `add_chamber_entities`. The cache writer always *writes* these keys --
+        `d.get("maxBedTemp", <previous>)` -- so a key can be present and `None`,
+        and keying the fallback on presence alone meant this gate returned that
+        `None` and skipped creating the sensor for the rest of the session, even
+        though the entity itself would have served the live value.
+        """
         d = coord.data or {}
         if key == "max_bed_temp":
-            return d.get("maxBedTemp")
-        if key == "max_nozzle_temp":
-            return d.get("maxNozzleTemp")
-        if key == "max_box_temp":
-            return d.get("maxBoxTemp")
-        return None
+            live = d.get("maxBedTemp")
+            cached_value = cached.get("_cached_max_bed_temp") if cached else None
+        elif key == "max_nozzle_temp":
+            live = d.get("maxNozzleTemp")
+            cached_value = cached.get("_cached_max_nozzle_temp") if cached else None
+        elif key == "max_box_temp":
+            live = d.get("maxBoxTemp")
+            cached_value = (
+                cached.get("_cached_max_chamber_temp", cached.get("_cached_max_box_temp"))
+                if cached else None
+            )
+        else:
+            return None
+        return cached_value if cached_value is not None else live
 
     max_noz = _cached_or_live("max_nozzle_temp")
     max_bed = _cached_or_live("max_bed_temp")

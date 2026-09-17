@@ -51,6 +51,10 @@ def _loop():
     asyncio.set_event_loop(loop)
     yield
     loop.close()
+    # Closing does not uninstall it: the policy keeps handing this closed loop to
+    # anything that later calls `asyncio.get_event_loop()`, which makes the rest
+    # of the session depend on collection order.
+    asyncio.set_event_loop(None)
 
 
 class HassStub:

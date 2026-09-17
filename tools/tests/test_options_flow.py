@@ -29,6 +29,7 @@ requires_voluptuous = pytest.mark.skipif(
 
 _ABSENT = object()
 _RESTORE: dict[str, object] = {}
+_RESTORE_ATTRS: list[tuple[object, str, object]] = []
 
 
 def _stub(name: str, module) -> None:
@@ -38,6 +39,15 @@ def _stub(name: str, module) -> None:
 
 def teardown_module(_module):
     """Undo the process-wide stubs; they would otherwise leak to later modules."""
+    for obj, attr, previous in reversed(_RESTORE_ATTRS):
+        if previous is _ABSENT:
+            try:
+                delattr(obj, attr)
+            except AttributeError:
+                pass
+        else:
+            setattr(obj, attr, previous)
+    _RESTORE_ATTRS.clear()
     for name, old in _RESTORE.items():
         if old is _ABSENT:
             sys.modules.pop(name, None)
@@ -90,8 +100,12 @@ def _install_stubs():
     selector.NumberSelectorMode = MagicMock()
     _stub("homeassistant.helpers.selector", selector)
 
+    # The attribute on the shared parent module, recorded so teardown can undo it.
+    # `_RESTORE` covers `sys.modules` only, so without this a later
+    # `from homeassistant.helpers import selector` kept receiving this stub.
     helpers = sys.modules.get("homeassistant.helpers")
     if helpers is not None:
+        _RESTORE_ATTRS.append((helpers, "selector", getattr(helpers, "selector", _ABSENT)))
         helpers.selector = selector
 
 
@@ -297,7 +311,7 @@ def test_a_legacy_single_device_is_preselected_as_a_target():
 @requires_voluptuous
 def test_the_live_card_is_opt_in_for_upgrading_users():
     """Someone who only ticked "notify when completed" in an earlier release
-    must not be handed a persistent lock-screen card by an update."""
+    must not be handed a self-refreshing lock-screen card by an update."""
     handler = _handler(
         {CONF_NOTIFY_DEVICE: "notify.mobile_app_pixel", CONF_NOTIFY_COMPLETED: True}
     )

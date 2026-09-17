@@ -161,7 +161,10 @@ def _keys_used_by_the_card(source: str) -> set[str]:
     used = set(re.findall(r'_t\(\s*"([a-z0-9_]+)"', source))
 
     # `_t(`label_material_${s.name}`)` -- one key per ha-form schema field.
-    form_block = source.split("form.schema = [", 1)[1].split("]", 1)[0]
+    # `];` and not `]`, matching test_dialog_field_bounds_match_the_service: a
+    # nested array in any field (a selector's `options: [...]`, say) would end the
+    # slice early and silently drop every field after it from `used`.
+    form_block = source.split("form.schema = [", 1)[1].split("];", 1)[0]
     for field in re.findall(r'name:\s*"([a-z0-9_]+)"', form_block):
         used.add(f"label_material_{field}")
     # The colour row is hand-built rather than part of the schema.

@@ -72,7 +72,9 @@ sleep 120                        # covers the ack race
 end=$((SECONDS+480))
 while [ $SECONDS -lt $end ]; do
   sumbody=$(gh api "repos/$owner/$repo/issues/comments/$summary_id" --jq '.body' || echo FETCHFAIL)
-  busy=$(grep -c "review in progress by coderabbit.ai" <<<"$sumbody" || true)
+  # Both marker forms, per the note below: matching only one lets `busy` reach 0
+  # while the other is still on the summary, and the poller calls it complete.
+  busy=$(grep -cE "review in progress by coderabbit.ai|Come back again in a few minutes" <<<"$sumbody" || true)
   newrev=$(gh api "repos/$owner/$repo/pulls/$pr/reviews" --paginate --jq \
     "[.[] | select(.user.login|test(\"coderabbit\")) | select(.submitted_at > \"$trigger\")] | length" || echo 0)
   if [ "$busy" = "0" ] && [ "$newrev" != "0" ]; then
@@ -92,10 +94,10 @@ in practice is `review in progress by coderabbit.ai`. Match either.
 
 ```bash
 gh api graphql -F owner="$owner" -F repo="$repo" -F pr="$pr" -f query='
-query($owner:String!, $repo:String!, $pr:Int!, $cursor:String) {
+query($owner:String!, $repo:String!, $pr:Int!, $endCursor:String) {
   repository(owner:$owner, name:$repo) {
     pullRequest(number:$pr) {
-      reviewThreads(first:100, after:$cursor) {
+      reviewThreads(first:100, after:$endCursor) {
         pageInfo { hasNextPage endCursor }
         nodes {
           isResolved isOutdated
@@ -114,9 +116,18 @@ query($owner:String!, $repo:String!, $pr:Int!, $cursor:String) {
   | {id: .databaseId, path, line: (.line // .startLine // .originalLine), body}'
 ```
 
+The cursor variable **must** be named `$endCursor`: that is the name
+`gh api --paginate` injects, so a query declaring `$cursor` silently stops after
+the first 100 threads. PR #119 passed 100 mid-review, and the broken form returned
+exactly 100 of 113 while hiding an unhandled finding.
+
 Cross-check the count against `Actionable comments posted: N` in the summary
 comment, and expand the collapsed **nitpick** and **outside diff range** sections
 in the review body. Both hold real findings.
+
+A count alone is not enough: a review submits its comments over a minute or two,
+so a harvest fired the moment the poller returns can miss the tail of the batch.
+Re-run the harvest before declaring a round clean.
 
 ## Reply to an inline finding
 

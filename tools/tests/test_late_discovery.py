@@ -217,6 +217,33 @@ def test_a_field_that_gates_an_entity_can_also_trigger_discovery(field, monkeypa
         )
 
 
+def test_a_null_cached_maximum_does_not_suppress_the_max_temp_sensors(monkeypatch):
+    """The creation gate must fall back per field, like the entity that reads it.
+
+    The cache writer always writes these keys -- `d.get("maxBedTemp", <previous>)`
+    -- so a key can be present and `None`. Keying the fallback on presence alone
+    made the gate return that `None` and skip the sensor for the whole session,
+    even though `KMaxTempSensor._read_cached_or_live` would have served the live
+    value.
+    """
+    coord = _bare_coord(monkeypatch, {"maxNozzleTemp": 300, "maxBedTemp": 100})
+    run = _run_sensor_setup(coord, {
+        "_device_info_cached": True,
+        "_cached_max_nozzle_temp": None,
+        "_cached_max_bed_temp": None,
+    })
+
+    uids = {getattr(e, "_attr_unique_id", None) or getattr(e, "unique_id", None)
+            for e in run.added}
+    names = [type(e).__name__ for e in run.added]
+    assert any("max_nozzle_temp" in str(u) for u in uids), (
+        f"the nozzle maximum is live but its sensor was skipped; got {names}"
+    )
+    assert any("max_bed_temp" in str(u) for u in uids), (
+        f"the bed maximum is live but its sensor was skipped; got {names}"
+    )
+
+
 def test_targetboxtemp_is_a_gating_field():
     """number.py gates the chamber control on it, so it must also trigger.
 

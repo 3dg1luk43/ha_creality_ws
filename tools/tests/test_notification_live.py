@@ -746,10 +746,13 @@ def test_the_card_does_not_ask_for_things_that_do_not_work():
         assert key not in data, key
 
 
-def test_an_undismissable_card_always_carries_a_way_out():
-    """The invariant that keeps `persistent` honest. Printer controls are
-    opt-in, but if the card can survive a swipe and offers no button, the user
-    has a notification they cannot remove by any means."""
+def test_a_refreshing_card_always_carries_a_way_out():
+    """Printer controls are opt-in, but the card must always offer a way out.
+
+    A swipe only clears the notification on screen; the next refresh re-posts it
+    under the same tag. Without a button the user has a card that keeps coming
+    back for the rest of the print.
+    """
     for actions in (True, False):
         coord, hass = _coordinator()
         coord._notify_actions = actions
@@ -811,9 +814,11 @@ def test_the_finishing_soon_reminder_sits_beside_the_card():
 
 
 def test_the_terminal_banner_replaces_the_card_and_frees_it():
-    """Posted on the card's own tag so it supersedes it in place, and it has to
-    undo `persistent`: the print is over, so a notification the user cannot
-    swipe away would be left behind for good."""
+    """Posted on the card's own tag so it supersedes it in place.
+
+    The print is over, so the refreshing card has to stop being re-posted; the
+    banner taking over its tag is what frees it.
+    """
     coord, hass = _coordinator()
     _frame(coord, hass, **_printing(50))
     coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)

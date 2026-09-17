@@ -1,7 +1,7 @@
 import sys
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from conftest import install_stub_module, restore_stubs
+from conftest import drop_stub_module, install_stub_module, restore_stubs
 
 if "aiohttp" not in sys.modules:
     install_stub_module(__name__, "aiohttp", MagicMock())
@@ -45,7 +45,13 @@ else:
     sys.modules["homeassistant.components.camera"] = cam_mod
     sys.modules["homeassistant.components"].camera = cam_mod
 
-from custom_components.ha_creality_ws.camera import CrealityWebRTCCamera
+# Same reasoning as tools/tests/test_camera_webrtc_repro.py: camera.py binds
+# `aiohttp` and `go2rtc_client` at import time and both are stubbed here, so
+# whichever suite first caches the module records it for teardown.
+if "custom_components.ha_creality_ws.camera" not in sys.modules:
+    drop_stub_module(__name__, "custom_components.ha_creality_ws.camera")
+
+from custom_components.ha_creality_ws.camera import CrealityWebRTCCamera  # noqa: E402
 
 
 def teardown_module(_module):

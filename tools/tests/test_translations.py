@@ -71,20 +71,31 @@ def _string_literals(path: Path) -> list[str]:
     is the point: `f"Print '{job}' done"` is a hardcoded string.
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    docstrings: set[str] = set()
+    # The docstring *nodes*, not their values. Excluding by value would also
+    # exclude a runtime literal that happens to equal a docstring -- and these
+    # docstrings quote the very messages this test exists to catch, so the
+    # hardcoded copy would be waved through.
+    docstring_nodes: set[int] = set()
     for node in ast.walk(tree):
         if isinstance(
             node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
         ):
-            doc = ast.get_docstring(node, clean=False)
-            if doc:
-                docstrings.add(doc)
+            body = getattr(node, "body", None)
+            if not body:
+                continue
+            first = body[0]
+            if (
+                isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)
+            ):
+                docstring_nodes.add(id(first.value))
     return [
         node.value
         for node in ast.walk(tree)
         if isinstance(node, ast.Constant)
         and isinstance(node.value, str)
-        and node.value not in docstrings
+        and id(node) not in docstring_nodes
     ]
 
 
