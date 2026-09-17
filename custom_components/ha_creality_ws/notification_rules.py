@@ -697,12 +697,6 @@ def build_live_payload(
             # Ticks on-device, so the countdown costs no further pushes.
             data["chronometer"] = True
             data["when"] = when
-            # Without this Android runs the chronometer *upwards* from `when`.
-            # With `when` in the future that renders as an elapsed time from a
-            # moment that has not happened -- a card reading "04:27" for a print
-            # with four and a half hours left, which looks like a clock and is
-            # neither a clock nor a countdown.
-            data["countdown"] = True
         else:
             # Stopped explicitly rather than by omitting the key: whether
             # dropping it clears a chronometer already running on the phone is

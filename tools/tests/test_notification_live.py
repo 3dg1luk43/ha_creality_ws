@@ -1080,14 +1080,13 @@ def test_the_card_is_dismissed_before_the_banner_not_after():
     assert len(sequence) == 2
 
 
-def test_the_countdown_direction_is_set_or_android_counts_upwards():
-    """`chronometer` with `when` in the future counts *up* without this, which
-    renders as an elapsed time from a moment that has not happened -- a card
-    reading "04:27" for a print with four and a half hours left."""
+def test_the_chronometer_is_given_an_absolute_future_deadline():
+    """`when` is the epoch second the print is expected to end, and the
+    companion app counts down to it on-device -- which is what makes the
+    remaining time move between pushes rather than only at one."""
     coord, hass = _coordinator()
     data = _live(_frame(coord, hass, **_printing(20, printLeftTime=3600)))[0]["data"]
     assert data["chronometer"] == "true"
-    assert data["countdown"] == "true"
     assert int(data["when"]) > 1_700_000_000
 
 
