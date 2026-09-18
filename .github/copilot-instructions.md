@@ -8,7 +8,7 @@ These instructions tell GitHub Copilot Chat how to work in this repo. Assume cha
 - Purpose: Low-latency local WebSocket telemetry and control for Creality K-series and compatible printers. Bundles a dependency-free Lovelace card.
 - Connectivity: Local WebSocket (default ws://<host>:9999) with push updates; no polling.
 - Discovery: Zeroconf matches for names containing creality/k1/k2.
-- Python target: 3.11 (ruff target-version py311).
+- Python target: 3.11, matching the CI workflow. No formatter or linter is configured; see "Dev quick checks".
 
 ## Repo layout quick map
 
@@ -17,10 +17,10 @@ These instructions tell GitHub Copilot Chat how to work in this repo. Assume cha
 - `custom_components/ha_creality_ws/ws_client.py` – Resilient WebSocket client, heartbeat, jittered backoff, periodic GETs
 - `custom_components/ha_creality_ws/sensor.py` – Sensors (status, temps, progress, positions, etc.)
 - `custom_components/ha_creality_ws/button.py` – Pause/Resume/Stop controls
-- `custom_components/ha_creality_ws/switch.py` – Light switch and similar
+- `custom_components/ha_creality_ws/light.py` – Chamber light; there is no switch platform
 - `custom_components/ha_creality_ws/number.py` – Number entities (speed/flow/targets; K2 box control only)
 - `custom_components/ha_creality_ws/camera.py` – MJPEG (K1) and WebRTC (K2) camera implementations
-- `custom_components/ha_creality_ws/image.py` – Image platform exposing current print preview (K1 family)
+- `custom_components/ha_creality_ws/image.py` – Image platform exposing current print preview (attempted for every model; see the Image section)
 - `custom_components/ha_creality_ws/light.py` – Light platform (printer chamber light)
 - `custom_components/ha_creality_ws/fan.py` – Fan platform (model/case/side fans)
 - `custom_components/ha_creality_ws/config_flow.py` – UI config + Options (power switch binding, camera mode, go2rtc)
@@ -28,7 +28,7 @@ These instructions tell GitHub Copilot Chat how to work in this repo. Assume cha
 - `custom_components/ha_creality_ws/utils.py` – Helpers (numeric coercion, parsing, model detection)
 - `custom_components/ha_creality_ws/services.yaml` – Custom HA services
 - `custom_components/ha_creality_ws/manifest.json` – HA manifest (requirements, version, zeroconf)
-- `tools/test_files/deploy_to_ha.sh` – Dev-to-HA deploy script with backup and restart
+- `tools/test_files/deploy_to_ha.sh` – Dev-to-HA deploy script with backup and restart (gitignored; local only)
 
 ## Design anchors to preserve
 
@@ -80,17 +80,17 @@ Use `ModelDetection` which reads both `model` and `modelVersion` codes.
 
 ## Image (print preview) implementation
 
-- K1 family:
+- Every model, no model gate:
   - Expose an `image` entity named "Current Print Preview" with unique_id `<host>-current_print_preview`.
-  - Fetch PNG from `http://<host>/downloads/original/current_print_image.png` using HA's `async_get_clientsession` with short timeouts.
-  - Show content only for statuses: self-testing, printing, completed (derive from the same telemetry/status rules as `PrintStatusSensor`).
+  - Fetch PNG from `http(s)://<host>/downloads/original/current_print_image.png` using HA's `async_get_clientsession` with short timeouts.
+  - Attempt it for **all** models. Some non-K1 printers serve the same path, and gating on `ModelDetection` hid the preview from them (removed in 43c6668).
+  - Show content for the statuses in `PREVIEW_PRINT_STATES` (`BUSY_PRINT_STATES` plus `completed`, i.e. printing, paused, processing, self-testing, completed), derived through `derive_activity_state` so a stale error code does not hide the preview.
   - When not eligible or fetch fails, return a built-in neutral PNG placeholder; cache last successful image to avoid flashing.
-- Other models:
-  - Keep the entity as a placeholder; do not fetch until we confirm model-specific URLs via diagnostics.
 - Diagnostics:
   - Cache all accessed HTTP URLs on the coordinator and include them in the diagnostic dump as `http_urls_accessed`.
 - Entity attributes:
-  - Expose `preview_reason` (ok | not_printing | unsupported_model | fetch_failed) and `source_url` to aid support.
+  - Expose `preview_reason` (ok | not_printing | fetch_failed) and `source_url` to aid support.
+  - The preview URL is attempted for every model, so there is no model-gated reason value: some non-K1 printers serve the same path, and gating on the model hid the preview from them.
 
 ## Startup and caching
 
@@ -114,9 +114,9 @@ Use `ModelDetection` which reads both `model` and `modelVersion` codes.
 
 ## Dev quick checks
 
-- Lint: ruff configured in repo
+- Lint: **nothing is configured**. `pyproject.toml` holds only `[tool.pytest.ini_options]`, there is no `ruff.toml`/`.flake8`/`.pylintrc`, and no workflow runs a linter. A `.ruff_cache/` directory is someone's ad-hoc run, not repo configuration. Do not describe a formatting change as needed to pass a lint check.
 - Manual validation: run HA with the component and observe logs/telemetry
-- Deployment: `tools/deploy_to_ha.sh --run` syncs to the HA test instance
+- Deployment: `tools/test_files/deploy_to_ha.sh --run` syncs to the HA test instance. `tools/test_files/` is gitignored, so this script is a local maintainer helper and is not present in a clone.
  - Diagnostic samples: sample WebSocket diagnostic JSONs are stored under `tools/test_files/ws_diagnostic_dumps/` for reference when adding or validating fields
 
 ## PR checklist (for Copilot-generated changes)
@@ -130,7 +130,7 @@ Use `ModelDetection` which reads both `model` and `modelVersion` codes.
 - Update README when user-facing behavior changes
 - Expose new values via sensors: add a spec to `SPECS` or a dedicated sensor class. Ensure zeroing respects `_should_zero()` and that attributes/units are correct.
 - For image/preview features: gate content by status; use placeholders when unavailable; update diagnostics with accessed URLs.
-- For new controls: add a Button or Switch platform entity, call `KCoordinator.request_*` or `KClient.send_set_retry()` as appropriate.
+- For new controls: add an entity on one of the platforms in `PLATFORMS` (sensor, camera, button, number, fan, light, image), and call `KCoordinator.request_*` or `KClient.send_set_retry()` as appropriate.
 - For options: wire through `OptionsFlowHandler` using `selector` and have the coordinator consume the option.
 - For diagnostic services: Use WARNING level logging for visibility, return data in service response for UI access, use async-safe file operations.
 
@@ -139,7 +139,7 @@ Use `ModelDetection` which reads both `model` and `modelVersion` codes.
 Do
 - Keep async, typed, minimal changes.
 - Reuse helpers in `utils.py` and zeroing via `KEntity`.
-- Add ruff-compliant imports ordering and formatting.
+- Match the surrounding file's existing import order and line length. Do not reformat untouched lines: with no linter configured there is no standard to converge on, and long signature lines are the norm across the platform modules.
 - Include concise docstrings for public classes/methods.
 
 Don’t
@@ -156,8 +156,8 @@ Don’t
   - Light chip now responds instantly to Power changes (show/hide) without reload; uses optimistic overrides.
   - Ensured Power chip styling reflects actual entity state only when state is known.
 - Image platform
-  - New `image.py` exposing "Current Print Preview" for K1 family.
-  - Returns placeholder when not printing/unsupported/fetch fails; records `http_urls_accessed` for diagnostics.
+  - New `image.py` exposing "Current Print Preview". The fetch is attempted for every model; the K1-only gate it shipped with was removed in 43c6668.
+  - Returns placeholder when not printing or the fetch fails; records `http_urls_accessed` for diagnostics.
   - Fixed ImageEntity initialization (`ImageEntity.__init__(self, hass)`) and updates `image_last_updated` on new bytes.
 - Diagnostics
   - Expanded diagnostic dump with accessed HTTP URLs to help confirm model-specific paths.

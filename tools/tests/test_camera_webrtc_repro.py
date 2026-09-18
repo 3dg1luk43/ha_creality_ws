@@ -1,14 +1,16 @@
 import sys
 from unittest.mock import MagicMock, AsyncMock, patch
 
+from conftest import install_stub_attr, install_stub_module, restore_stubs
+
 if "aiohttp" not in sys.modules:
-    sys.modules["aiohttp"] = MagicMock()
+    install_stub_module(__name__, "aiohttp", MagicMock())
 
 # Ensure go2rtc_client and aiohttp are mocked if not already
 if "go2rtc_client" not in sys.modules:
     g2_mod = MagicMock()
-    sys.modules["go2rtc_client"] = g2_mod
-    sys.modules["go2rtc_client.exceptions"] = MagicMock()
+    install_stub_module(__name__, "go2rtc_client", g2_mod)
+    install_stub_module(__name__, "go2rtc_client.exceptions", MagicMock())
 
 # Mock homeassistant.components.camera
 if "homeassistant.components" in sys.modules:
@@ -20,8 +22,11 @@ if "homeassistant.components" in sys.modules:
                 pass
         cam_mod.Camera = MockCamera
         cam_mod.CameraEntityFeature = MagicMock()
-        sys.modules["homeassistant.components.camera"] = cam_mod
-        components_mod.camera = cam_mod
+        install_stub_module(__name__, "homeassistant.components.camera", cam_mod)
+        # The attribute too: `sys.modules` and `homeassistant.components.camera`
+        # are two separate homes, and restoring only the first left
+        # `from homeassistant.components import camera` handing out this stub.
+        install_stub_attr(__name__, components_mod, "camera", cam_mod)
 else:
     mock_ha = MagicMock()
     sys.modules["homeassistant"] = mock_ha
@@ -36,7 +41,11 @@ else:
     sys.modules["homeassistant.components.camera"] = cam_mod
     sys.modules["homeassistant.components"].camera = cam_mod
 
-from custom_components.ha_creality_ws.camera import CrealityWebRTCCamera
+# Left installed for the session; see the note in test_camera_stream_config.py.
+# This suite patches `custom_components.ha_creality_ws.camera` attributes by
+# string target, so the module object it resolves has to be the same one
+# `CrealityWebRTCCamera` came from.
+from custom_components.ha_creality_ws.camera import CrealityWebRTCCamera  # noqa: E402
 
 def test_webrtc_offer_500_error_repro():
     import asyncio
@@ -85,3 +94,7 @@ def test_webrtc_offer_500_error_repro():
         assert "go2rtc error" in msg["message"]
         mock_go2rtc_client.streams.delete.assert_awaited_once_with("test_stream")
         assert camera._stream_name is None
+
+
+def teardown_module(_module):
+    restore_stubs(__name__)

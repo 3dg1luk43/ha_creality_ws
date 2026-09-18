@@ -7,11 +7,14 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import importlib.util
 import sys
 import types
 from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import patch
+
+from conftest import install_stub_module, restore_stubs
 
 # ---------------------------------------------------------------------------
 # Bootstrap: make sure the real ws_client module is importable without HA
@@ -20,8 +23,11 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# Remove the conftest stub so we load the real module
-sys.modules.pop("custom_components.ha_creality_ws.ws_client", None)
+# The conftest stub at `custom_components.ha_creality_ws.ws_client` is left in
+# place. The real implementation is loaded below under the separate name
+# `ha_creality_ws.ws_client`, so dropping the canonical one bought nothing -- and
+# it happened at *collection* time and was only undone in `teardown_module`, so
+# any module collected in between imported the real client instead of the stub.
 
 # Provide minimal stubs for any HA imports the module might pull in
 for mod_name in [
@@ -32,10 +38,16 @@ for mod_name in [
     "homeassistant.helpers.dispatcher",
 ]:
     if mod_name not in sys.modules:
-        sys.modules[mod_name] = types.ModuleType(mod_name)
+        # Through the helper, so `restore_stubs` below can undo it. A direct
+        # `sys.modules` write is invisible to it and outlives this module.
+        install_stub_module(__name__, mod_name, types.ModuleType(mod_name))
 
-# Stub out websockets and its submodules so the real package isn't required
-if "websockets" not in sys.modules:
+# Stub out websockets and its submodules so the real package isn't required.
+# Only substitute when it is genuinely absent: the tests below patch via
+# patch.object, so they work against the real package too, and installing the
+# stub over a real install would break any other test that needs a working
+# client (test_cfs_simulator.py talks to the simulator over a real socket).
+if "websockets" not in sys.modules and importlib.util.find_spec("websockets") is None:
     _ws_stub = types.ModuleType("websockets")
     _ws_stub.connect = None  # will be patched per-test
 
@@ -51,7 +63,7 @@ if "websockets" not in sys.modules:
     _ws_exceptions.ConnectionClosedOK = ConnectionClosedOK
     _ws_exceptions.ConnectionClosed = ConnectionClosed
     _ws_stub.exceptions = _ws_exceptions
-    sys.modules["websockets.exceptions"] = _ws_exceptions
+    install_stub_module(__name__, "websockets.exceptions", _ws_exceptions)
 
     # websockets.client (referenced in type annotation)
     _ws_client_sub = types.ModuleType("websockets.client")
@@ -61,9 +73,9 @@ if "websockets" not in sys.modules:
 
     _ws_client_sub.ClientConnection = ClientConnection
     _ws_stub.client = _ws_client_sub
-    sys.modules["websockets.client"] = _ws_client_sub
+    install_stub_module(__name__, "websockets.client", _ws_client_sub)
 
-    sys.modules["websockets"] = _ws_stub
+    install_stub_module(__name__, "websockets", _ws_stub)
 
 # Now import the real module
 import importlib.util
@@ -117,7 +129,7 @@ def _make_failing_connect(call_counter: list[int], exc: Exception | None = None)
 
 
 # ---------------------------------------------------------------------------
-# Test 1 — force_connect=True, power ON  →  connect IS attempted
+# Test 1 -- force_connect=True, power ON  →  connect IS attempted
 # ---------------------------------------------------------------------------
 def test_force_connect_attempts_connection_when_power_on():
     """With _force_connect=True and power ON, the loop must call websockets.connect."""
@@ -156,7 +168,7 @@ def test_force_connect_attempts_connection_when_power_on():
 
 
 # ---------------------------------------------------------------------------
-# Test 2 — force_connect=True, power OFF  →  connect is NOT attempted
+# Test 2 -- force_connect=True, power OFF  →  connect is NOT attempted
 # ---------------------------------------------------------------------------
 def test_force_connect_skips_connection_when_power_off():
     """With _force_connect=True but power OFF, the loop must NOT attempt to connect."""
@@ -191,7 +203,7 @@ def test_force_connect_skips_connection_when_power_off():
 
 
 # ---------------------------------------------------------------------------
-# Test 3 — force_connect=False, power ON  →  connect IS attempted normally
+# Test 3 -- force_connect=False, power ON  →  connect IS attempted normally
 # ---------------------------------------------------------------------------
 def test_normal_loop_connects_when_power_on():
     """Baseline: without any force flag, a normal loop iteration attempts to connect."""
@@ -224,3 +236,7 @@ def test_normal_loop_connects_when_power_on():
         )
 
     asyncio.run(run())
+
+
+def teardown_module(_module):
+    restore_stubs(__name__)

@@ -1,5 +1,5 @@
 [tool.pytest.ini_options]
 minversion = "7.0"
-testpaths = ["tools/tests", "tests"]
+testpaths = ["tools/tests"]
 python_files = "test_*.py"
 addopts = "-q"

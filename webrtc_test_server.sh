@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# webrtc_test_server.sh — start/stop the Creality test server in the background
+# webrtc_test_server.sh -- start/stop the Creality test server in the background
 # for WebRTC camera testing.
 #
 # Uses a WebRTC-capable model (k2plus) and an absurdly long print duration so the

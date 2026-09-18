@@ -131,10 +131,29 @@ function fmtTimeLeft(seconds) {
   if (m > 0) return `${m}:${String(sec).padStart(2, "0")}`;
   return `${sec}s`;
 }
+// Every state utils.derive_print_state can return. Mirrored here so a state
+// added on the Python side cannot silently fall through to a default, and so
+// impossible states cannot creep back in -- test_printer_card_layout.py
+// cross-checks this list against derive_print_state.
+const PRINT_STATES = new Set([
+  "off",
+  "unknown",
+  "error",
+  "self-testing",
+  "completed",
+  "paused",
+  "stopped",
+  "printing",
+  "processing",
+  "idle",
+]);
+
 function computeIcon(status) {
   const st = normStr(status);
   if (["off", "unknown", "stopped"].includes(st)) return mdi("printer-3d-off");
-  if (["printing", "resuming", "pausing", "paused"].includes(st)) return mdi("printer-3d-nozzle");
+  // `processing` is the warm-up before `printing` and is in BUSY_PRINT_STATES,
+  // so it gets the active icon too -- computeColor already treats it as active.
+  if (["printing", "paused", "processing"].includes(st)) return mdi("printer-3d-nozzle");
   if (st === "error") return mdi("close-octagon");
   if (st === "self-testing") return mdi("cogs");
   return mdi("printer-3d");
@@ -142,9 +161,9 @@ function computeIcon(status) {
 function computeColor(status) {
   const st = normStr(status);
   if (["off", "unknown", "stopped"].includes(st)) return "var(--secondary-text-color)";
-  if (["paused", "pausing"].includes(st)) return "#fc6d09";
+  if (st === "paused") return "#fc6d09";
   if (st === "error") return "var(--error-color)";
-  if (["printing", "resuming", "processing"].includes(st)) return "var(--primary-color)";
+  if (["printing", "processing"].includes(st)) return "var(--primary-color)";
   if (["idle", "completed"].includes(st)) return "var(--success-color, #4caf50)";
   if (st === "self-testing") return "var(--info-color, #2196f3)";
   return "var(--secondary-text-color)";
@@ -472,7 +491,9 @@ class KPrinterCard extends HTMLElement {
         // so an accidental tap can't kill a running job.
         if (this._hass?.states?.[eid]?.state === "on") {
           const st = normStr(this._hass?.states?.[this._cfg.status]?.state);
-          const printing = ["printing", "resuming", "pausing", "paused"].includes(st);
+          // `processing` means a job is on the bed and starting, so it needs
+          // the stronger warning as much as a running print does.
+          const printing = ["printing", "paused", "processing"].includes(st);
           const msg = printing ? this._t("confirm_power_off_printing") : this._t("confirm_power_off");
           if (!confirm(msg)) return;
         }
@@ -507,8 +528,8 @@ class KPrinterCard extends HTMLElement {
 
   connectedCallback() {
     // The card may be re-attached without setConfig firing again (e.g. when Lovelace
-    // moves the element between containers). _render() — which normally wires up the
-    // telemetry observer — only runs from setConfig/hass paths, so reinstate the
+    // moves the element between containers). _render() -- which normally wires up the
+    // telemetry observer -- only runs from setConfig/hass paths, so reinstate the
     // observer here whenever a previously-rendered card returns to the DOM.
     if (this._root) {
       this._setupTelemetrySizeObserver();
@@ -586,7 +607,7 @@ class KPrinterCard extends HTMLElement {
     const lastDispatch = _lastCardRebuildDispatch.get(cardKey) || 0;
     // Defer the _cardSize update until the throttle clears: otherwise a throttled
     // call would record the new size locally without telling Lovelace, and the
-    // next measurement would short-circuit on the equality check above — leaving
+    // next measurement would short-circuit on the equality check above -- leaving
     // the rebuild permanently suppressed.
     if (now - lastDispatch < LL_REBUILD_MIN_INTERVAL_MS) return;
     _lastCardRebuildDispatch.set(cardKey, now);
@@ -671,11 +692,11 @@ class KPrinterCard extends HTMLElement {
     const gObj = (eid) => this._hass?.states?.[eid];
     const gNum = (eid) => Number(g(eid));
     const fmtState = (st) => {
-      if (!st) return "—";
+      if (!st) return "-";
       const v = st.state;
-      if (v === undefined || v === null) return "—";
+      if (v === undefined || v === null) return "-";
       const s = String(v);
-      if (s === "unknown" || s === "unavailable") return "—";
+      if (s === "unknown" || s === "unavailable") return "-";
       // Prefer HA's built-in formatter to honor per-entity precision and units
       if (this._hass && typeof this._hass.formatEntityState === 'function') {
         try { return this._hass.formatEntityState(st); } catch (_) { }
@@ -712,8 +733,11 @@ class KPrinterCard extends HTMLElement {
     const powerState = g(resolvedPower);
 
     const st = normStr(status);
-    const isPrinting = ["printing", "resuming", "pausing"].includes(st);
+    const isPrinting = st === "printing";
     const isPaused = st === "paused";
+    // A job exists and is progressing. Pause stays restricted to `printing`
+    // and Stop to the states below; this is only the visual presentation.
+    const isActivePrint = ["printing", "paused", "processing"].includes(st);
     const showStop = isPrinting || isPaused || st === "self-testing";
     // Show Light chip only when the light entity exists in HA state and power (if configured) is not OFF
     const showLight = Boolean(resolvedLight && this._hass?.states?.[resolvedLight]) && !(resolvedPower && powerState === "off");
@@ -723,7 +747,7 @@ class KPrinterCard extends HTMLElement {
     // Title/status
     this._root.getElementById("name").textContent = name;
     const proper = (!status || status === "unavailable" || status === "unknown") ? this._t("status_unknown") : (fmtState(gObj(this._cfg.status)) || status[0].toUpperCase() + status.slice(1));
-    const sec = (isPrinting || isPaused) ? `${pct}% ${proper}` : proper;
+    const sec = isActivePrint ? `${pct}% ${proper}` : proper;
     this._root.getElementById("secondary").textContent = sec;
 
     // Icon & ring
@@ -733,7 +757,7 @@ class KPrinterCard extends HTMLElement {
     const iconColor = theme.status_icon === "auto" ? computeColor(status) : theme.status_icon;
     iconEl.style.setProperty("--icon-color", iconColor);
     const ring = this._root.getElementById("ring");
-    ring.style.setProperty("--ring-pct", isPrinting || isPaused ? `${pct}%` : "0%");
+    ring.style.setProperty("--ring-pct", isActivePrint ? `${pct}%` : "0%");
     const ringColor = theme.progress_ring === "auto" ? computeColor(status) : theme.progress_ring;
     ring.style.setProperty("--ring-color", ringColor);
 
@@ -834,14 +858,14 @@ class KPrinterCard extends HTMLElement {
     this._root.getElementById("bed").textContent = bedStr;
     this._root.getElementById("box").textContent = boxStr;
     this._root.getElementById("time").textContent = fmtTimeLeft(timeLeft);
-    this._root.getElementById("layers").textContent = `${layer || "—"}/${totalLayers || "—"}`;
+    this._root.getElementById("layers").textContent = `${layer || "-"}/${totalLayers || "-"}`;
 
     // Toggle Chamber Temp visibility.
     // Hide when explicitly hidden, when no chamber entity is configured, or when
     // the configured entity does not exist in HA (printers without a chamber,
     // e.g. Ender 3 V3 KE) so we don't render a stray thermometer icon that
     // offsets the adjacent telemetry. A configured-but-unavailable entity stays
-    // visible and shows "—", matching the nozzle/bed pills.
+    // visible and shows "-", matching the nozzle/bed pills.
     const boxPill = this._root.getElementById("box-pill");
     if (boxPill) {
       const boxConfigured = Boolean(this._cfg.box) && Boolean(this._hass?.states?.[this._cfg.box]);
