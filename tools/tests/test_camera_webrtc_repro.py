@@ -1,7 +1,7 @@
 import sys
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from conftest import install_stub_module, restore_stubs
+from conftest import install_stub_attr, install_stub_module, restore_stubs
 
 if "aiohttp" not in sys.modules:
     install_stub_module(__name__, "aiohttp", MagicMock())
@@ -23,7 +23,10 @@ if "homeassistant.components" in sys.modules:
         cam_mod.Camera = MockCamera
         cam_mod.CameraEntityFeature = MagicMock()
         install_stub_module(__name__, "homeassistant.components.camera", cam_mod)
-        components_mod.camera = cam_mod
+        # The attribute too: `sys.modules` and `homeassistant.components.camera`
+        # are two separate homes, and restoring only the first left
+        # `from homeassistant.components import camera` handing out this stub.
+        install_stub_attr(__name__, components_mod, "camera", cam_mod)
 else:
     mock_ha = MagicMock()
     sys.modules["homeassistant"] = mock_ha

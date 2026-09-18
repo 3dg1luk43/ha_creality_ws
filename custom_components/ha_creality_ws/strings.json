@@ -246,7 +246,7 @@
       "fields": {
         "device_id": {
           "name": "Device",
-          "description": "The printer to write to."
+          "description": "The printer(s) to write to."
         },
         "box_id": {
           "name": "Box ID",

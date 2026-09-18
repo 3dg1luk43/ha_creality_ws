@@ -72,7 +72,11 @@ logging.basicConfig(
 LOGGER = logging.getLogger("creality_printer_test_server")
 
 # Fan control the integration sends over `gcodeCmd`: M106 P<channel> S<0-255>
-_M106_RE = re.compile(r"^M106(?:\s+P(?P<p>\d+))?(?:\s+S(?P<s>\d+(?:\.\d+)?))?", re.IGNORECASE)
+# `\b` after the opcode is load-bearing: every group after it is optional, so
+# without it `M1061 S30` or `M1069` matched with no P and no S, and handle_gcode
+# then set channel 0 to 0% and marked it manual -- pinning the model fan off for
+# the rest of the run while reporting the command as handled.
+_M106_RE = re.compile(r"^M106\b(?:\s+P(?P<p>\d+))?(?:\s+S(?P<s>\d+(?:\.\d+)?))?", re.IGNORECASE)
 
 
 # -----------------------------------------------------------------------------

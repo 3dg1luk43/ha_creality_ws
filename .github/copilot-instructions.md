@@ -157,7 +157,7 @@ Don’t
   - Ensured Power chip styling reflects actual entity state only when state is known.
 - Image platform
   - New `image.py` exposing "Current Print Preview". The fetch is attempted for every model; the K1-only gate it shipped with was removed in 43c6668.
-  - Returns placeholder when not printing/unsupported/fetch fails; records `http_urls_accessed` for diagnostics.
+  - Returns placeholder when not printing or the fetch fails; records `http_urls_accessed` for diagnostics.
   - Fixed ImageEntity initialization (`ImageEntity.__init__(self, hass)`) and updates `image_last_updated` on new bytes.
 - Diagnostics
   - Expanded diagnostic dump with accessed HTTP URLs to help confirm model-specific paths.

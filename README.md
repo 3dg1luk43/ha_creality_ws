@@ -340,8 +340,9 @@ over the same WebSocket, so no extra configuration is needed. The printer's own
 temperature-driven fan control keeps running; a manual command overrides it until
 the printer decides otherwise.
 
-Equivalent `number.*_fan` entities also exist, but they are legacy and disabled by
-default; prefer the `fan` entities.
+The legacy `number.*_fan` entities are **gone** as of 0.9.8. If you are upgrading
+from an older release and had automations pointing at them, move those to the
+`fan` entities above.
 
 Example: force the case fan to full when the chamber gets too hot.
 

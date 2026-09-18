@@ -69,7 +69,13 @@ included review will be available in N minutes` in the same comment: triggered, 
 actually run. Grep the ack for `rate limited` and wait N minutes rather than polling.
 
 Capture the trigger timestamp (`date -u +%FT%TZ`) **before** posting the retrigger, and
-note the summary comment id once per PR.
+note the summary comment id once per PR. Capture the newest issue-comment id before
+posting too -- the ack is identified by id rather than timestamp:
+
+```bash
+last_comment_id=$(gh api "repos/$owner/$repo/issues/$pr/comments" --paginate \
+  --jq '.[].id' | sort -n | tail -1)
+```
 
 Wait in the background (single notification on exit, ~9 min cap, re-arm if it times out).
 Do not use `Monitor` for this, and do not foreground-sleep.
@@ -88,13 +94,14 @@ sleep 120                        # covers the ack race
 # fetch into "no rate limit", which is the wrong default. Re-reading it each
 # iteration catches a late ack and costs one request per 30s.
 check_rate_limit() {
-  local bound ack wait_min
-  # Bounded to this trigger's own ack, which lands within a couple of minutes.
-  # An unbounded "everything after $trigger" window also matches the *next*
-  # round's refusal, so it reports a succeeded round as rate limited.
-  bound=$(date -u -d "$trigger + 5 minutes" +%FT%TZ) || return 0
+  local ack wait_min
+  # Keyed on the comment id, not the timestamp. `date -u +%FT%TZ` has one-second
+  # precision, so an ack posted in the same second as the trigger compares equal
+  # and a strict `>` misses it -- and relaxing to `>=` would then match a
+  # *pre-existing* comment from that same second. Ids are monotonic per repo, so
+  # "newer than the last comment before I posted" is exact.
   ack=$(gh api "repos/$owner/$repo/issues/$pr/comments" --paginate --jq \
-    "[.[] | select(.user.login|test(\"coderabbit\")) | select(.created_at > \"$trigger\") | select(.created_at < \"$bound\")] | .[].body") || return 0
+    "[.[] | select(.user.login|test(\"coderabbit\")) | select(.id > $last_comment_id)] | .[].body") || return 0
   grep -qi "rate limited" <<<"$ack" || return 0
   wait_min=$(grep -oiE "available in [0-9]+ minute" <<<"$ack" | grep -oE "[0-9]+" | head -1)
   echo "RATE-LIMITED: no review started; retry in ${wait_min:-20} min"

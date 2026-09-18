@@ -379,6 +379,75 @@ helpers_entity_mod.EntityCategory = EntityCategory
 setattr(helpers_mod, "entity", helpers_entity_mod)
 sys.modules["homeassistant.helpers.entity"] = helpers_entity_mod
 
+# --- MOCK homeassistant.components.sensor and homeassistant.const ---
+# Session-stable, in conftest rather than in each suite. Three suites import
+# `custom_components.ha_creality_ws.sensor`, which binds these at import time, so
+# a suite that installed its own and then restored them at teardown left the
+# cached sensor module holding classes and constants nothing else could see. One
+# definition here means every importer gets the same objects and there is nothing
+# to restore. The per-suite installs are all guarded and become no-ops.
+components_sensor_mod = types.ModuleType("homeassistant.components.sensor")
+
+
+class SensorEntity:  # pragma: no cover - a base class only
+    pass
+
+
+class _StrEnumStub(str, enum.Enum):
+    """Enough of an enum for attribute access and equality in assertions."""
+
+
+class SensorDeviceClass(_StrEnumStub):
+    TEMPERATURE = "temperature"
+    HUMIDITY = "humidity"
+    DURATION = "duration"
+    DISTANCE = "distance"
+
+
+class SensorStateClass(_StrEnumStub):
+    MEASUREMENT = "measurement"
+    TOTAL = "total"
+    TOTAL_INCREASING = "total_increasing"
+
+
+components_sensor_mod.SensorEntity = SensorEntity
+components_sensor_mod.SensorDeviceClass = SensorDeviceClass
+components_sensor_mod.SensorStateClass = SensorStateClass
+sys.modules["homeassistant.components.sensor"] = components_sensor_mod
+setattr(components_mod, "sensor", components_sensor_mod)
+
+const_mod_ha = types.ModuleType("homeassistant.const")
+const_mod_ha.PERCENTAGE = "%"
+const_mod_ha.EntityCategory = EntityCategory
+# `__init__.py` reads this to enforce MINIMUM_HA_VERSION at setup. Kept well past
+# the minimum so the version gate is satisfied by default; the suites that test
+# the gate itself patch it.
+const_mod_ha.__version__ = "2099.1.0"
+
+
+class UnitOfTemperature(_StrEnumStub):
+    CELSIUS = "°C"
+    FAHRENHEIT = "°F"
+
+
+class UnitOfLength(_StrEnumStub):
+    MILLIMETERS = "mm"
+    CENTIMETERS = "cm"
+    METERS = "m"
+
+
+class UnitOfTime(_StrEnumStub):
+    SECONDS = "s"
+    MINUTES = "min"
+    HOURS = "h"
+
+
+const_mod_ha.UnitOfTemperature = UnitOfTemperature
+const_mod_ha.UnitOfLength = UnitOfLength
+const_mod_ha.UnitOfTime = UnitOfTime
+sys.modules["homeassistant.const"] = const_mod_ha
+setattr(ha_mod, "const", const_mod_ha)
+
 # --- MOCK custom_components.ha_creality_ws.ws_client ---
 ws_client_mod = types.ModuleType("custom_components.ha_creality_ws.ws_client")
 import asyncio, time, contextlib  # noqa: E401
@@ -445,6 +514,7 @@ def fake_config_entry(entry_id: str = "entry1", options=None, data=None):
 # from its teardown_module.
 _ABSENT = object()
 _MODULE_STUBS: dict[str, list] = {}
+_ATTR_STUBS: dict[str, list] = {}
 
 
 def install_stub_module(owner: str, name: str, module) -> None:
@@ -459,8 +529,30 @@ def drop_stub_module(owner: str, name: str) -> None:
     sys.modules.pop(name, None)
 
 
+def install_stub_attr(owner: str, obj, attr: str, value) -> None:
+    """Set `obj.attr`, remembering what `owner` displaced.
+
+    A companion to `install_stub_module` for the *attribute* half of a stub. A
+    submodule has two homes -- `sys.modules["pkg.sub"]` and `pkg.sub` -- and
+    restoring only the first leaves `from pkg import sub` handing out the stub
+    for the rest of the session. That leak has been found in five suites now.
+    """
+    _ATTR_STUBS.setdefault(owner, []).append(
+        (obj, attr, getattr(obj, attr, _ABSENT))
+    )
+    setattr(obj, attr, value)
+
+
 def restore_stubs(owner: str) -> None:
     """Put back everything `owner` installed or dropped, newest first."""
+    for obj, attr, old in reversed(_ATTR_STUBS.pop(owner, [])):
+        if old is _ABSENT:
+            try:
+                delattr(obj, attr)
+            except AttributeError:
+                pass
+        else:
+            setattr(obj, attr, old)
     for name, old in reversed(_MODULE_STUBS.pop(owner, [])):
         if old is _ABSENT:
             sys.modules.pop(name, None)

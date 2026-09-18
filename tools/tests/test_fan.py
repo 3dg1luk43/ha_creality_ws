@@ -152,6 +152,36 @@ def _test_server_source() -> str:
     ).read_text()
 
 
+def test_the_simulators_m106_pattern_ignores_unrelated_m_codes():
+    """`_M106_RE` compiled from source, so this runs without the simulator's deps.
+
+    Every group after the opcode is optional, so an unanchored pattern matched
+    `M1061 S30` and `M1069` with no P and no S -- and `handle_gcode` then did
+    `set_fan_pct(0, 0.0)` and added channel 0 to `_manual_fans`, pinning the model
+    fan off for the rest of the run while reporting the command as handled.
+    """
+    import re
+
+    source = _test_server_source()
+    match = re.search(r"_M106_RE = re\.compile\(\s*r\"(?P<pat>[^\"]+)\"", source)
+    assert match, "could not find _M106_RE in the simulator source"
+    pattern = re.compile(match.group("pat"), re.IGNORECASE)
+
+    for cmd, p, s_val in (
+        ("M106 P1 S255", "1", "255"),
+        ("M106 P0 S0", "0", "0"),
+        ("m106 p2 s128", "2", "128"),
+    ):
+        m = pattern.match(cmd)
+        assert m, f"{cmd} must still be handled"
+        assert (m.group("p"), m.group("s")) == (p, s_val), cmd
+
+    for cmd in ("M1061 S30", "M1069", "M106X"):
+        assert not pattern.match(cmd), (
+            f"{cmd} is not a fan command; matching it sets channel 0 to 0%"
+        )
+
+
 def test_test_server_reports_the_same_fan_fields_the_integration_reads():
     """The simulator used to emit caseFan/modelFan/sideFan, which never matched."""
     source = _test_server_source()

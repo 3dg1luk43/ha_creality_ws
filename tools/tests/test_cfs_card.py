@@ -256,8 +256,12 @@ def test_card_busy_states_are_real_sensor_states():
         f"never produced by derive_print_state: {sorted(BUSY_PRINT_STATES - produced)}"
     )
     # The card resolves the status entity by translation_key, so that is the
-    # coupling worth asserting -- not the bare string.
-    assert 'translation_key="print_status"' in sensor or '"print_status"' in sensor
+    # coupling worth asserting. The old form also accepted the bare string, which
+    # `unique_id="print_status"` on the next line satisfies on its own -- so the
+    # declaration could have been removed with this still green.
+    assert '_attr_translation_key = "print_status"' in sensor, (
+        "the card resolves the status entity by translation_key"
+    )
 
 
 def test_busy_lookup_is_device_scoped():

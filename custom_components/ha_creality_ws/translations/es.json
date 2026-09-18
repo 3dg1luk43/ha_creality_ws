@@ -246,7 +246,7 @@
       "fields": {
         "device_id": {
           "name": "Dispositivo",
-          "description": "La impresora en la que escribir."
+          "description": "La(s) impresora(s) en las que escribir."
         },
         "box_id": {
           "name": "ID de caja",

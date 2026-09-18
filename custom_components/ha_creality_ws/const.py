@@ -81,10 +81,12 @@ DEFAULT_GO2RTC_RTSP_PORT = 8554
 # a restart happened to race the right way -- the very defect this list exists
 # to prevent.
 # Must stay in step with every gate that reads these from coord.data:
-# number.py promotes chamber *control* on targetBoxTemp/maxBoxTemp, and sensor.py
-# promotes the chamber *sensor* on boxTemp/targetBoxTemp/maxBoxTemp. A field that
-# gates an entity but does not appear here can never trigger the pass that would
-# create it.
+# number.py promotes chamber *control* from the cached ModelDetection capability
+# or a live targetBoxTemp -- never from maxBoxTemp, which K1-family printers
+# report for a sensor-only chamber -- and sensor.py promotes the chamber *sensor*
+# on boxTemp/targetBoxTemp/maxBoxTemp. maxBoxTemp stays in this list for that
+# sensor gate. A field that gates an entity but does not appear here can never
+# trigger the pass that would create it.
 LATE_DISCOVERY_FIELDS: tuple[str, ...] = (
     "boxsInfo",
     "boxTemp",
