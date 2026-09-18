@@ -178,8 +178,14 @@ def _keys_used_by_the_card(source: str) -> set[str]:
 
     # `_t(this._deviceIdError)` -- the error keys that variable can hold.
     used.update(re.findall(r'_deviceIdError\s*=\s*[^;]*?"(toast_[a-z0-9_]+)"', source))
-    used.update(re.findall(r'\?\s*"(toast_[a-z0-9_]+)"\s*:\s*"(toast_[a-z0-9_]+)"', source)[0]
-                if re.search(r'\?\s*"toast_[a-z0-9_]+"\s*:\s*"toast_[a-z0-9_]+"', source) else [])
+    # Every ternary, not just the first: `findall(...)[0]` took one pair, so a
+    # second ternary's keys were never checked and could go missing from i18n
+    # without failing anything. The guard it needed is gone with it -- an empty
+    # findall simply contributes nothing.
+    for first, second in re.findall(
+        r'\?\s*"(toast_[a-z0-9_]+)"\s*:\s*"(toast_[a-z0-9_]+)"', source
+    ):
+        used.update((first, second))
     return used
 
 

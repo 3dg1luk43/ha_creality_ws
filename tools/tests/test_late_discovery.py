@@ -100,10 +100,20 @@ class HassStub:
 
 @pytest.fixture(autouse=True)
 def _event_loop():
+    # The previous loop is restored, not dropped: closing without restoring left
+    # the policy handing this closed loop to anything that later called
+    # `asyncio.get_event_loop()`, making the rest of the session order-dependent.
+    try:
+        previous = asyncio.get_event_loop_policy().get_event_loop()
+    except Exception:  # pylint: disable=broad-except
+        previous = None
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    yield
-    loop.close()
+    try:
+        yield
+    finally:
+        loop.close()
+        asyncio.set_event_loop(previous)
 
 
 @pytest.fixture

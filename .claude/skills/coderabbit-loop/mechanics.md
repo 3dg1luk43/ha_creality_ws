@@ -104,7 +104,7 @@ while [ $SECONDS -lt $end ]; do
   fi
   sleep 30
 done
-echo "TIMEOUT busy=$busy newrev=$newrev"; exit 1
+echo "TIMEOUT busy=$busy realrev=$realrev"; exit 1
 ```
 
 ISO-8601 UTC timestamps compare correctly as strings, so `>` is safe here.

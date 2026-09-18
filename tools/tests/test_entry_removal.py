@@ -47,14 +47,21 @@ def _load_package_init():
 
 @pytest.fixture(autouse=True)
 def _loop():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    yield
-    loop.close()
     # Closing does not uninstall it: the policy keeps handing this closed loop to
     # anything that later calls `asyncio.get_event_loop()`, which makes the rest
-    # of the session depend on collection order.
-    asyncio.set_event_loop(None)
+    # of the session depend on collection order. Restore the previous loop rather
+    # than clearing it, so a suite that had one keeps it.
+    try:
+        previous = asyncio.get_event_loop_policy().get_event_loop()
+    except Exception:  # pylint: disable=broad-except
+        previous = None
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        yield
+    finally:
+        loop.close()
+        asyncio.set_event_loop(previous)
 
 
 class HassStub:

@@ -422,7 +422,10 @@ class LiveCardState:
 
         if snap.activity_state != self.last_state:
             # Pause/resume must be visible at once, so it bypasses the interval
-            # floor -- but not entirely, or a flapping state would spam.
+            # floor. The floor is 0.0 deliberately (see the constant): a state
+            # that has not changed cannot reach here at all, so the only thing a
+            # delay would catch is genuine alternation, which is a printer fault.
+            # NOTIFY_LIVE_MAX_PUSHES_PER_JOB is the circuit breaker for that.
             if since is None or since >= NOTIFY_LIVE_TRANSITION_FLOOR_SECS:
                 return PushReason.TRANSITION
             return None

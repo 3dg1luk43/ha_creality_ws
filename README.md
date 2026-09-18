@@ -235,7 +235,7 @@ It ends by itself when the print finishes, and is replaced by a completion notif
 
 **Requirements:** Home Assistant **2026.7.0 or newer** (this is the integration's minimum), plus **iOS 17.2+** or **Android 16+**. On older phones the same notification still arrives and still replaces itself in place -- you lose the timer and the bar, not the notification.
 
-**Update rate.** The card is pushed on a state change (start, pause, resume, finish) and every 5% of progress, never more often than once every 30 seconds. That is not a compromise: iOS throttles frequent Live Activity updates and eventually drops them, and the countdown needs no pushes at all because it runs on the phone.
+**Update rate.** A state change (start, pause, resume, finish) is pushed immediately, because a deliberate user action has to show up at once. Everything else is rate limited: the card refreshes on a five-minute clock, a whole percent of progress can force an earlier refresh, and nothing is sent less than 30 seconds apart. That is not a compromise: the push relay allows about 500 notifications per device per day, iOS throttles frequent Live Activity updates and eventually drops them, and the countdown needs no pushes at all because it runs on the phone.
 
 **Long prints.** iOS ends any Live Activity after **8 hours** -- an Apple limit, not something an app can extend. Past that the card keeps updating as an ordinary notification, with the remaining time written into the text instead of shown as a timer, and you still get the completion notification. Android has no such limit.
 

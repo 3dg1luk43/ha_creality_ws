@@ -151,7 +151,9 @@ const PRINT_STATES = new Set([
 function computeIcon(status) {
   const st = normStr(status);
   if (["off", "unknown", "stopped"].includes(st)) return mdi("printer-3d-off");
-  if (["printing", "paused"].includes(st)) return mdi("printer-3d-nozzle");
+  // `processing` is the warm-up before `printing` and is in BUSY_PRINT_STATES,
+  // so it gets the active icon too -- computeColor already treats it as active.
+  if (["printing", "paused", "processing"].includes(st)) return mdi("printer-3d-nozzle");
   if (st === "error") return mdi("close-octagon");
   if (st === "self-testing") return mdi("cogs");
   return mdi("printer-3d");
@@ -489,7 +491,9 @@ class KPrinterCard extends HTMLElement {
         // so an accidental tap can't kill a running job.
         if (this._hass?.states?.[eid]?.state === "on") {
           const st = normStr(this._hass?.states?.[this._cfg.status]?.state);
-          const printing = ["printing", "paused"].includes(st);
+          // `processing` means a job is on the bed and starting, so it needs
+          // the stronger warning as much as a running print does.
+          const printing = ["printing", "paused", "processing"].includes(st);
           const msg = printing ? this._t("confirm_power_off_printing") : this._t("confirm_power_off");
           if (!confirm(msg)) return;
         }
@@ -731,6 +735,9 @@ class KPrinterCard extends HTMLElement {
     const st = normStr(status);
     const isPrinting = st === "printing";
     const isPaused = st === "paused";
+    // A job exists and is progressing. Pause stays restricted to `printing`
+    // and Stop to the states below; this is only the visual presentation.
+    const isActivePrint = ["printing", "paused", "processing"].includes(st);
     const showStop = isPrinting || isPaused || st === "self-testing";
     // Show Light chip only when the light entity exists in HA state and power (if configured) is not OFF
     const showLight = Boolean(resolvedLight && this._hass?.states?.[resolvedLight]) && !(resolvedPower && powerState === "off");
@@ -740,7 +747,7 @@ class KPrinterCard extends HTMLElement {
     // Title/status
     this._root.getElementById("name").textContent = name;
     const proper = (!status || status === "unavailable" || status === "unknown") ? this._t("status_unknown") : (fmtState(gObj(this._cfg.status)) || status[0].toUpperCase() + status.slice(1));
-    const sec = (isPrinting || isPaused) ? `${pct}% ${proper}` : proper;
+    const sec = isActivePrint ? `${pct}% ${proper}` : proper;
     this._root.getElementById("secondary").textContent = sec;
 
     // Icon & ring
@@ -750,7 +757,7 @@ class KPrinterCard extends HTMLElement {
     const iconColor = theme.status_icon === "auto" ? computeColor(status) : theme.status_icon;
     iconEl.style.setProperty("--icon-color", iconColor);
     const ring = this._root.getElementById("ring");
-    ring.style.setProperty("--ring-pct", isPrinting || isPaused ? `${pct}%` : "0%");
+    ring.style.setProperty("--ring-pct", isActivePrint ? `${pct}%` : "0%");
     const ringColor = theme.progress_ring === "auto" ? computeColor(status) : theme.progress_ring;
     ring.style.setProperty("--ring-color", ringColor);
 

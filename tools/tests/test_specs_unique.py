@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from conftest import install_stub_module, restore_stubs
+
 ROOT = Path(__file__).resolve().parents[2]
 
 sensor_path = ROOT / "custom_components" / "ha_creality_ws" / "sensor.py"
@@ -37,6 +39,28 @@ def _extract_uids(src: str):
     return uids
 
 
+def _specs():
+    """The real sensor module, loaded against the conftest Home Assistant stubs."""
+    import importlib
+    import sys
+    from unittest.mock import MagicMock
+
+    if "homeassistant.components.sensor" not in sys.modules:
+        module = MagicMock()
+
+        class _SensorEntity:
+            pass
+
+        module.SensorEntity = _SensorEntity
+        install_stub_module(__name__, "homeassistant.components.sensor", module)
+
+    return importlib.import_module("custom_components.ha_creality_ws.sensor")
+
+
+def teardown_module(_module):
+    restore_stubs(__name__)
+
+
 def test_sensor_specs_uids_unique_and_contains_box():
     """Assert all sensor uids are unique and that box_temperature is present."""
     uids = _extract_uids(text)
@@ -55,28 +79,22 @@ def test_no_two_sensors_read_the_same_telemetry_field():
     user got both. If a genuine second view of one field is ever wanted, add it
     to the allowlist below with a reason.
     """
-    import ast
-
     allowed_duplicate_fields: dict[str, str] = {
         # field: why two sensors legitimately read it
     }
 
-    tree = ast.parse(text)
+    # The registries themselves, not the source text. The previous version walked
+    # the AST for dict literals whose `uid` and `field` were inline constants, so
+    # a duplicate written as `dict(...)`, built from a named constant, or produced
+    # by any other expression was skipped -- and because the remaining entries
+    # kept `seen` non-empty, the test still passed while checking less than it
+    # claimed.
     seen: dict[str, list[str]] = {}
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Dict):
+    for spec in (*_specs().SPECS, *_specs().MAPPED_SPECS):
+        uid, field = spec.get("uid"), spec.get("field")
+        if not isinstance(uid, str) or not isinstance(field, str):
             continue
-        entry = {
-            k.value: v
-            for k, v in zip(node.keys, node.values)
-            if isinstance(k, ast.Constant) and isinstance(k.value, str)
-        }
-        if "uid" not in entry or "field" not in entry:
-            continue
-        uid, field = entry["uid"], entry["field"]
-        if not (isinstance(uid, ast.Constant) and isinstance(field, ast.Constant)):
-            continue
-        seen.setdefault(field.value, []).append(uid.value)
+        seen.setdefault(field, []).append(uid)
 
     assert seen, "found no sensor definitions to check"
     duplicates = {

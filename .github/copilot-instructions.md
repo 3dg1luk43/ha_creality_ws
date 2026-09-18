@@ -80,13 +80,12 @@ Use `ModelDetection` which reads both `model` and `modelVersion` codes.
 
 ## Image (print preview) implementation
 
-- K1 family:
+- Every model, no model gate:
   - Expose an `image` entity named "Current Print Preview" with unique_id `<host>-current_print_preview`.
-  - Fetch PNG from `http://<host>/downloads/original/current_print_image.png` using HA's `async_get_clientsession` with short timeouts.
-  - Show content only for statuses: self-testing, printing, completed (derive from the same telemetry/status rules as `PrintStatusSensor`).
+  - Fetch PNG from `http(s)://<host>/downloads/original/current_print_image.png` using HA's `async_get_clientsession` with short timeouts.
+  - Attempt it for **all** models. Some non-K1 printers serve the same path, and gating on `ModelDetection` hid the preview from them (removed in 43c6668).
+  - Show content for the statuses in `PREVIEW_PRINT_STATES` (`BUSY_PRINT_STATES` plus `completed`, i.e. printing, paused, processing, self-testing, completed), derived through `derive_activity_state` so a stale error code does not hide the preview.
   - When not eligible or fetch fails, return a built-in neutral PNG placeholder; cache last successful image to avoid flashing.
-- Other models:
-  - Keep the entity as a placeholder; do not fetch until we confirm model-specific URLs via diagnostics.
 - Diagnostics:
   - Cache all accessed HTTP URLs on the coordinator and include them in the diagnostic dump as `http_urls_accessed`.
 - Entity attributes:

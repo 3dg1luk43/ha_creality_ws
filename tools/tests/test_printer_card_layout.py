@@ -107,3 +107,65 @@ def test_the_card_only_branches_on_real_states():
     assert compared, "found no state comparisons to check"
     unknown = sorted(compared - known)
     assert not unknown, f"card branches on states derive_print_state cannot return: {unknown}"
+
+
+def _card_source() -> str:
+    from pathlib import Path
+
+    return (
+        Path(__file__).resolve().parents[2]
+        / "custom_components/ha_creality_ws/www/k_printer_card.js"
+    ).read_text(encoding="utf-8")
+
+
+def test_processing_is_presented_as_an_active_print():
+    """`processing` is the warm-up phase and is in BUSY_PRINT_STATES.
+
+    The card used to treat it as active in `computeColor` only, so the icon fell
+    through to the generic printer, the percentage and the progress ring were
+    hidden, and -- the one that matters -- powering off got the weaker of the two
+    confirmations even though a job was on the bed.
+    """
+    import re
+
+    card = _card_source()
+
+    icon_branch = re.search(
+        r'if \(\[([^\]]*)\]\.includes\(st\)\) return mdi\("printer-3d-nozzle"\)', card
+    )
+    assert icon_branch, "the active-icon branch moved; update this test"
+    assert "processing" in icon_branch.group(1), "processing must get the active icon"
+
+    active = re.search(r'const isActivePrint = \[([^\]]*)\]\.includes\(st\)', card)
+    assert active, "isActivePrint is gone; the presentation gate moved"
+    for state in ("printing", "paused", "processing"):
+        assert state in active.group(1), f"{state} must count as an active print"
+
+    # The percentage and the ring both key on it, not on printing/paused.
+    assert "const sec = isActivePrint ?" in card
+    assert 'ring.style.setProperty("--ring-pct", isActivePrint ?' in card
+
+
+def test_powering_off_mid_job_warns_for_every_busy_state():
+    """The stronger confirmation must cover any state with a job on the bed."""
+    import re
+
+    card = _card_source()
+    guard = re.search(r'const printing = \[([^\]]*)\]\.includes\(st\)', card)
+    assert guard, "the power-off guard moved; update this test"
+    for state in ("printing", "paused", "processing"):
+        assert state in guard.group(1), (
+            f"{state} leaves a job on the bed, so it needs the printing warning"
+        )
+
+
+def test_pause_and_stop_stay_restricted():
+    """isActivePrint is presentation only: the commands keep their own gates.
+
+    Pause is meaningless before the printer is actually printing, and Stop is
+    deliberately not offered during `processing`.
+    """
+    card = _card_source()
+    assert 'const isPrinting = st === "printing";' in card
+    assert "hidden: !isPrinting," in card, "Pause must stay gated on printing alone"
+    assert 'const showStop = isPrinting || isPaused || st === "self-testing";' in card
