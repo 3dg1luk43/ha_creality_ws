@@ -79,18 +79,31 @@ trigger="2026-01-01T00:00:00Z"   # captured before posting the retrigger
 summary_id=<the walkthrough issue comment id for this PR>
 sleep 120                        # covers the ack race
 
-# --- Gate 0: did the trigger actually start a review? -----------------------
 # The ack can say "Full review triggered" and carry the rate-limit refusal in the
 # same comment. Nothing will ever be submitted, so polling just burns the window.
-ack=$(gh api "repos/$owner/$repo/issues/$pr/comments" --paginate --jq \
-  "[.[] | select(.user.login|test(\"coderabbit\")) | select(.created_at > \"$trigger\")] | last | .body" || echo "")
-if grep -qi "rate limited" <<<"$ack"; then
+#
+# Checked *inside* the loop, not once before it. Two reasons, both observed:
+# GitHub's comment list lags its own `created_at`, so an ack stamped 30s before
+# the check can still be invisible to it; and `$(... || echo "")` turns a failed
+# fetch into "no rate limit", which is the wrong default. Re-reading it each
+# iteration catches a late ack and costs one request per 30s.
+check_rate_limit() {
+  local bound ack wait_min
+  # Bounded to this trigger's own ack, which lands within a couple of minutes.
+  # An unbounded "everything after $trigger" window also matches the *next*
+  # round's refusal, so it reports a succeeded round as rate limited.
+  bound=$(date -u -d "$trigger + 5 minutes" +%FT%TZ) || return 0
+  ack=$(gh api "repos/$owner/$repo/issues/$pr/comments" --paginate --jq \
+    "[.[] | select(.user.login|test(\"coderabbit\")) | select(.created_at > \"$trigger\") | select(.created_at < \"$bound\")] | .[].body") || return 0
+  grep -qi "rate limited" <<<"$ack" || return 0
   wait_min=$(grep -oiE "available in [0-9]+ minute" <<<"$ack" | grep -oE "[0-9]+" | head -1)
-  echo "RATE-LIMITED: no review started; retry in ${wait_min:-20} min"; exit 2
-fi
+  echo "RATE-LIMITED: no review started; retry in ${wait_min:-20} min"
+  return 1
+}
 
 end=$((SECONDS+480))
 while [ $SECONDS -lt $end ]; do
+  check_rate_limit || exit 2
   # A failed fetch must not read as "marker absent": `grep -c` on FETCHFAIL
   # returns 0, so a transient API error plus an already-submitted review would
   # report completion without ever confirming the marker had cleared.
