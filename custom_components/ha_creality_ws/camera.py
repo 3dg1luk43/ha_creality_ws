@@ -474,6 +474,13 @@ class CrealityWebRTCCamera(_BaseCamera):
             except (TypeError, ValueError):
                 port = 0
             if port > 0:
+                # HA's managed go2rtc binds RTSP to IPv4 127.0.0.1 only, while
+                # its API is addressed as "localhost" -- which can resolve to
+                # ::1 and an unbound port. Keep the explicit port, pin the host.
+                if self._go2rtc_is_ha_managed and host in (
+                    None, "localhost", "127.0.0.1", "::1"
+                ):
+                    return ("127.0.0.1", port)
                 return (host or "127.0.0.1", port)
 
         if (
@@ -488,6 +495,16 @@ class CrealityWebRTCCamera(_BaseCamera):
     def _rtsp_stream_url(self) -> str | None:
         """Build the go2rtc RTSP URL for the already-configured stream."""
         if not self._uses_go2rtc_webrtc_bridge() or not self._stream_name:
+            return None
+        # A pending recreate means the stream this name refers to may already be
+        # gone: `_configure_stream_locked` deletes before it adds, and an add
+        # that fails leaves the previous `_stream_name` in place. Handing HA an
+        # RTSP URL for a deleted stream is worse than admitting there is none.
+        if self._force_recreate_stream:
+            _LOGGER.debug(
+                "ha_creality_ws: No RTSP source for '%s': a recreate is pending",
+                self._stream_name,
+            )
             return None
         host, port = self._go2rtc_rtsp_endpoint()
         # urlparse().hostname strips the brackets off an IPv6 literal, and

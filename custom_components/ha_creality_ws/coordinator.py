@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import asyncio
 import json
+import math
 import time
 from collections.abc import Iterable
 from typing import Any
@@ -1059,8 +1060,19 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @staticmethod
     def _int_or_none(value: Any) -> int | None:
+        """A whole number from telemetry, or None when there is not one.
+
+        `safe_float` passes nan and inf through, and `int()` raises ValueError on
+        the first and OverflowError on the second. Raising here aborts
+        `_live_snapshot`, `_check_notifications` and the listener update for the
+        whole frame, and `ws_client` only logs "K on_message failed" -- so a
+        single malformed value silently costs a frame. Same rule as
+        `derive_print_state`, so the two paths agree.
+        """
         number = safe_float(value)
-        return None if number is None else int(number)
+        if number is None or not math.isfinite(number):
+            return None
+        return int(number)
 
     def _live_message(self, snap: LiveSnapshot, *, include_eta: bool) -> str:
         """The card body. Every segment is dropped when its source is unknown.
@@ -1564,7 +1576,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if progress is None:
             progress = d.get("dProgress")
         value = safe_float(progress)
-        return None if value is None else int(value)
+        if value is None or not math.isfinite(value):
+            return None
+        return int(value)
 
     def _target_os(self, target: str) -> str | None:
         """The companion `os_name` behind a notify target, or None if unknown.

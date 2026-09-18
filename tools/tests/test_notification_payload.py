@@ -295,11 +295,22 @@ def test_a_miss_is_not_cached(registry):
 
 
 def test_options_reload_drops_the_cache(registry):
+    """Through `_load_options`, not by clearing the cache here.
+
+    Doing the invalidation in the test meant it passed whether or not
+    `_load_options` still cleared `_entity_id_cache` -- which is the only thing
+    that makes a rename visible without a restart.
+    """
     coord, _hass = _coordinator()
     registry[CAMERA_KEY] = "camera.old_name"
     assert coord._resolve_entity_id("camera", "camera") == "camera.old_name"
+
     registry[CAMERA_KEY] = "camera.renamed_by_user"
-    coord._entity_id_cache.clear()
+    assert coord._resolve_entity_id("camera", "camera") == "camera.old_name", (
+        "still cached until the options are re-read"
+    )
+
+    coord._load_options()
     assert coord._resolve_entity_id("camera", "camera") == "camera.renamed_by_user"
 
 

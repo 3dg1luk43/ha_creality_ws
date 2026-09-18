@@ -118,7 +118,7 @@ python3 -m pytest -q                                 # whole suite, ~3s
 python3 -m pytest tools/tests/test_<area>.py -q      # targeted, while iterating
 ```
 
-Baseline: **550 passed, 4 skipped**. The 4 skips need Node or the CFS simulator
+Baseline: **586 passed, 5 skipped** as of this branch's head. The skips need Node or the CFS simulator
 and are expected to skip in a bare environment; a larger skip count means missing
 tooling, not removed tests.
 

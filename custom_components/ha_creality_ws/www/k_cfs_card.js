@@ -197,6 +197,19 @@ function sharedPresets() {
   return _sharedPresets;
 }
 
+// The values that mean "no reading", in one place. Home Assistant renders an
+// entity with no value as "unknown" and an unavailable one as "unavailable", and
+// the integration writes "-" for an empty CFS slot. Trimmed before comparing, so
+// a padded " unknown " is caught everywhere rather than only in the edit form --
+// each caller keeps its own fallback, since the display wants "-" and the form
+// wants "".
+const SENTINEL_VALUES = new Set(["unknown", "unavailable", "-"]);
+function isSentinel(value) {
+  if (value === undefined || value === null) return true;
+  const text = String(value).trim();
+  return text === "" || SENTINEL_VALUES.has(text.toLowerCase());
+}
+
 const BUSY_PRINT_STATES = new Set([
   "printing",
   "paused",
@@ -271,10 +284,8 @@ class KCFSCard extends HTMLElement {
   }
 
   static _sanitizeColor(value) {
-    const raw = String(value || "").trim();
-    if (!raw || ["unknown", "unavailable", "-"].includes(raw.toLowerCase())) {
-      return "#cccccc";
-    }
+    if (isSentinel(value)) return "#cccccc";
+    const raw = String(value).trim();
     const hex = raw.startsWith("#") ? raw.slice(1) : raw;
     if (hex.length === 6 && /^[0-9a-fA-F]+$/.test(hex)) {
       return `#${hex.toLowerCase()}`;
@@ -353,10 +364,10 @@ class KCFSCard extends HTMLElement {
   static _parsePercent(percentObj) {
     if (!percentObj) return null;
     const state = percentObj.state;
-    if (state === undefined || state === null) return null;
-    const s = String(state);
-    if (s === "unknown" || s === "unavailable") return null;
-    const n = Number(s);
+    // "-" is a sentinel here too: Number("-") is NaN, so it was already
+    // rejected, but going through the shared helper keeps the set in one place.
+    if (isSentinel(state)) return null;
+    const n = Number(String(state).trim());
     if (Number.isNaN(n) || !Number.isFinite(n)) return null;
     return Math.max(0, Math.min(100, n));
   }
@@ -1202,9 +1213,8 @@ class KCFSCard extends HTMLElement {
     const fmtState = (st) => {
       if (!st) return "-";
       const v = st.state;
-      if (v === undefined || v === null) return "-";
-      const s = String(v);
-      if (s === "unknown" || s === "unavailable") return "-";
+      if (isSentinel(v)) return "-";
+      const s = String(v).trim();
       if (this._hass && typeof this._hass.formatEntityState === "function") {
         try { return this._hass.formatEntityState(st); } catch (_) { }
       }
@@ -1435,7 +1445,7 @@ class KCFSCard extends HTMLElement {
 
     const bays = slots.map((slot) => {
       if (!slot) return '<div class="bay"></div>';
-      const safeType = slot.type && !["unknown", "unavailable", "-"].includes(String(slot.type).toLowerCase()) ? slot.type : "-";
+      const safeType = !isSentinel(slot.type) ? String(slot.type).trim() : "-";
       const hasFilament = safeType !== "-";
       const pct = hasFilament && slot.percent !== null ? Math.round(slot.percent) : 0;
       return `
@@ -1529,8 +1539,8 @@ class KCFSCard extends HTMLElement {
     // External section
     let externalSection = '';
     if (external) {
-      const safeType = external.type && !["unknown", "unavailable", "-"].includes(String(external.type).toLowerCase()) ? external.type : "-";
-      const safeName = external.name && !["unknown", "unavailable", "-"].includes(String(external.name).toLowerCase()) ? external.name : "-";
+      const safeType = !isSentinel(external.type) ? String(external.type).trim() : "-";
+      const safeName = !isSentinel(external.name) ? String(external.name).trim() : "-";
       const hasFilament = safeType !== "-" && safeName !== "-";
       const pct = hasFilament && external.percent !== null ? external.percent : 0;
       const percentTextDisplay = hasFilament ? (external.percentText || '-') : '-';
@@ -1584,8 +1594,8 @@ class KCFSCard extends HTMLElement {
    */
   _renderExternalCompact(external) {
     if (!external) return '';
-    const safeType = external.type && !["unknown", "unavailable", "-"].includes(String(external.type).toLowerCase()) ? external.type : "-";
-    const safeName = external.name && !["unknown", "unavailable", "-"].includes(String(external.name).toLowerCase()) ? external.name : "-";
+    const safeType = !isSentinel(external.type) ? String(external.type).trim() : "-";
+    const safeName = !isSentinel(external.name) ? String(external.name).trim() : "-";
     const hasFilament = safeType !== "-" && safeName !== "-";
     const percentTextDisplay = hasFilament ? (external.percentText || '-') : '-';
     const displayName = hasFilament ? `${safeName} ${safeType}` : '-';
@@ -1670,8 +1680,8 @@ class KCFSCard extends HTMLElement {
 
     const isActive = slot.selected === 1 || slot.selected === true;
     const color = slot.color || '#cccccc';
-    const safeType = slot.type && !["unknown", "unavailable", "-"].includes(String(slot.type).toLowerCase()) ? slot.type : "-";
-    const safeName = slot.name && !["unknown", "unavailable", "-"].includes(String(slot.name).toLowerCase()) ? slot.name : "-";
+    const safeType = !isSentinel(slot.type) ? String(slot.type).trim() : "-";
+    const safeName = !isSentinel(slot.name) ? String(slot.name).trim() : "-";
 
     // If no filament (type is "-" or name is "-"), show 0% regardless of actual value
     const hasFilament = safeType !== "-" && safeName !== "-";
@@ -1710,8 +1720,8 @@ class KCFSCard extends HTMLElement {
 
     const isActive = slot.selected === 1 || slot.selected === true;
     const color = slot.color || '#cccccc';
-    const safeType = slot.type && !["unknown", "unavailable", "-"].includes(String(slot.type).toLowerCase()) ? slot.type : "-";
-    const safeName = slot.name && !["unknown", "unavailable", "-"].includes(String(slot.name).toLowerCase()) ? slot.name : null;
+    const safeType = !isSentinel(slot.type) ? String(slot.type).trim() : "-";
+    const safeName = !isSentinel(slot.name) ? String(slot.name).trim() : null;
 
     // If no filament (type is "-" or name is empty/dash), show 0% regardless of actual value
     const hasFilament = safeType !== "-" && safeName !== null;
@@ -2041,16 +2051,17 @@ class KCFSCard extends HTMLElement {
     // filling that in and saving an otherwise untouched form wrote "unknown"
     // to the spool as its material name. Same sentinel set the display path
     // uses, rather than the "-" check this had.
-    const clean = (value) => {
-      const text = String(value ?? "").trim();
-      return text && !["unknown", "unavailable", "-"].includes(text.toLowerCase())
-        ? text
-        : "";
-    };
+    const clean = (value) => (isSentinel(value) ? "" : String(value).trim());
 
     const values = {
       type: clean(slot.type),
-      name: clean(slot.materialName) || clean(slot.name),
+      // The bare `name` attribute only. `slot.name` is the sensor *state*, which
+      // `format_filament_label` composes from vendor plus name -- or vendor plus
+      // *type* when the printer reports no name at all, e.g. "Creality PLA". As
+      // a fallback it prefilled that composite as the material name and
+      // `_saveMaterial` wrote it back, putting the vendor inside the name, which
+      // is the duplication issue #115 removed from the display path.
+      name: clean(slot.materialName),
       vendor: clean(slot.vendor),
       min_temp: slot.minTemp ?? undefined,
       max_temp: slot.maxTemp ?? undefined,

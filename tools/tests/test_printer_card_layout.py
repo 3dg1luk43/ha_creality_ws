@@ -84,6 +84,39 @@ def test_card_print_states_match_the_integration():
         f"card has {sorted(in_card)}, derive_print_state produces {sorted(produced)}"
     )
 
+    # The sample above proves each state is *reachable*, but not that it is the
+    # whole set: a new `return "..."` branch would go unrepresented and the card
+    # could drift from it silently. So read the returns out of the function too.
+    declared = _declared_print_states()
+    assert declared == produced, (
+        "the input sample no longer covers every branch of derive_print_state: "
+        f"declared {sorted(declared)}, sample produces {sorted(produced)}"
+    )
+    assert in_card == declared, (
+        f"card has {sorted(in_card)}, derive_print_state declares {sorted(declared)}"
+    )
+
+
+def _declared_print_states() -> set:
+    """Every string literal `derive_print_state` can return, read from source."""
+    import ast
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "custom_components/ha_creality_ws/utils.py"
+    ).read_text(encoding="utf-8")
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.FunctionDef) and node.name == "derive_print_state":
+            return {
+                n.value.value
+                for n in ast.walk(node)
+                if isinstance(n, ast.Return)
+                and isinstance(n.value, ast.Constant)
+                and isinstance(n.value.value, str)
+            }
+    raise AssertionError("derive_print_state not found in utils.py")
+
 
 def test_the_card_only_branches_on_real_states():
     """Guards against a new impossible state being introduced elsewhere."""

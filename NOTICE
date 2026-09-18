@@ -23,8 +23,14 @@ over it and grants none to you:
     If you redistribute this project, note that redistributing this image is
     subject to Creality's rights, not the AGPL. If you need a build free of
     third-party material, delete the file and remove "cfs_box.webp" from the
-    ASSETS list in custom_components/ha_creality_ws/frontend.py; the card falls
-    back to its "full" display mode automatically.
+    ASSETS list in custom_components/ha_creality_ws/frontend.py.
+
+    That alone is not sufficient: the card's "box" mode renders the image
+    unconditionally, and its only fallback is for a box without four filled
+    slots -- it does not check whether the asset exists. Any dashboard card
+    configured with view_mode: "box" will show a broken image until it is set to
+    "full" or "compact", so a build without the asset should not offer or
+    document "box" mode.
 
 --------------------------------------------------------------------------------
 Reproducing cfs_box.webp

@@ -304,24 +304,29 @@ def test_first_appearance_of_a_gating_field_triggers_discovery(coord, field):
     assert coord.signals == ["ha_creality_ws_new_entities_entry1"]
 
 
-@pytest.mark.parametrize("field", ["boxsInfo", "maxBoxTemp"])
+# Over the constant, like the test above: these used to name boxsInfo and
+# maxBoxTemp only, so a repeated targetBoxTemp or boxTemp frame could start
+# re-signalling without failing anything.
+@pytest.mark.parametrize("field", LATE_DISCOVERY_FIELDS)
 def test_repeated_frames_do_not_re_trigger_discovery(coord, field):
-    value = 80.0 if field == "maxBoxTemp" else {"materialBoxs": []}
     for _ in range(4):
-        _feed(coord, {field: value})
+        _feed(coord, {field: _gating_value(field)})
     assert len(coord.signals) == 1
 
 
 def test_each_gating_field_triggers_once(coord):
     """A printer that reports the fields in separate frames signals for each."""
-    _feed(coord, {"maxBoxTemp": 80.0})
-    _feed(coord, {"boxsInfo": {"materialBoxs": []}})
-    _feed(coord, {"maxBoxTemp": 80.0, "boxsInfo": {"materialBoxs": []}})
-    assert len(coord.signals) == 2
+    for field in LATE_DISCOVERY_FIELDS:
+        _feed(coord, {field: _gating_value(field)})
+    assert len(coord.signals) == len(LATE_DISCOVERY_FIELDS)
+
+    # A frame repeating all of them adds nothing.
+    _feed(coord, {f: _gating_value(f) for f in LATE_DISCOVERY_FIELDS})
+    assert len(coord.signals) == len(LATE_DISCOVERY_FIELDS)
 
 
-def test_both_fields_in_one_frame_signal_once(coord):
-    _feed(coord, {"maxBoxTemp": 80.0, "boxsInfo": {"materialBoxs": []}})
+def test_all_fields_in_one_frame_signal_once(coord):
+    _feed(coord, {f: _gating_value(f) for f in LATE_DISCOVERY_FIELDS})
     assert len(coord.signals) == 1
 
 

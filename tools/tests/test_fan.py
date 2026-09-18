@@ -31,19 +31,46 @@ if "homeassistant.components.fan" not in sys.modules:
     fan_mod.ATTR_PERCENTAGE = "percentage"
     install_stub_module(__name__, "homeassistant.components.fan", fan_mod)
 
-from custom_components.ha_creality_ws.fan import _KFanEntity  # noqa: E402
+from custom_components.ha_creality_ws.fan import (  # noqa: E402
+    _KFanEntity,
+    async_setup_entry,
+)
 
 
 def teardown_module(_module):
     restore_stubs(__name__)
 
 
-# (uid, telemetry field, M106 channel) as wired up in fan.async_setup_entry.
+# (uid, telemetry field, M106 channel). This is the *expectation*;
+# test_the_platform_wires_up_exactly_these_fans drives the real
+# `async_setup_entry` and checks production against it, so a wrong field or
+# channel there cannot pass by virtue of the tests using this copy.
 FAN_SPECS = [
     ("model_fan", "modelFanPct", 0),
     ("case_fan", "caseFanPct", 1),
     ("side_fan", "auxiliaryFanPct", 2),
 ]
+
+
+def test_the_platform_wires_up_exactly_these_fans():
+    """Ties FAN_SPECS to what `async_setup_entry` actually creates.
+
+    Every other test in this file builds `_KFanEntity` from the local copy, so
+    without this a production field or channel could change and they would all
+    still pass against the stale expectation.
+    """
+    coord = SimpleNamespace(client=ClientStub(), data={}, available=True,
+                            config_entry=None, last_update_success=True)
+    entry = SimpleNamespace(entry_id="e1")
+    hass = SimpleNamespace(data={"ha_creality_ws": {"e1": coord}})
+    added: list = []
+    asyncio.run(async_setup_entry(hass, entry, added.extend))
+
+    actual = [(e._attr_unique_id.split("-", 1)[1], e._read_field, e._channel)
+              for e in added]
+    assert actual == FAN_SPECS, (
+        f"the platform no longer matches FAN_SPECS: {actual}"
+    )
 
 
 class ClientStub:
@@ -169,9 +196,14 @@ def test_test_server_prefers_h264_for_video():
     finally:
         sys.modules.pop(name, None)
 
-    parser = module.build_argparser() if hasattr(module, "build_argparser") else None
-    if parser is None:
-        pytest.skip("simulator does not expose its parser separately")
+    # The module imported, so a missing parser is a regression in the simulator,
+    # not an environment it cannot run in. Skipping here quietly dropped the
+    # prefer_codec assertion below.
+    assert hasattr(module, "build_argparser"), (
+        "the simulator no longer exposes build_argparser; the codec default is "
+        "unasserted until this is restored or the test is rewritten"
+    )
+    parser = module.build_argparser()
     defaults = parser.parse_args([])
     assert defaults.prefer_codec == "h264", (
         "aiortc answers VP8 first, which HA's HLS pipeline cannot package"

@@ -195,7 +195,7 @@ gh pr comment "$pr" --body '@coderabbitai full review'
 python3 -m compileall custom_components/ha_creality_ws tools/tests -q
 node --check custom_components/ha_creality_ws/www/k_printer_card.js   # if card JS changed
 node --check custom_components/ha_creality_ws/www/k_cfs_card.js
-python3 -m pytest -q                              # whole suite, ~3s, baseline 550 passed / 4 skipped
+python3 -m pytest -q                              # whole suite, ~3s, baseline 586 passed / 5 skipped
 python3 -m pytest tools/tests/test_<area>.py -q   # targeted
 ```
 
@@ -208,7 +208,9 @@ workflow installs nothing else, and `tools/tests/conftest.py` stubs the entire
 `homeassistant.*` tree. A suite that passes with the project venv but fails in CI
 usually means a test is reaching something CI does not install.
 
-The 4 expected skips need Node or the CFS simulator. A larger skip count means
+The 5 expected skips need Node or the CFS simulator (`aiohttp`/`websockets` in
+the interpreter running the tests, which CI does not install). A larger skip
+count means
 missing tooling, not removed tests.
 
 ## Line endings, before every commit

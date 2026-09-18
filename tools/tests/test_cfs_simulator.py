@@ -307,3 +307,46 @@ def test_unknown_box_or_slot_is_rejected(simulator):
             assert _slot(boxes, 1, 7) is None
 
     asyncio.run(scenario())
+
+
+def test_modify_material_rejects_an_unknown_box_or_slot():
+    """The state assertions above also pass for a handler that silently ignores
+    the write, so pin the rejection itself.
+
+    Asserted against `PrinterState.modify_material` in process rather than by
+    scraping the subprocess log: the handler logs `modifyMaterial rejected` and
+    sends no protocol error, so an end-to-end assertion would mean a reader
+    thread and a timed wait for a log line -- flaky for no extra coverage. This
+    is the source of that rejection, and `ws_handle_conn` only catches what it
+    raises.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_sim_reject", SERVER)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["_sim_reject"] = module
+    try:
+        spec.loader.exec_module(module)
+    except ModuleNotFoundError as exc:  # pragma: no cover - optional extras
+        pytest.skip(f"simulator dependency missing: {exc.name}")
+    finally:
+        sys.modules.pop("_sim_reject", None)
+
+    state = module.PrinterState(
+        "k2plus",
+        simulate_print=False,
+        sim=module.SimOptions(),
+        targets={},
+        deterministic=True,
+    )
+
+    with pytest.raises(ValueError, match=r"no such box 9"):
+        state.modify_material({"boxId": 9, "id": 0, "type": "PLA"})
+
+    with pytest.raises(ValueError, match=r"no such slot 7 in box 1"):
+        state.modify_material({"boxId": 1, "id": 7, "type": "PLA"})
+
+    # And a well-formed write to a real slot still applies, so the guard above
+    # is not simply rejecting everything.
+    updated = state.modify_material({"boxId": 1, "id": 0, "type": "PETG"})
+    assert updated["type"] == "PETG"

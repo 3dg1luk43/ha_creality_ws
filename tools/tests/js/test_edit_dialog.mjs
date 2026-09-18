@@ -303,6 +303,50 @@ test("every unavailable sentinel is stripped from the prefill", async () => {
   }
 });
 
+test("a vendor-only spool does not prefill the vendor as the material name", async () => {
+  // With no `name` attribute the sensor state is `format_filament_label`'s
+  // composite of vendor plus *type* -- "Creality PLA". Falling back to the state
+  // prefilled that as the material name, and saving wrote it to the spool, which
+  // is the vendor-inside-the-name duplication issue #115 removed from display.
+  const { card, calls } = await setup({
+    attributes: { type: "PLA", vendor: "Creality", box_id: 1, slot_id: 0 },
+    filament: "Creality PLA",
+  });
+  const slot = card._findSlot(SLOT);
+  assert.equal(slot.name, "Creality PLA", "the state really is the composite");
+  assert.equal(slot.materialName, undefined, "and there is no bare name to use");
+
+  const form = card._renderEditForm(slot, () => {});
+  const haForm = form.children.find((c) => c.tagName === "HA-FORM");
+  assert.equal(haForm.data.name, "", "the composite must not prefill the name");
+  assert.equal(haForm.data.vendor, "Creality", "the vendor still prefills its own field");
+
+  await card._saveMaterial(slot, { ...haForm.data, color: "#00ff00" });
+  assert.ok(!("name" in saved(calls)), "and nothing is written back as the name");
+});
+
+test("a padded sentinel is cleared in the form and the renderers alike", async () => {
+  // The edit form trimmed before comparing and the renderers did not, so a
+  // telemetry value of " unknown " was blanked in the dialog while still being
+  // displayed on the card. One shared `isSentinel` now decides for both.
+  const { card } = await setup({
+    filament: "  unknown  ",
+    attributes: { type: " UNAVAILABLE ", vendor: "  -  ", box_id: 1, slot_id: 0 },
+  });
+  const slot = card._findSlot(SLOT);
+
+  const form = card._renderEditForm(slot, () => {});
+  const haForm = form.children.find((c) => c.tagName === "HA-FORM");
+  assert.equal(haForm.data.type, "", "padded sentinel must not prefill the type");
+  assert.equal(haForm.data.name, "", "padded sentinel must not prefill the name");
+  assert.equal(haForm.data.vendor, "", "padded sentinel must not prefill the vendor");
+
+  // And the renderers agree, rather than showing the raw padded value.
+  const html = card._renderSpoolCard(slot) + card._renderSpoolMini(slot);
+  assert.ok(!/unknown/i.test(html), `a padded sentinel was rendered: ${html}`);
+  assert.ok(!/unavailable/i.test(html), "the padded type was rendered");
+});
+
 test("a save round-trip does not accumulate the vendor in the name", async () => {
   const { card, calls } = await setup({
     attributes: { ...ATTRS, name: "Hyper PLA", vendor: "Creality" },

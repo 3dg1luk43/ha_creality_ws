@@ -336,6 +336,33 @@ def _stream_source(cam, name="creality_k2_1_2_3_4"):
     return asyncio.run(run())
 
 
+def test_no_rtsp_source_while_a_stream_recreate_is_pending():
+    """`_configure_stream_locked` deletes before it adds.
+
+    An `add` that fails after a successful delete leaves the previous
+    `_stream_name` in place and only sets `_force_recreate_stream`, so this used
+    to hand Home Assistant's stream pipeline an RTSP URL for a stream go2rtc no
+    longer had.
+    """
+    import asyncio
+
+    cam = _camera()
+    _run_initialize(cam, custom_ok=True)
+
+    async def run():
+        with patch.object(cam, "_ensure_stream_configured", new_callable=AsyncMock):
+            cam._stream_name = "creality_k2_1_2_3_4"
+            cam._force_recreate_stream = True
+            pending = await cam.stream_source()
+            # ...and once the recreate has succeeded it comes back.
+            cam._force_recreate_stream = False
+            return pending, await cam.stream_source()
+
+    pending, recovered = asyncio.run(run())
+    assert pending is None, "no URL may be offered for a stream that may be gone"
+    assert recovered == "rtsp://127.0.0.1:18554/creality_k2_1_2_3_4"
+
+
 def test_a_failed_custom_go2rtc_does_not_keep_its_rtsp_override():
     """Custom init fails, discovery falls back to HA's go2rtc.
 
@@ -366,8 +393,10 @@ def test_an_ha_managed_instance_keeps_an_explicit_rtsp_override():
     assert ok is True
     assert cam._go2rtc_is_ha_managed is True
     assert cam._go2rtc_fell_back_from_custom is False, "no custom server was configured"
-    # Host comes from the resolved go2rtc URL, which for HA-managed is localhost.
-    assert _stream_source(cam) == "rtsp://localhost:9554/creality_k2_1_2_3_4"
+    # The port is kept; the host is pinned to IPv4 loopback. HA's managed go2rtc
+    # binds its RTSP listener to 127.0.0.1 only, and the "localhost" its API is
+    # addressed by can resolve to ::1, where nothing is listening.
+    assert _stream_source(cam) == "rtsp://127.0.0.1:9554/creality_k2_1_2_3_4"
 
 
 def test_a_reachable_custom_go2rtc_keeps_its_override():
