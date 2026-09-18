@@ -93,6 +93,13 @@ sleep 120                        # covers the ack race
 # the check can still be invisible to it; and `$(... || echo "")` turns a failed
 # fetch into "no rate limit", which is the wrong default. Re-reading it each
 # iteration catches a late ack and costs one request per 30s.
+# There is more than one refusal wording. Both carry the wait, neither is
+# reliably "rate limited":
+#   * "Action not completed" / "Review rate limited."
+#   * "Action failed" / "Review failed." -- says only "your included review limit
+#     is currently reached", so a grep for "rate limited" sails straight past it.
+_CR_REFUSAL_RE='rate limited|review limit is currently reached|next included review will be available'
+
 check_rate_limit() {
   local ack wait_min
   # Keyed on the comment id, not the timestamp. `date -u +%FT%TZ` has one-second
@@ -100,9 +107,13 @@ check_rate_limit() {
   # and a strict `>` misses it -- and relaxing to `>=` would then match a
   # *pre-existing* comment from that same second. Ids are monotonic per repo, so
   # "newer than the last comment before I posted" is exact.
+  #
+  # `.[0]` and not `.[]`: this trigger's own ack is the first CodeRabbit comment
+  # after the baseline. Matching every newer one also matches a *later* round's
+  # refusal, which reports a round that did start as refused.
   ack=$(gh api "repos/$owner/$repo/issues/$pr/comments" --paginate --jq \
-    "[.[] | select(.user.login|test(\"coderabbit\")) | select(.id > $last_comment_id)] | .[].body") || return 0
-  grep -qi "rate limited" <<<"$ack" || return 0
+    "[.[] | select(.user.login|test(\"coderabbit\")) | select(.id > $last_comment_id)] | .[0].body // empty") || return 0
+  grep -qiE "$_CR_REFUSAL_RE" <<<"$ack" || return 0
   wait_min=$(grep -oiE "available in [0-9]+ minute" <<<"$ack" | grep -oE "[0-9]+" | head -1)
   echo "RATE-LIMITED: no review started; retry in ${wait_min:-20} min"
   return 1
