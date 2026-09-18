@@ -58,6 +58,15 @@ required, plus a lead-in sleep that covers the ack race:
    "any bot comment" - the ack is a bot comment and never carries the marker).
 2. `/pulls/$pr/reviews` holds at least one CodeRabbit review with `submitted_at` after
    the trigger timestamp.
+3. That review is a **review pass**, not a reply. Replying to threads also submits a
+   review - `state: COMMENTED` with an **empty body** - so condition 2 alone goes true
+   within a minute of a round where you posted replies, reporting a clean round that
+   never ran. Require a non-empty body, or that the marker was seen at least once.
+
+Check for the rate-limit refusal **before** trusting any of it. The ack can read
+`Action performed / Full review triggered` and carry `Review rate limited ... your next
+included review will be available in N minutes` in the same comment: triggered, but not
+actually run. Grep the ack for `rate limited` and wait N minutes rather than polling.
 
 Capture the trigger timestamp (`date -u +%FT%TZ`) **before** posting the retrigger, and
 note the summary comment id once per PR.
@@ -77,8 +86,12 @@ while [ $SECONDS -lt $end ]; do
   busy=$(grep -cE "review in progress by coderabbit.ai|Come back again in a few minutes" <<<"$sumbody" || true)
   newrev=$(gh api "repos/$owner/$repo/pulls/$pr/reviews" --paginate --jq \
     "[.[] | select(.user.login|test(\"coderabbit\")) | select(.submitted_at > \"$trigger\")] | length" || echo 0)
-  if [ "$busy" = "0" ] && [ "$newrev" != "0" ]; then
-    echo "REVIEW COMPLETE newrev=$newrev"; exit 0
+  # Non-empty body only: an empty-bodied COMMENTED review is CodeRabbit replying
+  # to threads, which would otherwise read as a completed pass.
+  realrev=$(gh api "repos/$owner/$repo/pulls/$pr/reviews" --paginate --jq \
+    "[.[] | select(.user.login|test(\"coderabbit\")) | select(.submitted_at > \"$trigger\") | select(.body != \"\")] | length" || echo 0)
+  if [ "$busy" = "0" ] && [ "$realrev" != "0" ]; then
+    echo "REVIEW COMPLETE realrev=$realrev"; exit 0
   fi
   sleep 30
 done
