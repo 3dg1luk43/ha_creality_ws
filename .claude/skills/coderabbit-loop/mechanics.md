@@ -78,14 +78,23 @@ Do not use `Monitor` for this, and do not foreground-sleep.
 trigger="2026-01-01T00:00:00Z"   # captured before posting the retrigger
 summary_id=<the walkthrough issue comment id for this PR>
 sleep 120                        # covers the ack race
+
+# --- Gate 0: did the trigger actually start a review? -----------------------
+# The ack can say "Full review triggered" and carry the rate-limit refusal in the
+# same comment. Nothing will ever be submitted, so polling just burns the window.
+ack=$(gh api "repos/$owner/$repo/issues/$pr/comments" --paginate --jq \
+  "[.[] | select(.user.login|test(\"coderabbit\")) | select(.created_at > \"$trigger\")] | last | .body" || echo "")
+if grep -qi "rate limited" <<<"$ack"; then
+  wait_min=$(grep -oiE "available in [0-9]+ minute" <<<"$ack" | grep -oE "[0-9]+" | head -1)
+  echo "RATE-LIMITED: no review started; retry in ${wait_min:-20} min"; exit 2
+fi
+
 end=$((SECONDS+480))
 while [ $SECONDS -lt $end ]; do
   sumbody=$(gh api "repos/$owner/$repo/issues/comments/$summary_id" --jq '.body' || echo FETCHFAIL)
-  # Both marker forms, per the note below: matching only one lets `busy` reach 0
+  # Both marker forms, per the note above: matching only one lets `busy` reach 0
   # while the other is still on the summary, and the poller calls it complete.
   busy=$(grep -cE "review in progress by coderabbit.ai|Come back again in a few minutes" <<<"$sumbody" || true)
-  newrev=$(gh api "repos/$owner/$repo/pulls/$pr/reviews" --paginate --jq \
-    "[.[] | select(.user.login|test(\"coderabbit\")) | select(.submitted_at > \"$trigger\")] | length" || echo 0)
   # Non-empty body only: an empty-bodied COMMENTED review is CodeRabbit replying
   # to threads, which would otherwise read as a completed pass.
   realrev=$(gh api "repos/$owner/$repo/pulls/$pr/reviews" --paginate --jq \
