@@ -105,18 +105,23 @@ sleep 120                        # covers the ack race
 _CR_REFUSAL_RE='rate limited|review limit is currently reached|next included review will be available'
 
 check_rate_limit() {
-  local ack wait_min
+  local ack ack_id wait_min
   # Keyed on the comment id, not the timestamp. `date -u +%FT%TZ` has one-second
   # precision, so an ack posted in the same second as the trigger compares equal
   # and a strict `>` misses it -- and relaxing to `>=` would then match a
   # *pre-existing* comment from that same second. Ids are monotonic per repo, so
   # "newer than the last comment before I posted" is exact.
-  #
-  # `.[0]` and not `.[]`: this trigger's own ack is the first CodeRabbit comment
-  # after the baseline. Matching every newer one also matches a *later* round's
-  # refusal, which reports a round that did start as refused.
-  ack=$(gh api "repos/$owner/$repo/issues/$pr/comments" --paginate --jq \
-    "[.[] | select(.user.login|test(\"coderabbit\")) | select(.id > $last_comment_id)] | .[0].body // empty") || return 0
+  [[ $last_comment_id =~ ^[0-9]+$ ]] || last_comment_id=0
+  # Ids first, then one fetch. Only this trigger's own ack -- the *lowest* new id
+  # -- may decide: matching every newer comment lets a later round's refusal
+  # report a round that did start as refused. And it has to be picked in the
+  # shell, because `--paginate --jq` runs the filter per page, so a jq-side
+  # `.[0]` emits one body per page and a refusal on page two still reaches grep.
+  ack_id=$(gh api "repos/$owner/$repo/issues/$pr/comments" --paginate --jq \
+    "[.[] | select(.user.login|test(\"coderabbit\")) | select(.id > $last_comment_id)] | .[].id" \
+    | sort -n | head -1) || return 0
+  [[ $ack_id =~ ^[0-9]+$ ]] || return 0   # nothing posted yet: not a refusal
+  ack=$(gh api "repos/$owner/$repo/issues/comments/$ack_id" --jq '.body') || return 0
   grep -qiE "$_CR_REFUSAL_RE" <<<"$ack" || return 0
   wait_min=$(grep -oiE "available in [0-9]+ minute" <<<"$ack" | grep -oE "[0-9]+" | head -1)
   echo "RATE-LIMITED: no review started; retry in ${wait_min:-20} min"

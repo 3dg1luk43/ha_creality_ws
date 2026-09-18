@@ -155,8 +155,14 @@ def extract_info_from_zeroconf(info: Any) -> tuple[str | None, str | None]:
             addrs = [str(a) for a in info.addresses]
         
         if addrs:
-            v4 = next((a for a in addrs if ":" not in a), None)
-            host = v4 or addrs[0]
+            # Same precedence as the dict branch above, which is the one the
+            # tests exercised -- this is the branch a real ZeroconfServiceInfo
+            # takes, so it was still handing a 169.254 address to _probe_tcp.
+            host = (
+                next((a for a in addrs if _is_routable_v4(a)), None)
+                or next((a for a in addrs if ":" not in a), None)
+                or addrs[0]
+            )
         elif getattr(info, "host", None):
             host = str(info.host)
         elif getattr(info, "hostname", None):

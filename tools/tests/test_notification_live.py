@@ -792,14 +792,21 @@ def test_the_first_push_alerts_and_later_ones_do_not():
 def test_progress_refreshes_on_the_clock_not_only_on_a_milestone():
     """The card used to move only on a 5% boundary, so on a long print the
     percentage and the remaining estimate sat visibly stale for twenty minutes
-    at a time."""
+    at a time.
+
+    Progress is deliberately *unchanged* across the two frames. The step is 1, so
+    advancing it at all crosses a milestone and the push would be explained by
+    either rule -- which is what the old version did, under a comment claiming a
+    "5% bucket" left over from the previous step. Holding progress still leaves
+    the clock as the only thing that can produce a push.
+    """
     coord, hass = _coordinator()
     _frame(coord, hass, **_printing(10))
-    # Well past the refresh cadence but inside the same 5% bucket.
+    # Well past the refresh cadence, and inside the same milestone.
     coord.hass.loop.advance(NOTIFY_LIVE_INTERVAL_SECS + 1)
-    pushes = _live(_frame(coord, hass, **_printing(11)))
-    assert len(pushes) == 1
-    assert pushes[0]["data"]["progress"] == "11"
+    pushes = _live(_frame(coord, hass, **_printing(10)))
+    assert len(pushes) == 1, "the wall clock alone must refresh the card"
+    assert pushes[0]["data"]["progress"] == "10"
 
 
 def test_the_finishing_soon_reminder_sits_beside_the_card():

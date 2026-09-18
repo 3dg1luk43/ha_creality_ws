@@ -97,6 +97,44 @@ def test_extract_info_from_zeroconf_dicts():
     assert host == "printer.local"
 
 
+def test_extract_info_from_zeroconf_objects():
+    """The object branch is the one a real `ZeroconfServiceInfo` takes.
+
+    It had no test at all, so the routable-address precedence added for the dict
+    branch was absent here -- meaning production still handed `_probe_tcp` a
+    169.254 address and `async_step_zeroconf` still aborted with "not_K".
+    """
+    from types import SimpleNamespace
+
+    def info(**kwargs):
+        kwargs.setdefault("properties", {})
+        return SimpleNamespace(**kwargs)
+
+    # Routable wins wherever it sits in the list.
+    host, _mac = extract_info_from_zeroconf(info(ip_addresses=["169.254.13.7", "10.0.0.2"]))
+    assert host == "10.0.0.2", "a routable address must win over 169.254"
+    host, _mac = extract_info_from_zeroconf(info(ip_addresses=["10.0.0.2", "169.254.13.7"]))
+    assert host == "10.0.0.2"
+
+    # IPv6 is still deprioritised, and link-local remains a last resort.
+    host, _mac = extract_info_from_zeroconf(
+        info(ip_addresses=["fe80::1", "169.254.13.7", "192.168.1.9"])
+    )
+    assert host == "192.168.1.9"
+    host, _mac = extract_info_from_zeroconf(info(ip_addresses=["169.254.13.7"]))
+    assert host == "169.254.13.7"
+
+    # The legacy `addresses` attribute is honoured the same way.
+    host, _mac = extract_info_from_zeroconf(info(addresses=["169.254.13.7", "10.0.0.2"]))
+    assert host == "10.0.0.2"
+
+    # And the host/hostname fallbacks when no addresses were advertised.
+    host, _mac = extract_info_from_zeroconf(info(ip_addresses=[], host="192.168.1.5"))
+    assert host == "192.168.1.5"
+    host, _mac = extract_info_from_zeroconf(info(ip_addresses=[], hostname="printer.local."))
+    assert host == "printer.local"
+
+
 # --------------------------------------------------------------------------- #
 # Minimum core version
 # --------------------------------------------------------------------------- #

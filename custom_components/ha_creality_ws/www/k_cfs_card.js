@@ -1171,7 +1171,11 @@ class KCFSCard extends HTMLElement {
         left: 50%;
         bottom: 12px;
         transform: translateX(-50%);
-        z-index: 10;
+        /* Above .edit-overlay (100). Both _showToast and _showEditDialog append
+           to the same root, so at 10 the overlay's rgba backdrop painted over
+           every toast raised from the dialog: preset saved, preset deleted,
+           name required and invalid colour were all invisible. */
+        z-index: 110;
         max-width: calc(100% - 24px);
         padding: 8px 14px;
         border-radius: 6px;

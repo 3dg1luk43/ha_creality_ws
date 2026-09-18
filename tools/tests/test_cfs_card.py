@@ -414,8 +414,18 @@ def test_the_www_directory_is_not_served_wholesale():
 
 
 def test_asset_referenced_by_the_card_exists():
-    """A typo here is a broken image in every box-view dashboard."""
-    for name in re.findall(r'ASSET_URL_BASE\}([\w.\-]+)"', _card()):
+    """A typo here is a broken image in every box-view dashboard.
+
+    The match set is asserted non-empty first: if the card stops building asset
+    URLs as `${ASSET_URL_BASE}name`, `findall` returns nothing and the loop below
+    checks nothing while still passing.
+    """
+    names = re.findall(r'ASSET_URL_BASE\}([\w.\-]+)"', _card())
+    assert names, (
+        "no ${ASSET_URL_BASE}... references found -- has the URL form changed? "
+        "This test cannot see a broken asset reference until it matches again."
+    )
+    for name in names:
         assert (WWW / name).exists(), f"card references missing asset: {name}"
 
 
@@ -448,3 +458,26 @@ def test_readme_licence_matches_the_licence_file():
     )
     assert "Affero" in section, "LICENSE is AGPL but the README says otherwise"
     assert "MIT" not in section, "the README still claims MIT"
+
+
+def test_a_toast_is_stacked_above_the_edit_overlay():
+    """Both are appended to the same root, so the z-indexes decide.
+
+    At 10 against the overlay's 100 the rgba backdrop painted over every toast
+    raised from the dialog -- preset saved, preset deleted, name required and
+    invalid colour were all raised and none were visible.
+    """
+    import re
+
+    card = _card()
+
+    def z_index(selector: str) -> int:
+        start = card.index(selector)
+        match = re.search(r"z-index:\s*(\d+)", card[start:start + 800])
+        assert match, f"no z-index in the {selector} rule"
+        return int(match.group(1))
+
+    toast, overlay = z_index(".cfs-toast {"), z_index(".edit-overlay {")
+    assert toast > overlay, (
+        f"the toast (z-index {toast}) must sit above the edit overlay ({overlay})"
+    )

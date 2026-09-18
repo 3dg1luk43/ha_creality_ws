@@ -437,8 +437,12 @@ def test_target_box_temp_alone_creates_the_chamber_control(monkeypatch):
     code: the discovery signal fires once, so returning nothing left the control
     permanently absent. BoxTargetNumber already falls back to 60 C.
     """
+    # Capability deliberately *false*: this is the live-promotion path. With it
+    # true the entity is created from the cache and the test passed even with the
+    # `targetBoxTemp` promotion removed -- and the cached route is already covered
+    # by test_a_k2_base_still_gets_its_chamber_control_from_the_capability.
     coord = _bare_coord(monkeypatch, {"targetBoxTemp": 40.0})
-    run = _run_number_setup(coord, {"_cached_has_chamber_control": True})
+    run = _run_number_setup(coord, {"_cached_has_chamber_control": False})
 
     names = [type(e).__name__ for e in run.added]
     assert "BoxTargetNumber" in names, f"chamber control missing from {names}"
