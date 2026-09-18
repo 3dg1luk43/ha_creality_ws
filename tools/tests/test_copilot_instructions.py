@@ -29,9 +29,12 @@ def test_copilot_instructions_present_and_sections():
 
 def test_it_does_not_claim_a_linter_is_configured():
     """Nothing in the repo configures ruff, flake8 or pylint."""
-    assert not list(ROOT.glob("ruff.toml"))
-    assert not list(ROOT.glob(".flake8"))
-    assert not list(ROOT.glob(".pylintrc"))
+    # `.ruff.toml` counts as project configuration too, per Ruff's docs, so a
+    # check for `ruff.toml` alone would let one appear while this still passed.
+    for name in ("ruff.toml", ".ruff.toml", ".flake8", ".pylintrc", "tox.ini"):
+        assert not list(ROOT.glob(name)), (
+            f"{name} exists now; the lint claims in the instructions need revisiting"
+        )
     pyproject = (ROOT / "pyproject.toml").read_text()
     assert "[tool.ruff" not in pyproject
     text = inst.read_text()

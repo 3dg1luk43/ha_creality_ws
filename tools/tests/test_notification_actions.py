@@ -12,7 +12,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from conftest import fake_config_entry
+from conftest import (
+    fake_config_entry,
+    install_stub_attr,
+    install_stub_module,
+    restore_stubs,
+)
 
 from custom_components.ha_creality_ws.coordinator import KCoordinator
 from custom_components.ha_creality_ws.notification_rules import (
@@ -299,15 +304,15 @@ def test_the_stop_button_entity_uses_the_same_path(monkeypatch):
         pass
 
     button_mod.ButtonEntity = ButtonEntity
-    old = sys.modules.get("homeassistant.components.button")
-    sys.modules["homeassistant.components.button"] = button_mod
-    try:
-        from custom_components.ha_creality_ws.button import KPrintStopButton
-    finally:
-        if old is None:
-            sys.modules.pop("homeassistant.components.button", None)
-        else:
-            sys.modules["homeassistant.components.button"] = old
+    # Through the shared helpers so the parent attribute is restored too: the
+    # hand-rolled version only put back the `sys.modules` entry, leaving
+    # `homeassistant.components.button` pointing at this stub for the rest of the
+    # session. Undone by `teardown_module` at the bottom of this file.
+    install_stub_module(__name__, "homeassistant.components.button", button_mod)
+    install_stub_attr(
+        __name__, sys.modules["homeassistant.components"], "button", button_mod
+    )
+    from custom_components.ha_creality_ws.button import KPrintStopButton
 
     coord = _coordinator()
     button = KPrintStopButton.__new__(KPrintStopButton)
@@ -334,3 +339,8 @@ def test_a_near_identical_entry_id_is_still_distinguished():
     a = action_ids("01JABCDEFGHJKMNPQRSTVWXYZ0")
     b = action_ids("01JABCDEFGHJKMNPQRSTVWXYZ1")
     assert set(a.values()).isdisjoint(b.values())
+
+
+def teardown_module(_module):
+    """Undo the `homeassistant.components.button` stub installed above."""
+    restore_stubs(__name__)

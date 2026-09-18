@@ -259,6 +259,42 @@ def test_an_http_custom_url_is_not_treated_as_a_go2rtc_source():
 
 
 @requires_voluptuous
+@pytest.mark.parametrize("url", [
+    # Non-empty netloc made entirely of userinfo: `urlparse` reports
+    # netloc="user@" but hostname=None, so a netloc check accepted it.
+    "rtsp://user@",
+    "rtsp://user:pw@",
+    "rtsp://@",
+    "http://",
+    "rtsp://",
+    "not-a-url",
+])
+def test_a_custom_url_without_a_host_is_refused(url):
+    handler = _handler(EXTERNAL)
+
+    _submit(handler, {CONF_CAMERA_MODE: CAM_MODE_CUSTOM, CONF_CUSTOM_CAMERA_URL: url})
+
+    assert CONF_CUSTOM_CAMERA_URL not in handler._working, (
+        f"{url!r} has no host and must not be saved as a camera source"
+    )
+
+
+@requires_voluptuous
+@pytest.mark.parametrize("url", [
+    "rtsp://10.0.0.5:554/stream1",
+    "rtsp://user:pw@10.0.0.5/stream1",
+    "https://cam.local/snapshot.jpg",
+])
+def test_a_custom_url_with_a_host_is_accepted(url):
+    """Credentials in the URL are fine as long as a host follows them."""
+    handler = _handler(EXTERNAL)
+
+    _submit(handler, {CONF_CAMERA_MODE: CAM_MODE_CUSTOM, CONF_CUSTOM_CAMERA_URL: url})
+
+    assert handler._working[CONF_CUSTOM_CAMERA_URL] == url
+
+
+@requires_voluptuous
 def test_the_go2rtc_fields_are_offered_for_a_custom_rtsp_source():
     """Once the URL is staged, the step must expose the server settings."""
     handler = _handler({

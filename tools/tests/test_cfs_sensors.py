@@ -217,6 +217,12 @@ def test_a_powered_off_printer_publishes_no_stale_material_attributes():
 
 
 def test_an_offline_external_slot_publishes_no_stale_attributes():
+    """The *unavailable* path, i.e. a lost WebSocket rather than a power switch.
+
+    This set `available=True` with `power_is_off()` true, which is the powered-off
+    case the test above already covers -- so the unavailable branch of
+    `_should_zero()` was never exercised here.
+    """
     coord = SimpleNamespace(
         client=SimpleNamespace(_host="1.2.3.4"),
         data={
@@ -226,8 +232,8 @@ def test_an_offline_external_slot_publishes_no_stale_attributes():
                 ]
             }
         },
-        available=True,
-        power_is_off=lambda: True,
+        available=False,
+        power_is_off=lambda: False,
     )
     sensor = KCFSExtSlotSensor(coord, slot_id=0, sensor_type="filament")
     assert sensor.extra_state_attributes == {}

@@ -75,6 +75,10 @@ posting too -- the ack is identified by id rather than timestamp:
 ```bash
 last_comment_id=$(gh api "repos/$owner/$repo/issues/$pr/comments" --paginate \
   --jq '.[].id' | sort -n | tail -1)
+# A PR with no comments yet leaves this empty, which builds the invalid jq filter
+# `.id > ` -- and the `|| return 0` in the helper then reports "not refused" for
+# every iteration. 0 is below every real id, so it means "everything".
+[[ $last_comment_id =~ ^[0-9]+$ ]] || last_comment_id=0
 ```
 
 Wait in the background (single notification on exit, ~9 min cap, re-arm if it times out).

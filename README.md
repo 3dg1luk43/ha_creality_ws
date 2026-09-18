@@ -402,7 +402,8 @@ If your printer reports CFS data, the integration creates sensors for each CFS b
 
 Creality RFID tags store the colour as *seven* hex characters: a padding character
 followed by the real `RRGGBB`. `color_hex` therefore keeps the **last** six digits,
-so `#0ffffff` becomes `#ffffff`. `color_hex_raw` is kept for reference.
+so the tag's `0ffffff` becomes `#ffffff` -- the `#` is added by the normalisation,
+not reported by the printer. `color_hex_raw` keeps the printer's value verbatim.
 
 `rfid` is a material/filament id rather than a tag serial, so two spools of the same
 material and vendor share it even when their colours differ. `spool_key` combines it

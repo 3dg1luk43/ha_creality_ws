@@ -280,7 +280,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 parsed = urlparse(custom_url)
                 # Require a supported scheme and a host. http(s) -> MJPEG/snapshot;
                 # rtsp/rtmp/srt -> ingested via go2rtc (see camera.async_setup_entry).
-                if parsed.scheme.lower() not in ("http", "https") + GO2RTC_SOURCE_SCHEMES or not parsed.netloc:
+                #
+                # `hostname` and not `netloc`: "rtsp://user@" has a non-empty
+                # netloc made entirely of userinfo, so it passed validation and
+                # was saved as a source nothing can connect to.
+                if parsed.scheme.lower() not in ("http", "https") + GO2RTC_SOURCE_SCHEMES or not parsed.hostname:
                     errors[CONF_CUSTOM_CAMERA_URL] = "invalid_camera_url"
                     effective_mode = CAM_MODE_CUSTOM  # ensure the URL field is shown
                 else:
