@@ -91,7 +91,10 @@ fi
 
 end=$((SECONDS+480))
 while [ $SECONDS -lt $end ]; do
-  sumbody=$(gh api "repos/$owner/$repo/issues/comments/$summary_id" --jq '.body' || echo FETCHFAIL)
+  # A failed fetch must not read as "marker absent": `grep -c` on FETCHFAIL
+  # returns 0, so a transient API error plus an already-submitted review would
+  # report completion without ever confirming the marker had cleared.
+  sumbody=$(gh api "repos/$owner/$repo/issues/comments/$summary_id" --jq '.body') || { sleep 30; continue; }
   # Both marker forms, per the note above: matching only one lets `busy` reach 0
   # while the other is still on the summary, and the poller calls it complete.
   busy=$(grep -cE "review in progress by coderabbit.ai|Come back again in a few minutes" <<<"$sumbody" || true)

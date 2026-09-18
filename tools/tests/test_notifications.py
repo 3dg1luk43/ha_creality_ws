@@ -52,10 +52,19 @@ def _run(coro):
 
 @pytest.fixture(autouse=True)
 def _event_loop():
+    # Restore the previous loop: closing does not uninstall it, so the policy
+    # keeps handing this closed loop to any later module without its own fixture.
+    try:
+        previous = asyncio.get_event_loop_policy().get_event_loop()
+    except Exception:  # pylint: disable=broad-except
+        previous = None
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    yield
-    loop.close()
+    try:
+        yield
+    finally:
+        loop.close()
+        asyncio.set_event_loop(previous)
 
 
 def test_finished_job_at_startup_does_not_notify(monkeypatch):

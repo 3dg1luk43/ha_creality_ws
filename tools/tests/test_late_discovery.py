@@ -210,14 +210,25 @@ def test_a_field_that_gates_an_entity_can_also_trigger_discovery(field, monkeypa
     duplicated the constant's own comment, so it could not have caught the third
     instance of a mismatch that had already happened twice.
     """
+    # Against a field-free baseline, by unique id. `if run.added` was always true:
+    # both platforms add their standard entities whether or not `field` is there
+    # (3 from number, 20 from sensor), so the old form proved nothing and passed
+    # only because every candidate happened to be in the constant already.
+    # Ids rather than class names, since KSimpleFieldSensor is in the baseline.
+    def _ids(run):
+        return {
+            getattr(e, "_attr_unique_id", None) or getattr(e, "unique_id", None)
+            for e in run.added
+        }
+
     gates_something = False
-    for run in (
-        _run_number_setup(_bare_coord(monkeypatch, {field: 40.0}),
-                          {"_cached_has_chamber_control": True}),
-        _run_sensor_setup(_bare_coord(monkeypatch, {field: 40.0}),
-                          {"_cached_has_chamber_sensor": False}),
+    for runner, entry_data in (
+        (_run_number_setup, {"_cached_has_chamber_control": True}),
+        (_run_sensor_setup, {"_cached_has_chamber_sensor": False}),
     ):
-        if run.added:
+        baseline = _ids(runner(_bare_coord(monkeypatch, {}), entry_data))
+        with_field = _ids(runner(_bare_coord(monkeypatch, {field: 40.0}), entry_data))
+        if with_field - baseline:
             gates_something = True
 
     if gates_something:

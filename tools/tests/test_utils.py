@@ -183,6 +183,13 @@ def test_a_stale_error_code_does_not_mask_what_the_job_is_doing():
     ({"withSelfTest": "50"}, "self-testing"),
     ({"withSelfTest": "0"}, "idle"),
     ({"withSelfTest": "junk"}, "idle"),
+    # Non-finite progress: `safe_float` passes nan/inf through and `int()` raises
+    # ValueError on the first, OverflowError on the second.
+    ({"printFileName": "a.gcode", "state": 1, "printProgress": "nan"}, "printing"),
+    ({"printFileName": "a.gcode", "state": 1, "printProgress": "inf"}, "printing"),
+    ({"printFileName": "a.gcode", "state": 1, "printProgress": float("-inf")}, "printing"),
+    # A non-finite reading must not be mistaken for a completed job either.
+    ({"printFileName": "a.gcode", "state": 0, "printProgress": float("inf")}, "processing"),
 ])
 def test_malformed_telemetry_does_not_raise_out_of_the_state_derivation(frame, expected):
     """This runs on the WebSocket frame path, so raising here takes the whole

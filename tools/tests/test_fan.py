@@ -112,6 +112,11 @@ def test_fan_is_off_and_zero_when_the_printer_is_unreachable():
     assert fan.is_on is False
 
 
+# Optional third-party imports the simulator makes at module scope. Anything
+# outside this set is a defect in the simulator, not a missing extra.
+_SIMULATOR_OPTIONAL_DEPS = frozenset({"aiortc", "av", "websockets", "aiohttp"})
+
+
 def _test_server_source() -> str:
     from pathlib import Path
 
@@ -154,8 +159,13 @@ def test_test_server_prefers_h264_for_video():
     sys.modules[name] = module
     try:
         spec.loader.exec_module(module)
-    except Exception as exc:  # pragma: no cover - aiortc/av absent in CI
-        pytest.skip(f"simulator not importable here: {exc}")
+    except ModuleNotFoundError as exc:  # pragma: no cover - aiortc/av absent in CI
+        # Only a genuinely absent optional dependency is a skip. Catching every
+        # exception meant a SyntaxError or a NameError in the simulator itself
+        # reported as "not importable here" and the test passed as skipped.
+        if (exc.name or "").split(".")[0] not in _SIMULATOR_OPTIONAL_DEPS:
+            raise
+        pytest.skip(f"simulator dependency missing: {exc.name}")
     finally:
         sys.modules.pop(name, None)
 

@@ -770,7 +770,7 @@ The diagnostic data can be safely shared with developers for troubleshooting. It
 
 GNU Affero General Public License v3.0. See `LICENSE`.
 
-One bundled file is **not** covered by that grant: `www/cfs_box.webp` is a
+One bundled file is **not** covered by that grant: `custom_components/ha_creality_ws/www/cfs_box.webp` is a
 Creality product render, used by the CFS card's `box` display mode to depict the
 hardware this integration controls. See `NOTICE` for the details, including how
 to produce a build with no third-party material in it.

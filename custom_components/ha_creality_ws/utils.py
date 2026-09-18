@@ -518,7 +518,13 @@ def derive_print_state(
         data.get("printProgress") if data.get("printProgress") is not None
         else data.get("dProgress")
     )
-    progress = -1 if progress is None else int(progress)
+    # `safe_float` happily returns nan/inf, and `int()` raises ValueError on the
+    # first and OverflowError on the second. Same frame path as the fields above,
+    # so treat a non-finite reading as no reading at all.
+    if progress is None or not math.isfinite(progress):
+        progress = -1
+    else:
+        progress = int(progress)
 
     if filename:
         if progress >= 100:
