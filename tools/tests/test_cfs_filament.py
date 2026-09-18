@@ -26,7 +26,13 @@ from custom_components.ha_creality_ws.utils import (
         # Already-correct values pass through (normalised to lowercase + '#').
         ("#ffffff", "#ffffff"),
         ("1b04ae", "#1b04ae"),
-        ("#fff", "#fff"),
+        # Short form is expanded, not passed through: the contract is #rrggbb,
+        # `build_spool_key` must not treat #abc and #aabbcc as two spools, and
+        # `normalize_material_color` refuses to write a three-digit colour.
+        ("#fff", "#ffffff"),
+        ("#abc", "#aabbcc"),
+        ("#ABC", "#aabbcc"),
+        ("abc", "#aabbcc"),
     ],
 )
 def test_normalize_color_hex_keeps_last_six_digits(raw, expected):
@@ -117,6 +123,13 @@ def test_spool_key_keeps_an_odd_length_hex_token(color, expected):
     case and *are* excluded; see the test above.
     """
     assert build_spool_key(rfid="001001", color=color) == expected
+
+
+def test_spool_key_treats_the_short_and_long_form_of_a_colour_as_one_spool():
+    """#abc and #aabbcc are the same colour, so they must not be two spools."""
+    short = build_spool_key(rfid="001001", color="#abc")
+    long = build_spool_key(rfid="001001", color="#aabbcc")
+    assert short == long == "001001_aabbcc"
 
 
 def test_spool_key_uses_the_material_name_when_vendor_is_absent():

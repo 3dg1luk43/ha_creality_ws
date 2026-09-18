@@ -1616,7 +1616,14 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         `last_rx_monotonic()` go stale and flip every entity unavailable.
         """
         clear = build_clear_payload(f"{self._notify_tag_base()}_live")
-        targets = [t for t in self._notify_targets if is_mobile_target(t)]
+        # The same live-capability gate the card itself was pushed under. A
+        # macOS companion is skipped by `live_only`, so it never received the
+        # card -- sending it the dismiss sentinel clears a tag it does not have,
+        # and the sentinel is only meaningful to a client that consumes it.
+        targets = [
+            t for t in self._notify_targets
+            if is_mobile_target(t) and is_live_capable(self._target_os(t))
+        ]
         for target in targets:
             self.hass.async_create_task(
                 self._async_replace_one(target, clear, payload)
@@ -1626,10 +1633,10 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             kind,
             len(targets),
         )
-        # Non-mobile targets cannot carry a tag, so there is no card to replace
-        # there -- they just get the banner.
+        # Everything else just gets the banner: a non-mobile target cannot carry
+        # a tag at all, and a live-incapable one has no card to replace.
         for target in self._notify_targets:
-            if not is_mobile_target(target):
+            if target not in targets:
                 self.hass.async_create_task(
                     self._async_deliver_one(target, payload)
                 )

@@ -132,6 +132,21 @@ def _frame(coord, hass, **telemetry):
     return [c[2] for c in calls]
 
 
+def _frame_calls(coord, hass, **telemetry):
+    """Like `_frame`, but keeps the target each payload went to.
+
+    `_frame` discards it -- it returns only the payload dicts -- so a test about
+    *which* device received what cannot use it.
+    """
+    coord.data = {"hostname": "K1C", **telemetry}
+    asyncio.get_event_loop().run_until_complete(coord._check_notifications({}))
+    pending, hass.tasks = hass.tasks, []
+    if pending:
+        asyncio.get_event_loop().run_until_complete(asyncio.gather(*pending))
+    calls, hass.calls = hass.calls, []
+    return calls
+
+
 def _printing(progress=10, **kw):
     payload = {
         "printFileName": "/usr/data/printer_data/gcodes/3DBenchy.gcode",
@@ -848,6 +863,41 @@ def test_the_terminal_banner_replaces_the_card_and_frees_it():
     # No alert_once, or replacing the card would happen silently and the
     # "finished" ping would never sound.
     assert "alert_once" not in data
+
+
+def test_a_mac_is_not_sent_a_dismissal_for_a_card_it_never_received():
+    """The replace path must use the same live-capability gate as the card.
+
+    `live_only` skips macOS, so it never gets the live card -- but the
+    replacement path selected every *mobile* target, so the clear sentinel went
+    to it anyway, clearing a tag it does not have. The banner still must arrive,
+    exactly as for the finishing-soon reminder.
+    """
+    coord, hass = _coordinator(
+        targets=("notify.mobile_app_s24", "notify.mobile_app_macbookairlukas")
+    )
+    _with_devices(coord, hass, [("S24", "Android"), ("MacBookAirLukas", "macOS")])
+
+    _frame(coord, hass, **_printing(50))
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    calls = _frame_calls(coord, hass, **_printing(100, printLeftTime=0))
+
+    def messages_for(service):
+        return [c[2]["message"] for c in calls if c[1] == service]
+
+    mac = messages_for("mobile_app_macbookairlukas")
+    android = messages_for("mobile_app_s24")
+
+    assert CLEAR_NOTIFICATION_MARKER not in mac, (
+        f"the Mac never had the card, so it must not be sent a dismissal: {mac}"
+    )
+    assert len(mac) == 1, f"but it does still get the banner: {mac}"
+
+    assert CLEAR_NOTIFICATION_MARKER in android, (
+        f"the phone did have the card and must have it cleared: {android}"
+    )
+    assert len(android) == 2, f"clear then banner, in that order: {android}"
+    assert android[0] == CLEAR_NOTIFICATION_MARKER
 
 
 def test_a_card_the_user_hid_does_not_come_straight_back():

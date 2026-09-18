@@ -371,7 +371,12 @@ def _normalize_color_token(token: str) -> str:
     if not _HEX_RE.match(body):
         return token
     if len(body) == 3:
-        return f"#{body.lower()}"
+        # Expanded, not passed through: the docstring promises #rrggbb, and a
+        # short form otherwise gave `build_spool_key` two different ids for the
+        # same colour (#abc vs #aabbcc). It also kept the value unwritable --
+        # `normalize_material_color` refuses a three-digit colour -- so a card
+        # prefilling from `color_hex` could not save what it was shown.
+        return "#" + "".join(ch * 2 for ch in body.lower())
     if len(body) >= 6:
         # Creality pads the colour with a leading character, so the *last* six
         # hex digits are the real RRGGBB value.

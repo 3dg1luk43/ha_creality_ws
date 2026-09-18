@@ -19,8 +19,14 @@ from homeassistant.util import dt as dt_util  # type: ignore[import]
 from homeassistant.exceptions import ConfigEntryNotReady  # type: ignore[import]
 try:
     from homeassistant.exceptions import ConfigEntryError  # type: ignore[import]
+    _CONFIG_ENTRY_ERROR_TRANSLATES = True
 except ImportError:  # pragma: no cover - older cores, which is what we reject
     from homeassistant.exceptions import HomeAssistantError as ConfigEntryError  # type: ignore[import]
+    # A core without `ConfigEntryError` also predates translated exceptions
+    # (2024.4), so `HomeAssistantError.__init__` takes no `translation_*`
+    # arguments. Passing them raises TypeError *instead of* the version message,
+    # which is the one moment that message has to get through.
+    _CONFIG_ENTRY_ERROR_TRANSLATES = False
 try:  # HA 2023.10+
     from homeassistant.exceptions import ServiceValidationError  # type: ignore[import]
 except ImportError:  # pragma: no cover - older cores
@@ -181,12 +187,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # make the core newer.
     running = _core_version()
     if not core_version_supported(running, MINIMUM_HA_VERSION):
+        minimum_text = ".".join(str(part) for part in MINIMUM_HA_VERSION)
+        running_text = ".".join(str(part) for part in running or ()) or "unknown"
+        if not _CONFIG_ENTRY_ERROR_TRANSLATES:
+            # The only inline user-visible string in the integration, and it has
+            # to be: this core cannot resolve a translation key, so the choice is
+            # an English sentence or a TypeError. `strings.json` still carries the
+            # translated version for every core that can use it.
+            raise ConfigEntryError(
+                f"ha_creality_ws requires Home Assistant {minimum_text} or newer; "
+                f"this system is running {running_text}."
+            )
         raise ConfigEntryError(
             translation_domain=DOMAIN,
             translation_key="unsupported_ha_version",
             translation_placeholders={
-                "minimum": ".".join(str(part) for part in MINIMUM_HA_VERSION),
-                "running": ".".join(str(part) for part in running or ()),
+                "minimum": minimum_text,
+                "running": running_text,
             },
         )
 

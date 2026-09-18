@@ -281,3 +281,30 @@ def test_notification_keys_are_valid_slugs():
             key for key in _load(path)[NOTIFICATION_SECTION] if not slug.match(key)
         )
         assert not offenders, f"{path.name}: {offenders}"
+
+
+def test_the_version_gate_has_a_message_for_a_core_that_cannot_translate():
+    """`ConfigEntryError` and translated exceptions arrived together.
+
+    On a core old enough to need the `HomeAssistantError` fallback,
+    `__init__` takes no `translation_*` arguments, so raising with them gives a
+    TypeError instead of the "your core is too old" message -- the one moment it
+    has to get through. The fallback path must therefore pass a positional
+    string, and every other core must still use the translation key.
+    """
+    import re
+
+    source = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
+
+    assert "_CONFIG_ENTRY_ERROR_TRANSLATES" in source, (
+        "the fallback import must record whether translated exceptions exist"
+    )
+    gate = source[source.index("def async_setup_entry") :][:2000]
+    assert re.search(r"if not _CONFIG_ENTRY_ERROR_TRANSLATES:", gate), (
+        "the version gate must branch on it before raising"
+    )
+    # The translated form is still the path for a supported core.
+    assert 'translation_key="unsupported_ha_version"' in gate
+    assert "unsupported_ha_version" in _load(COMPONENT / "strings.json").get(
+        "exceptions", {}
+    ), "the translated message must still exist for cores that can use it"

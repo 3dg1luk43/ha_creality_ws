@@ -44,10 +44,26 @@ def test_it_does_not_claim_a_linter_is_configured():
 
 
 def test_preview_reason_list_matches_the_image_entity():
-    """`unsupported_model` was removed from image.py; the doc must not list it."""
+    """`unsupported_model` was removed from image.py; the doc must not list it.
+
+    Both spellings: this guarded `unsupported_model` only, so the doc was free to
+    say a bare "unsupported" -- which it did, for three rounds, until someone read
+    it. Scoped to lines that actually describe `preview_reason`, so an unrelated
+    use of the word elsewhere in the file does not fail.
+    """
+    import re
+
     image = (SRC / "image.py").read_text()
     assert "unsupported_model" not in image, "image.py changed; update the doc too"
-    assert "unsupported_model" not in inst.read_text()
+
+    text = inst.read_text()
+    assert "unsupported_model" not in text
+    for line in text.splitlines():
+        if not re.search(r"preview_reason", line):
+            continue
+        assert not re.search(r"\bunsupported\w*", line, re.IGNORECASE), (
+            f"the only preview_reason values are ok/not_printing/fetch_failed: {line!r}"
+        )
 
 
 def test_the_preview_is_not_described_as_k1_only():
