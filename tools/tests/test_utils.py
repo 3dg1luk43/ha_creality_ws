@@ -65,14 +65,33 @@ def test_safe_float():
 def test_extract_info_from_zeroconf_dicts():
     """Covers the host-resolution order config_flow.async_step_zeroconf depends on.
 
-    Note the link-local address is skipped in favour of the routable one, and
-    the trailing dot is stripped from an mDNS hostname.
+    Link-local addresses are skipped in favour of a routable one, and the
+    trailing dot is stripped from an mDNS hostname. This used to claim the
+    link-local part while only exercising `fe80::1`, which was skipped for
+    containing a colon rather than for being link-local -- the IPv4 169.254 case
+    below was the one that actually mattered and was not covered.
     """
     host, _mac = extract_info_from_zeroconf({"host": "192.168.1.5"})
     assert host == "192.168.1.5"
 
     host, _mac = extract_info_from_zeroconf({"addresses": ["fe80::1", "10.0.0.2"]})
     assert host == "10.0.0.2"
+
+    # IPv4 link-local first in the list: a printer whose DHCP lease failed
+    # advertises both, and probing 169.254 aborts discovery with "not_K".
+    host, _mac = extract_info_from_zeroconf(
+        {"addresses": ["169.254.13.7", "10.0.0.2"]}
+    )
+    assert host == "10.0.0.2", "a routable address must win over 169.254"
+
+    host, _mac = extract_info_from_zeroconf(
+        {"addresses": ["fe80::1", "169.254.13.7", "192.168.1.9"]}
+    )
+    assert host == "192.168.1.9"
+
+    # ...but link-local is better than nothing when it is all the printer gave.
+    host, _mac = extract_info_from_zeroconf({"addresses": ["169.254.13.7"]})
+    assert host == "169.254.13.7", "link-local is still a usable last resort"
 
     host, _mac = extract_info_from_zeroconf({"hostname": "printer.local."})
     assert host == "printer.local"
@@ -150,6 +169,31 @@ def test_a_stale_error_code_does_not_mask_what_the_job_is_doing():
     frame = dict(PRINTING_FRAME, err={"errcode": 521, "key": 1})
     assert derive_print_state(frame) == "error"
     assert derive_activity_state(frame) == "printing"
+
+
+@pytest.mark.parametrize("frame,expected", [
+    # `err` as a bare code rather than the usual mapping.
+    ({"err": 521}, "error"),
+    ({"err": 0}, "idle"),
+    # Unparseable: degrade to "no error" rather than raising.
+    ({"err": "boom"}, "idle"),
+    ({"err": [1]}, "idle"),
+    ({"err": None}, "idle"),
+    # `withSelfTest` arriving as a string.
+    ({"withSelfTest": "50"}, "self-testing"),
+    ({"withSelfTest": "0"}, "idle"),
+    ({"withSelfTest": "junk"}, "idle"),
+])
+def test_malformed_telemetry_does_not_raise_out_of_the_state_derivation(frame, expected):
+    """This runs on the WebSocket frame path, so raising here takes the whole
+    state update with it and every entity reads its state through it.
+
+    `err` as a non-mapping hit `.get` on an int, and a string `withSelfTest` hit
+    a chained int comparison -- both AttributeError/TypeError rather than a state.
+    """
+    assert derive_print_state(frame) == expected
+    # The activity variant re-derives, so it has the same exposure.
+    assert derive_activity_state(frame) is not None
 
 
 def test_activity_state_still_reports_error_when_nothing_is_running():

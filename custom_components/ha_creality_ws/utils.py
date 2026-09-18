@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Mapping
 from typing import Any, ClassVar
 
 __all__ = [
@@ -85,6 +86,14 @@ def safe_float(v: Any) -> float | None:
         return float(v)
     except (TypeError, ValueError):
         return None
+def _is_routable_v4(addr: Any) -> bool:
+    """An IPv4 address that is not link-local (169.254.0.0/16)."""
+    text = str(addr).strip()
+    if not text or ":" in text:
+        return False
+    return not text.startswith("169.254.")
+
+
 def extract_info_from_zeroconf(info: Any) -> tuple[str | None, str | None]:
     """Extract host/IP and optional MAC from zeroconf discovery info.
     
@@ -102,9 +111,18 @@ def extract_info_from_zeroconf(info: Any) -> tuple[str | None, str | None]:
         else:
             addrs_raw = info.get("addresses") or info.get("ip_addresses") or info.get("ip_address")
             if isinstance(addrs_raw, (list, tuple)) and addrs_raw:
-                # Prefer IPv4 addresses when present (no ':' in string)
-                v4 = next((a for a in addrs_raw if ":" not in str(a)), None)
-                host = str(v4 or addrs_raw[0])
+                # IPv4 first (no ':' in the string), and a routable IPv4 ahead of
+                # a 169.254 link-local one. A printer whose DHCP lease failed, or
+                # which answers on a second interface, advertises the link-local
+                # address alongside the real one -- and taking whichever came
+                # first meant `async_step_zeroconf` probed an address nothing
+                # answers on and aborted with "not_K", so the printer was never
+                # offered at all. Link-local is still used if it is all there is.
+                host = str(
+                    next((a for a in addrs_raw if _is_routable_v4(a)), None)
+                    or next((a for a in addrs_raw if ":" not in str(a)), None)
+                    or addrs_raw[0]
+                )
             elif isinstance(addrs_raw, str):
                 host = addrs_raw
             if not host:
@@ -481,10 +499,17 @@ def derive_print_state(
     if not available:
         return "unknown"
 
-    if (data.get("err") or {}).get("errcode", 0) != 0:
+    # Both fields are normalised rather than trusted. This runs on the WebSocket
+    # frame path, so a printer that reports `err` as a bare code instead of a
+    # mapping, or `withSelfTest` as a string, would raise here and take the whole
+    # state update with it -- and every entity reads its state through this.
+    err = data.get("err")
+    errcode = safe_float(err.get("errcode", 0) if isinstance(err, Mapping) else err)
+    if errcode is not None and errcode != 0:
         return "error"
 
-    if 1 <= (data.get("withSelfTest") or 0) <= 99:
+    self_test = safe_float(data.get("withSelfTest"))
+    if self_test is not None and 1 <= self_test <= 99:
         return "self-testing"
 
     state = data.get("state")

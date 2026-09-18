@@ -97,8 +97,12 @@ while [ $SECONDS -lt $end ]; do
   busy=$(grep -cE "review in progress by coderabbit.ai|Come back again in a few minutes" <<<"$sumbody" || true)
   # Non-empty body only: an empty-bodied COMMENTED review is CodeRabbit replying
   # to threads, which would otherwise read as a completed pass.
+  # `--paginate` runs the --jq filter per *page*, so this emits one count per
+  # page: a bare `!= "0"` test on the raw value compares against "0\n0" and goes
+  # true on two empty pages. Sum them.
   realrev=$(gh api "repos/$owner/$repo/pulls/$pr/reviews" --paginate --jq \
-    "[.[] | select(.user.login|test(\"coderabbit\")) | select(.submitted_at > \"$trigger\") | select(.body != \"\")] | length" || echo 0)
+    "[.[] | select(.user.login|test(\"coderabbit\")) | select(.submitted_at > \"$trigger\") | select(.body != \"\")] | length" \
+    | awk '{s+=$1} END{print s+0}')
   if [ "$busy" = "0" ] && [ "$realrev" != "0" ]; then
     echo "REVIEW COMPLETE realrev=$realrev"; exit 0
   fi
@@ -199,9 +203,13 @@ normalises to LF and turns a two-line fix into a three-thousand-line diff.
 
 ```bash
 # After edits, restore any file whose HEAD version was CRLF.
-# The path is passed as argv and read from sys.argv, never interpolated into the
-# Python source: a file name containing a quote would otherwise be parsed as
-# code, and `-z` plus `read -d ''` keeps names with spaces in one piece.
+# `-z` plus `read -d ''` is the part that matters: `git diff --name-only` C-quotes
+# an unusual path, and the unquoted `$(...)` this replaced then split it on the
+# embedded space, so the file was silently skipped and left flattened to LF --
+# exactly the whole-file diff this is here to prevent. The path also goes in as
+# argv rather than being interpolated into the Python source, which is the right
+# shape regardless, though the quoting above is what actually stopped the old
+# form from reaching Python with a crafted name.
 while IFS= read -r -d '' f; do
   case "$f" in *.py|*.json|*.js|*.mjs|*.md) ;; *) continue ;; esac
   git show "HEAD:$f" 2>/dev/null | grep -qU $'\r' || continue

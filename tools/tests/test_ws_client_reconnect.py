@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-from conftest import drop_stub_module, install_stub_module, restore_stubs
+from conftest import install_stub_module, restore_stubs
 
 # ---------------------------------------------------------------------------
 # Bootstrap: make sure the real ws_client module is importable without HA
@@ -23,8 +23,11 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# Remove the conftest stub so we load the real module
-drop_stub_module(__name__, "custom_components.ha_creality_ws.ws_client")
+# The conftest stub at `custom_components.ha_creality_ws.ws_client` is left in
+# place. The real implementation is loaded below under the separate name
+# `ha_creality_ws.ws_client`, so dropping the canonical one bought nothing -- and
+# it happened at *collection* time and was only undone in `teardown_module`, so
+# any module collected in between imported the real client instead of the stub.
 
 # Provide minimal stubs for any HA imports the module might pull in
 for mod_name in [

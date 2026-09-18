@@ -96,6 +96,8 @@ If auto-detection doesn't choose your preferred stream, you can force it under t
 
 Native WebRTC works out of the box: the bundled go2rtc in every supported core (2026.7+) is new enough for Creality's streams. The go2rtc host/port fields in the options exist for pointing the integration at a stand-alone go2rtc instead, and for the RTSP port its stream pipeline uses.
 
+> **If you point these at a go2rtc on another machine,** be aware that the RTSP hop Home Assistant uses to pull the stream is plain `rtsp://` -- go2rtc has no RTSPS output, so that traffic is unencrypted on your network. Left at the default it is loopback only (`127.0.0.1`) and never leaves the host. Only send it across a network you trust, or put it through a TLS-terminating proxy or tunnel.
+
 ### Dependencies
 
 The integration automatically installs the following Python packages:
