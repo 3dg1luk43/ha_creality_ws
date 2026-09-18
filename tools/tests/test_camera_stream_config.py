@@ -1,7 +1,7 @@
 import sys
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from conftest import drop_stub_module, install_stub_module, restore_stubs
+from conftest import install_stub_module, restore_stubs
 
 if "aiohttp" not in sys.modules:
     install_stub_module(__name__, "aiohttp", MagicMock())
@@ -45,12 +45,13 @@ else:
     sys.modules["homeassistant.components.camera"] = cam_mod
     sys.modules["homeassistant.components"].camera = cam_mod
 
-# Same reasoning as tools/tests/test_camera_webrtc_repro.py: camera.py binds
-# `aiohttp` and `go2rtc_client` at import time and both are stubbed here, so
-# whichever suite first caches the module records it for teardown.
-if "custom_components.ha_creality_ws.camera" not in sys.modules:
-    drop_stub_module(__name__, "custom_components.ha_creality_ws.camera")
-
+# The camera module graph is deliberately left installed for the whole session.
+# Both camera suites stub `aiohttp` and `go2rtc_client` the same way and nothing
+# else imports camera, so one module object is correct -- and necessary: these
+# tests patch by string target (`patch("...camera.Go2RtcClientError", ...)`),
+# which resolves through sys.modules, while the class under test was bound at
+# collection. Dropping the module made those two disagree, so the patch landed on
+# a freshly imported module the running code knew nothing about.
 from custom_components.ha_creality_ws.camera import CrealityWebRTCCamera  # noqa: E402
 
 

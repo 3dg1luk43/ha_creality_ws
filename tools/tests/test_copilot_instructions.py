@@ -47,6 +47,27 @@ def test_preview_reason_list_matches_the_image_entity():
     assert "unsupported_model" not in inst.read_text()
 
 
+def test_the_preview_is_not_described_as_k1_only():
+    """Three review rounds in a row flagged a K1-only preview claim in this file.
+
+    `image.py` attempts the URL for every model (the gate went in 43c6668), so any
+    line that ties the *preview* to the K1 family sends an agent to reinstate it.
+    K1-family mentions about model detection or MJPEG cameras are accurate and
+    deliberately not matched here.
+    """
+    import re
+
+    k1 = re.compile(r"k1[ -]family|k1[ -]only", re.IGNORECASE)
+    preview = re.compile(r"preview|image\.py", re.IGNORECASE)
+    for line in inst.read_text().splitlines():
+        if not k1.search(line) or not preview.search(line):
+            continue
+        # An explicit note that the gate was *removed* is the one allowed form.
+        assert "removed" in line.lower(), (
+            f"the preview is not K1-only; it is attempted for every model: {line!r}"
+        )
+
+
 def test_referenced_paths_exist():
     """A layout map that names deleted files sends readers to the wrong place.
 

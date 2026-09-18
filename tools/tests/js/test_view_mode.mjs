@@ -163,6 +163,37 @@ test("the editor offers a mode select, not the legacy toggle", () => {
   assert.ok(!("compact_view" in editor._cfg));
 });
 
+test("the editor's theme form actually renders the view_mode select", () => {
+  // The migration assertions above pass whether or not the control exists, so
+  // the editor could drop the select or keep the legacy toggle and no view-mode
+  // test would notice. This reads the schema the form is handed.
+  const { defined } = loadCard();
+  const Editor = defined.get("k-cfs-card-editor");
+  const editor = new Editor();
+  editor.hass = makeHass(slotEntities(1, 0, {}), { entities: {} });
+  editor.setConfig({ ...SLOT_CFG });
+  editor._setupThemeForm();
+
+  const form = editor._root.getElementById("theme-form");
+  const entry = (form.schema || []).find((f) => f.name === "view_mode");
+  assert.ok(entry, `view_mode missing from the theme form: ${JSON.stringify(form.schema)}`);
+
+  const options = entry.selector?.select?.options;
+  assert.ok(options, "view_mode must be a select, not a free-text or boolean field");
+  // Joined rather than deep-compared: the card is evaluated in its own vm realm,
+  // so its Array has a different prototype and deepStrictEqual rejects it.
+  assert.equal(
+    Array.from(options, (o) => o.value).sort().join(","),
+    "box,compact,full",
+    "every view mode must be offered",
+  );
+
+  assert.ok(
+    !(form.schema || []).some((f) => f.name === "compact_view"),
+    "the legacy compact_view toggle must not come back",
+  );
+});
+
 let failed = 0;
 for (const [name, fn] of tests) {
   try { fn(); console.log(`ok   ${name}`); }

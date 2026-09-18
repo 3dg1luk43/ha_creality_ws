@@ -1,8 +1,7 @@
 import asyncio
-from unittest.mock import MagicMock
 from types import SimpleNamespace
 
-from conftest import install_stub_module, restore_stubs
+from conftest import restore_stubs
 
 # Mock homeassistant.helpers.update_coordinator
 # The coordinator stub comes from conftest. This module used to install a
@@ -11,9 +10,12 @@ from conftest import install_stub_module, restore_stubs
 # constructor argument missing here broke them, and teardown_module ran far too
 # late to help.
 
-# Mock homeassistant.helpers.aiohttp_client
-mock_aiohttp_client = MagicMock()
-install_stub_module(__name__, "homeassistant.helpers.aiohttp_client", mock_aiohttp_client)
+# aiohttp_client comes from conftest too, which defines a real ModuleType with
+# `async_get_clientsession`. This module used to install a bare MagicMock over it
+# -- the same mistake the note above describes, and with the same reach: it was
+# live while every later module was imported, so anything binding
+# `async_get_clientsession` during collection got the mock instead. It was never
+# even referenced here.
 
 # homeassistant.helpers.dispatcher comes from conftest; installing another stub
 # here would clobber it for every module collected afterwards.

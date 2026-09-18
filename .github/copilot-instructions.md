@@ -20,7 +20,7 @@ These instructions tell GitHub Copilot Chat how to work in this repo. Assume cha
 - `custom_components/ha_creality_ws/light.py` – Chamber light; there is no switch platform
 - `custom_components/ha_creality_ws/number.py` – Number entities (speed/flow/targets; K2 box control only)
 - `custom_components/ha_creality_ws/camera.py` – MJPEG (K1) and WebRTC (K2) camera implementations
-- `custom_components/ha_creality_ws/image.py` – Image platform exposing current print preview (K1 family)
+- `custom_components/ha_creality_ws/image.py` – Image platform exposing current print preview (attempted for every model; see the Image section)
 - `custom_components/ha_creality_ws/light.py` – Light platform (printer chamber light)
 - `custom_components/ha_creality_ws/fan.py` – Fan platform (model/case/side fans)
 - `custom_components/ha_creality_ws/config_flow.py` – UI config + Options (power switch binding, camera mode, go2rtc)
@@ -156,7 +156,7 @@ Don’t
   - Light chip now responds instantly to Power changes (show/hide) without reload; uses optimistic overrides.
   - Ensured Power chip styling reflects actual entity state only when state is known.
 - Image platform
-  - New `image.py` exposing "Current Print Preview" for K1 family.
+  - New `image.py` exposing "Current Print Preview". The fetch is attempted for every model; the K1-only gate it shipped with was removed in 43c6668.
   - Returns placeholder when not printing/unsupported/fetch fails; records `http_urls_accessed` for diagnostics.
   - Fixed ImageEntity initialization (`ImageEntity.__init__(self, hass)`) and updates `image_last_updated` on new bytes.
 - Diagnostics

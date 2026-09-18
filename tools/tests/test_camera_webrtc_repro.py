@@ -1,7 +1,7 @@
 import sys
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from conftest import drop_stub_module, install_stub_module, restore_stubs
+from conftest import install_stub_module, restore_stubs
 
 if "aiohttp" not in sys.modules:
     install_stub_module(__name__, "aiohttp", MagicMock())
@@ -38,15 +38,10 @@ else:
     sys.modules["homeassistant.components.camera"] = cam_mod
     sys.modules["homeassistant.components"].camera = cam_mod
 
-# camera.py binds `aiohttp` and `go2rtc_client` at import time, and those are
-# MagicMocks here, so the cached module must not outlive the stubs. Only the file
-# that actually creates the entry records it: dropping an already-cached module
-# would force a re-import and give this file a *different* module object from the
-# sibling camera suite, whose `patch.object(camera_mod, ...)` would then patch a
-# module the class under test does not belong to.
-if "custom_components.ha_creality_ws.camera" not in sys.modules:
-    drop_stub_module(__name__, "custom_components.ha_creality_ws.camera")
-
+# Left installed for the session; see the note in test_camera_stream_config.py.
+# This suite patches `custom_components.ha_creality_ws.camera` attributes by
+# string target, so the module object it resolves has to be the same one
+# `CrealityWebRTCCamera` came from.
 from custom_components.ha_creality_ws.camera import CrealityWebRTCCamera  # noqa: E402
 
 def test_webrtc_offer_500_error_repro():

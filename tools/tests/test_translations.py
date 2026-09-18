@@ -162,10 +162,18 @@ def test_strings_json_matches_en():
 
 
 def test_every_notification_string_is_referenced():
-    """A key nobody reads is dead weight that translators still translate."""
+    """A key nobody reads is dead weight that translators still translate.
+
+    Against the parsed string literals, not the raw text: a comment that happens
+    to mention a key made a dead one look referenced, and a single-quoted
+    reference to a live one looked unused because only the double-quoted spelling
+    was searched.
+    """
     keys = set(_load(COMPONENT / "strings.json")[NOTIFICATION_SECTION])
-    source = "\n".join(p.read_text(encoding="utf-8") for p in _python_sources())
-    unused = sorted(k for k in keys if f'"{k}"' not in source)
+    referenced: set[str] = set()
+    for path in _python_sources():
+        referenced.update(_string_literals(path))
+    unused = sorted(keys - referenced)
     assert not unused, f"notification strings nothing reads: {unused}"
 
 
