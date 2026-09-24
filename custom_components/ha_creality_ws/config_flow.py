@@ -375,6 +375,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         self._ensure_working()
         assert self._working is not None
         errors: dict[str, str] = {}
+        # Camera fields are staged into a copy and only folded into the working
+        # options once the whole page validates.
+        staged = dict(self._working)
         saved_mode = self._working.get(CONF_CAMERA_MODE, CAM_MODE_AUTO)
         # Mode to render fields for: the just-submitted one (so the error re-render
         # reveals the right fields), otherwise the staged/saved one.
@@ -386,7 +389,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 camera_mode = await self._detect_camera_type()
                 _LOGGER.info("ha_creality_ws: auto mode detected camera type: %s", camera_mode)
 
-            self._working[CONF_CAMERA_MODE] = camera_mode
+            staged[CONF_CAMERA_MODE] = camera_mode
 
             if camera_mode == CAM_MODE_CUSTOM:
                 custom_url = str(user_input.get(CONF_CUSTOM_CAMERA_URL) or "").strip()
@@ -401,7 +404,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     errors[CONF_CUSTOM_CAMERA_URL] = "invalid_camera_url"
                     effective_mode = CAM_MODE_CUSTOM  # ensure the URL field is shown
                 else:
-                    self._working[CONF_CUSTOM_CAMERA_URL] = custom_url
+                    staged[CONF_CUSTOM_CAMERA_URL] = custom_url
 
             # A Custom source with an rtsp/rtmp/srt URL is ingested by go2rtc as
             # well (camera.async_setup_entry -> _make_go2rtc_camera), so it needs
@@ -409,7 +412,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             # external go2rtc at all, and silently dropped its RTSP port.
             custom_uses_go2rtc = (
                 camera_mode == CAM_MODE_CUSTOM
-                and urlparse(self._working.get(CONF_CUSTOM_CAMERA_URL, "") or "")
+                and urlparse(staged.get(CONF_CUSTOM_CAMERA_URL, "") or "")
                     .scheme.lower() in GO2RTC_SOURCE_SCHEMES
             )
 
@@ -420,20 +423,20 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 # go2rtc keys in user_input, so `.get() or DEFAULT` silently
                 # replaced a configured external server with localhost:11984.
                 if CONF_GO2RTC_URL in user_input:
-                    self._working[CONF_GO2RTC_URL] = (
+                    staged[CONF_GO2RTC_URL] = (
                         str(user_input.get(CONF_GO2RTC_URL) or "").strip() or DEFAULT_GO2RTC_URL
                     )
-                elif CONF_GO2RTC_URL not in self._working:
-                    self._working[CONF_GO2RTC_URL] = DEFAULT_GO2RTC_URL
+                elif CONF_GO2RTC_URL not in staged:
+                    staged[CONF_GO2RTC_URL] = DEFAULT_GO2RTC_URL
 
                 if CONF_GO2RTC_PORT in user_input:
                     port = user_input.get(CONF_GO2RTC_PORT)
                     try:
-                        self._working[CONF_GO2RTC_PORT] = int(port) if port is not None else DEFAULT_GO2RTC_PORT
+                        staged[CONF_GO2RTC_PORT] = int(port) if port is not None else DEFAULT_GO2RTC_PORT
                     except (ValueError, TypeError):
-                        self._working[CONF_GO2RTC_PORT] = DEFAULT_GO2RTC_PORT
-                elif CONF_GO2RTC_PORT not in self._working:
-                    self._working[CONF_GO2RTC_PORT] = DEFAULT_GO2RTC_PORT
+                        staged[CONF_GO2RTC_PORT] = DEFAULT_GO2RTC_PORT
+                elif CONF_GO2RTC_PORT not in staged:
+                    staged[CONF_GO2RTC_PORT] = DEFAULT_GO2RTC_PORT
 
                 # RTSP port is only needed for HA's HLS pipeline; blank/0 means
                 # "auto-detect" (18554 for HA-managed go2rtc, 8554 otherwise).
@@ -444,26 +447,32 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     except (ValueError, TypeError):
                         rtsp_port_int = 0
                     if rtsp_port_int > 0:
-                        self._working[CONF_GO2RTC_RTSP_PORT] = rtsp_port_int
+                        staged[CONF_GO2RTC_RTSP_PORT] = rtsp_port_int
                     else:
-                        self._working.pop(CONF_GO2RTC_RTSP_PORT, None)
+                        staged.pop(CONF_GO2RTC_RTSP_PORT, None)
             elif not errors:
                 # Drop go2rtc settings for non-go2rtc modes so they don't linger.
                 # Only once the submission is otherwise valid: an invalid Custom
                 # URL re-renders this step, and discarding the settings meanwhile
                 # lost them before the user could correct the URL.
-                self._working.pop(CONF_GO2RTC_URL, None)
-                self._working.pop(CONF_GO2RTC_PORT, None)
-                self._working.pop(CONF_GO2RTC_RTSP_PORT, None)
+                staged.pop(CONF_GO2RTC_URL, None)
+                staged.pop(CONF_GO2RTC_PORT, None)
+                staged.pop(CONF_GO2RTC_RTSP_PORT, None)
 
             if not errors:
+                # Folded in only here. `_persist` writes the whole dict, so a
+                # field applied by a submit that was then rejected would be
+                # saved by whichever section the user submits next -- a Custom
+                # mode with no URL to go with it. The notifications step stages
+                # its own fields for the same reason.
+                self._working = staged
                 return await self._saved()
 
-        current_go2rtc_url = self._working.get(CONF_GO2RTC_URL, DEFAULT_GO2RTC_URL)
-        current_go2rtc_port = self._working.get(CONF_GO2RTC_PORT, DEFAULT_GO2RTC_PORT)
+        current_go2rtc_url = staged.get(CONF_GO2RTC_URL, DEFAULT_GO2RTC_URL)
+        current_go2rtc_port = staged.get(CONF_GO2RTC_PORT, DEFAULT_GO2RTC_PORT)
         # 0 renders as "auto-detect" in the form.
-        current_go2rtc_rtsp_port = self._working.get(CONF_GO2RTC_RTSP_PORT, 0)
-        current_custom_url = self._working.get(CONF_CUSTOM_CAMERA_URL, "")
+        current_go2rtc_rtsp_port = staged.get(CONF_GO2RTC_RTSP_PORT, 0)
+        current_custom_url = staged.get(CONF_CUSTOM_CAMERA_URL, "")
         # Offered for Custom too once its URL is a go2rtc-ingested scheme, since
         # that path builds a go2rtc camera. On a fresh Custom setup the URL is not
         # staged yet, so the fields appear the next time the step is opened.

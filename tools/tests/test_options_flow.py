@@ -594,6 +594,25 @@ def test_a_refused_submit_saves_nothing():
 
 
 @requires_voluptuous
+def test_a_refused_submit_does_not_leak_into_the_next_section():
+    """The refusal itself writes nothing, but `_persist` writes the *whole*
+    working copy -- so a camera mode applied before its URL had been validated
+    was saved by whichever section the user submitted next, leaving Custom
+    configured with no URL to go with it."""
+    handler = _handler({CONF_CAMERA_MODE: CAM_MODE_WEBRTC_DIRECT})
+
+    _submit(handler, {
+        CONF_CAMERA_MODE: CAM_MODE_CUSTOM,
+        CONF_CUSTOM_CAMERA_URL: "not-a-url",
+    })
+    asyncio.run(handler.async_step_connection({CONF_POLLING_RATE: 3}))
+
+    options = _updates(handler)["options"]
+    assert options[CONF_CAMERA_MODE] == CAM_MODE_WEBRTC_DIRECT
+    assert CONF_CUSTOM_CAMERA_URL not in options
+
+
+@requires_voluptuous
 def test_a_new_host_and_the_options_go_out_in_one_update():
     """The host lives in `data` and everything else in `options`. Updating them
     separately fired the update listener twice and reloaded the entry twice for
