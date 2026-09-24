@@ -118,9 +118,17 @@ python3 -m pytest -q                                 # whole suite, ~3s
 python3 -m pytest tools/tests/test_<area>.py -q      # targeted, while iterating
 ```
 
-Baseline: **586 passed, 5 skipped** as of this branch's head. The skips need Node or the CFS simulator
-and are expected to skip in a bare environment; a larger skip count means missing
-tooling, not removed tests.
+Baseline: **5 skipped, and a pass count that only ever grows** (707 at the time of
+writing, but every round adds tests, so treat a *drop* as the signal and ignore the
+absolute number -- an exact figure here is stale within one round and this one was
+wrong by 120 before anyone noticed). The 5 skips need Node or the CFS simulator and
+are expected in a bare environment; a larger skip count means missing tooling, not
+removed tests.
+
+Run the suite in a venv holding only `pytest` and `voluptuous` before trusting a
+green gate. That is what CI installs, and a suite that passes with the project venv
+can still fail there -- `Static Tests` was red for six days on exactly that
+difference while local runs looked clean.
 
 Then restore line endings and re-check the diff is the size you intended:
 

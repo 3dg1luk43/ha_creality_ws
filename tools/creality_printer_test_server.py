@@ -44,6 +44,7 @@ import re
 import signal
 import tempfile
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import Any
@@ -624,6 +625,15 @@ class PrinterState:
         `boxId` (for example an off-by-one from the card's card-position guess)
         fails loudly in testing instead of silently doing nothing.
         """
+        # A non-dict reaches here because the caller does `params.get(...) or {}`,
+        # which passes a list, a string or a number straight through. `.get` on
+        # one raises AttributeError, and the handler catches only ValueError --
+        # so the exception escaped `rx_loop`, `asyncio.gather` re-raised it and
+        # the socket closed, while `tx_loop` was left ticking against a dead
+        # connection for the life of the process. The contract says a bad write
+        # is rejected and logged, so make it one of those.
+        if not isinstance(payload, Mapping):
+            raise ValueError(f"modifyMaterial needs an object, got {payload!r}")
         try:
             box_id = int(payload.get("boxId"))
             slot_id = int(payload.get("id"))
@@ -638,6 +648,11 @@ class PrinterState:
             raise ValueError(f"no such box {box_id} (have {known})")
 
         materials = box.get("materials", [])
+        # Same reason, one level down: `POST /test/cfs` stores whatever list it
+        # is handed, so a non-dict entry would raise AttributeError here rather
+        # than being reported as a missing slot.
+        if not all(isinstance(m, Mapping) for m in materials):
+            raise ValueError(f"box {box_id} holds a non-object material entry")
         slot = next((m for m in materials if m.get("id") == slot_id), None)
         if slot is None:
             known = [m.get("id") for m in materials]

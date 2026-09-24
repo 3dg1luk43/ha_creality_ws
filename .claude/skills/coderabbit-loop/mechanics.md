@@ -146,10 +146,10 @@ check_rate_limit() {
   # per page, so a jq-side `.[0]` emits one body per page.
   ids=$(gh api "repos/$owner/$repo/issues/$pr/comments" --paginate --jq \
     "[.[] | select(.user.login as \$l | $_CR_LOGINS | index(\$l)) | select(.id > $last_comment_id)] | .[].id" \
-    | sort -n) || return 0
+    | sort -n) || return 2   # API error, not a negative result
   for id in $ids; do
     [[ $id =~ ^[0-9]+$ ]] || continue
-    body=$(gh api "repos/$owner/$repo/issues/comments/$id" --jq '.body') || continue
+    body=$(gh api "repos/$owner/$repo/issues/comments/$id" --jq '.body') || return 2
     grep -qiE "$_CR_REFUSAL_RE" <<<"$body" || continue
     wait_min=$(grep -oiE "available in [0-9]+ minute" <<<"$body" | grep -oE "[0-9]+" | head -1)
     echo "RATE-LIMITED: no review started; retry in ${wait_min:-20} min"
@@ -160,7 +160,14 @@ check_rate_limit() {
 
 end=$((SECONDS+480))
 while [ $SECONDS -lt $end ]; do
-  check_rate_limit || exit 2
+  # 1 is a confirmed refusal; 2 is "the API did not answer". A failed fetch is
+  # not evidence that nothing was refused -- `|| return 0` made a transient
+  # error indistinguishable from a clean scan, so a refusal arriving during a
+  # blip stayed invisible and the poller waited out its whole window. Retry
+  # instead, and only a body actually read may end the round.
+  check_rate_limit; _rc=$?
+  [ "$_rc" = 1 ] && exit 2
+  [ "$_rc" = 2 ] && { sleep 30; continue; }
   # A failed fetch must not read as "marker absent": `grep -c` on FETCHFAIL
   # returns 0, so a transient API error plus an already-submitted review would
   # report completion without ever confirming the marker had cleared.
@@ -252,7 +259,7 @@ gh pr comment "$pr" --body '@coderabbitai full review'
 python3 -m compileall custom_components/ha_creality_ws tools/tests -q
 node --check custom_components/ha_creality_ws/www/k_printer_card.js   # if card JS changed
 node --check custom_components/ha_creality_ws/www/k_cfs_card.js
-python3 -m pytest -q                              # whole suite, ~3s, baseline 586 passed / 5 skipped
+python3 -m pytest -q                              # whole suite, ~3s; 5 skipped, pass count only grows
 python3 -m pytest tools/tests/test_<area>.py -q   # targeted
 ```
 

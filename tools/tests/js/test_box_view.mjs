@@ -136,6 +136,24 @@ test("an external spool with no reported colour says so", () => {
   assert.equal(external.colorIsKnown, false, "but will not write it to the spool");
 });
 
+test("an external spool reporting a null slot id is flagged as guessed", () => {
+  // `sensor.py` publishes `data.get("id", self._slot_id)`, which is None when
+  // the printer reports `"id": null` -- so the attribute arrives as `null`,
+  // `?? 0` swallows it, and an `=== undefined` test called the id known.
+  const card = boxCard(4, {
+    external: true,
+    externalStates: {
+      "sensor.printer_cfs_external_filament": {
+        state: "Creality Hyper PETG",
+        attributes: { type: "PETG", box_id: 2, slot_id: null },
+      },
+    },
+  });
+  const external = card._collectData().external;
+  assert.equal(external.printerSlotId, 0);
+  assert.equal(external.targetIsGuessed, true);
+});
+
 test("an external spool missing its slot id is flagged as guessed", () => {
   // `printerSlotId` falls back to 0, and the guess used to be keyed on the box
   // id alone -- so a spool reporting a box but no slot was written to slot 0

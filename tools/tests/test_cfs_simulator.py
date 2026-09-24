@@ -66,6 +66,17 @@ def test_modify_material_merges_rather_than_replaces():
     assert "if key in payload:" in source
 
 
+def test_modify_material_rejects_a_non_object_payload():
+    """`params.get("modifyMaterial") or {}` passes a list or a string straight
+    through, and `.get` on one raises AttributeError -- which the handler does
+    not catch, so it escaped `rx_loop`, closed the socket, and left `tx_loop`
+    ticking against a dead connection. A source contract as well as the live
+    assertion below, because CI cannot import the simulator at all."""
+    source = _source()
+    assert "modifyMaterial needs an object" in source
+    assert "non-object material entry" in source
+
+
 def test_modify_material_rejects_unknown_targets():
     """A real printer would not invent a slot, so a bad boxId must fail loudly."""
     source = _source()
@@ -346,7 +357,23 @@ def test_modify_material_rejects_an_unknown_box_or_slot():
     with pytest.raises(ValueError, match=r"no such slot 7 in box 1"):
         state.modify_material({"boxId": 1, "id": 7, "type": "PLA"})
 
-    # And a well-formed write to a real slot still applies, so the guard above
-    # is not simply rejecting everything.
+    # A payload that is not an object at all. `rx_loop` does
+    # `params.get("modifyMaterial") or {}`, which lets a list, a string or a
+    # number through; `.get` on one raises AttributeError, which the handler
+    # does not catch, so it escaped the receive loop and took the connection
+    # with it instead of being logged as a rejected write.
+    for payload in ([], ["boxId"], "boxId=1", 7, True):
+        with pytest.raises(ValueError, match=r"needs an object"):
+            state.modify_material(payload)
+
+    # And the same one level down: `POST /test/cfs` stores whatever list it is
+    # given, so a non-object entry would raise from the slot lookup.
+    state.set_cfs_materials(1, ["not a dict"])
+    with pytest.raises(ValueError, match=r"non-object material entry"):
+        state.modify_material({"boxId": 1, "id": 0, "type": "PLA"})
+
+    # And a well-formed write to a real slot still applies, so the guards above
+    # are not simply rejecting everything.
+    state.set_cfs_materials(1, [{"id": 0, "type": "PLA"}])
     updated = state.modify_material({"boxId": 1, "id": 0, "type": "PETG"})
     assert updated["type"] == "PETG"

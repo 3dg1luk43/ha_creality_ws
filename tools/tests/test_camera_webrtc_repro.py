@@ -10,7 +10,22 @@ if "aiohttp" not in sys.modules:
 if "go2rtc_client" not in sys.modules:
     g2_mod = MagicMock()
     install_stub_module(__name__, "go2rtc_client", g2_mod)
-    install_stub_module(__name__, "go2rtc_client.exceptions", MagicMock())
+    exceptions_mod = MagicMock()
+
+    class Go2RtcClientError(Exception):
+        """Real class, not a MagicMock: camera.py catches it, and `except` on a
+        non-exception raises TypeError instead of exercising the handler.
+
+        Identical to the stub in `test_camera_stream_config.py` on purpose.
+        Both suites install this only when `go2rtc_client` is absent, so
+        whichever imports first decides which class `camera.py` binds for the
+        whole session -- and while this one was a bare MagicMock, running that
+        suite after this one turned its handled-error tests into TypeErrors.
+        Test order or a single-file selection was enough to flip it.
+        """
+
+    exceptions_mod.Go2RtcClientError = Go2RtcClientError
+    install_stub_module(__name__, "go2rtc_client.exceptions", exceptions_mod)
 
 # Mock homeassistant.components.camera
 if "homeassistant.components" in sys.modules:

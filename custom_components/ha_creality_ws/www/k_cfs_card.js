@@ -1376,9 +1376,15 @@ class KCFSCard extends HTMLElement {
         // Both ids, not just the box: `slot_id` falls back to 0 above, so a
         // spool reporting a box but no slot would have been written to slot 0
         // with nothing on screen saying the slot had been assumed.
+        //
+        // Typed, not `=== undefined`: `sensor.py` publishes
+        // `data.get("id", self._slot_id)`, which is `None` when the printer
+        // reports `"id": null` -- and that arrives here as `null`, which `??`
+        // swallows into 0 while an `undefined` test says the id was known.
+        // The box-slot path already tests `typeof === "number"`.
         targetIsGuessed:
-          filamentObj?.attributes?.box_id === undefined
-          || filamentObj?.attributes?.slot_id === undefined,
+          typeof filamentObj?.attributes?.box_id !== "number"
+          || typeof filamentObj?.attributes?.slot_id !== "number",
         vendor: filamentObj?.attributes?.vendor,
         materialName: filamentObj?.attributes?.name,
         rfid: filamentObj?.attributes?.rfid,
