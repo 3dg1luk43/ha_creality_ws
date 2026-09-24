@@ -62,6 +62,7 @@ if "homeassistant.const" not in sys.modules:
 from custom_components.ha_creality_ws.sensor import (  # noqa: E402
     KCFSExtSlotSensor,
     KCFSSlotSensor,
+    PrintStatusSensor,
     _cfs_slot_attributes,
 )
 
@@ -237,3 +238,42 @@ def test_an_offline_external_slot_publishes_no_stale_attributes():
     )
     sensor = KCFSExtSlotSensor(coord, slot_id=0, sensor_type="filament")
     assert sensor.extra_state_attributes == {}
+
+
+# --------------------------------------------------------------------------- #
+# The print-status attributes survive either shape of `err`
+# --------------------------------------------------------------------------- #
+
+
+def _status_sensor(err):
+    """Print-status sensor over a frame carrying `err` exactly as given."""
+    coordinator = SimpleNamespace(
+        client=SimpleNamespace(_host="1.2.3.4"),
+        data={"state": 1, "err": err},
+        available=True,
+        power_is_off=lambda: False,
+        paused_flag=lambda: False,
+    )
+    return PrintStatusSensor(coordinator)
+
+
+def test_a_bare_error_code_does_not_take_the_attributes_down():
+    """Some firmware reports `err` as the code itself rather than a mapping --
+    `derive_print_state` has always handled both. Here it was `.get()`-ed
+    unconditionally, so a bare code raised AttributeError while the attribute
+    dict was being built and every attribute went with it."""
+    attrs = _status_sensor(521).extra_state_attributes
+
+    assert attrs["error_code"] == 521
+    assert attrs["err"] == 521
+    # The rest of the frame still has to arrive.
+    assert attrs["state_raw"] == 1
+
+
+def test_a_mapping_error_code_is_still_read_from_errcode():
+    assert _status_sensor({"errcode": 521}).extra_state_attributes["error_code"] == 521
+
+
+def test_no_error_reports_no_error_code():
+    for err in (None, 0, {}, {"errcode": 0}):
+        assert "error_code" not in _status_sensor(err).extra_state_attributes, err

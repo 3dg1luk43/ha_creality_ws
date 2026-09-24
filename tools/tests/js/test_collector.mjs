@@ -59,14 +59,37 @@ test("prefers the printer ids published by the sensor", () => {
 });
 
 test("falls back to the entity id when attributes are missing", () => {
-  const card = cardForOneSlot();
-  const states = slotEntities(1, 0, { attributes: { type: "PLA" } });
-  card.hass = makeHass(states);
+  // The id Home Assistant actually generates: the entity *name* is
+  // "CFS Box 1 Slot 1 Filament" for the printer's slot 0, because the name
+  // counts from 1 for the reader. Reading the captured 1 back as a printer
+  // slot id addressed slot 1 -- the spool next to the one on screen.
+  const ids = {
+    box0_slot0_filament: "sensor.printer_cfs_box_1_slot_1_filament",
+    box0_slot0_color: "sensor.printer_cfs_box_1_slot_1_color",
+    box0_slot0_percent: "sensor.printer_cfs_box_1_slot_1_percent",
+  };
+  const card = cardForOneSlot(ids);
+  card.hass = makeHass({
+    [ids.box0_slot0_filament]: { state: "PLA", attributes: { type: "PLA" } },
+    [ids.box0_slot0_color]: { state: "#ffffff", attributes: {} },
+    [ids.box0_slot0_percent]: { state: "80", attributes: { unit_of_measurement: "%" } },
+  });
   const slot = card._collectData().boxes[0].slots[0];
-  // cfs_box_1_slot_0 is encoded in the entity id, so this is not a guess.
   assert.equal(slot.printerBoxId, 1);
+  assert.equal(slot.printerSlotId, 0, "the displayed slot 1 is the printer's slot 0");
+  // An entity id is renameable, so it is never as authoritative as the
+  // attributes; the dialog warns and asks the user to confirm the target.
+  assert.equal(slot.targetIsGuessed, true);
+});
+
+test("a slot number no naming scheme produces is not trusted", () => {
+  // `_slot_0_` cannot come from the entity name, so decrementing it would
+  // address slot -1. The card position answers instead, and says it guessed.
+  const card = cardForOneSlot();
+  card.hass = makeHass(slotEntities(1, 0, { attributes: { type: "PLA" } }));
+  const slot = card._collectData().boxes[0].slots[0];
   assert.equal(slot.printerSlotId, 0);
-  assert.equal(slot.targetIsGuessed, false);
+  assert.equal(slot.targetIsGuessed, true);
 });
 
 test("marks card-position guesses as guessed", () => {

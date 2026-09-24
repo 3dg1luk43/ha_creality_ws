@@ -326,7 +326,11 @@ def test_the_card_path_computes_no_values_without_a_template():
     awaits it inline in its receive loop. Formatting six numbers per frame to
     throw them away is exactly the kind of work that does not belong there."""
     coord, hass = _coordinator()
-    coord._template_values = lambda **_kw: pytest.fail(
+    # `*_a` matters: `_template_values(self, name, /, **extra)` takes `name`
+    # positionally, so a keyword-only stub raises TypeError instead of the
+    # failure it is standing in for -- a different exception, and one a broad
+    # `except` on the frame path could swallow while `Failed` would survive.
+    coord._template_values = lambda *_a, **_kw: pytest.fail(
         "no template is configured, so nothing should have been formatted"
     )
     assert _cards(_frame(coord, hass, **_printing(42)))

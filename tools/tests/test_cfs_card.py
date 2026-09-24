@@ -207,6 +207,32 @@ def test_every_translation_key_used_by_the_card_exists():
     assert not (used - bundled), f"missing from CFS_TRANSLATIONS.en: {sorted(used - bundled)}"
 
 
+def test_the_bundled_fallback_says_the_same_words_as_i18n():
+    """The keys already have to match; so do the strings behind them.
+
+    `CFS_TRANSLATIONS.en` is what the card shows until `i18n/en.json` loads, and
+    if that request fails it is what the user reads for good. The two drifted
+    apart on spelling alone -- "Colour" in the fallback against "Color" in
+    i18n -- so the edit dialog could label one field each way depending on how
+    far the load got.
+    """
+    source = _card()
+    remote = _i18n("en")["cfs_card"]
+    fallback_block = source.split("const CFS_TRANSLATIONS", 1)[1].split("\n};", 1)[0]
+    en_block = fallback_block.split("en: {", 1)[1].split("\n  },", 1)[0]
+    bundled = re.findall(
+        r'^\s{4}([a-z0-9_]+):\s*"((?:[^"\\]|\\.)*)"', en_block, re.MULTILINE
+    )
+    assert bundled, "the en fallback block did not parse -- has its shape changed?"
+
+    differing = {
+        key: (value.replace('\\"', '"'), remote[key])
+        for key, value in bundled
+        if key in remote and remote[key] != value.replace('\\"', '"')
+    }
+    assert not differing, f"fallback text differs from i18n/en.json: {differing}"
+
+
 @pytest.mark.parametrize("section", ["cfs_card", "printer_card"])
 def test_english_and_spanish_have_the_same_keys(section):
     en, es = _i18n("en"), _i18n("es")

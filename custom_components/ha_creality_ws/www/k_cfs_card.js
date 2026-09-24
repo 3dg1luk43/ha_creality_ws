@@ -242,13 +242,13 @@ const CFS_TRANSLATIONS = {
     hint_delete_preset: "Dashed swatches are your own presets; right-click one to delete it.",
     btn_edit: "Edit material",
     tooltip_edit_locked: "Editing is disabled while the printer is busy",
-    tooltip_multicolour_readonly: "Multi-colour spools cannot be edited",
+    tooltip_multicolour_readonly: "Multi-color spools cannot be edited",
     dialog_edit_title: "Edit material",
     dialog_edit_target: "Writing to box {box}, slot {slot}",
     label_material_type: "Material type",
     label_material_name: "Material name",
     label_material_vendor: "Vendor",
-    label_material_color: "Colour",
+    label_material_color: "Color",
     label_material_min_temp: "Minimum temperature",
     label_material_max_temp: "Maximum temperature",
     label_material_pressure: "Pressure advance",
@@ -258,7 +258,7 @@ const CFS_TRANSLATIONS = {
     toast_saved: "Material saved",
     toast_save_failed: "Could not save material: {error}",
     toast_temp_range_invalid: "Maximum temperature must not be below the minimum",
-    toast_colour_invalid: "Colour must be six hex digits, for example #06c84f",
+    toast_colour_invalid: "Color must be six hex digits, for example #06c84f",
     toast_type_required: "Material type is required",
     toast_external_not_supported: "This printer does not report a box id for the external spool, so it cannot be edited",
     warn_box_id_guessed: "The target box was inferred from the card layout; check it matches the printer before saving",
@@ -354,8 +354,20 @@ class KCFSCard extends HTMLElement {
     }
 
     const match = /cfs_box_(\d+)_slot_(\d+)_/.exec(String(entityId || ""));
-    if (match) {
-      return { boxId: Number(match[1]), slotId: Number(match[2]), guessed: false };
+    // Home Assistant builds the entity id from the entity *name*, and the name
+    // counts slots from 1 for the reader ("CFS Box 1 Slot 2") while the printer
+    // counts them from 0. Passing the captured number straight through
+    // addressed the slot after the one on screen, so a save overwrote the
+    // neighbouring spool. Only the unique id is 0-based, and that never reaches
+    // the frontend.
+    //
+    // Guessed, unlike the attributes above: an entity id is a renameable
+    // display artifact, so the warning invites the user to check the target
+    // before writing to the printer. A `_slot_0_` id cannot have come from that
+    // naming scheme at all, so it is left to the card-position fallback rather
+    // than decremented into -1.
+    if (match && Number(match[2]) >= 1) {
+      return { boxId: Number(match[1]), slotId: Number(match[2]) - 1, guessed: true };
     }
 
     return { boxId: cardBoxIndex + 1, slotId: cardSlotIndex, guessed: true };

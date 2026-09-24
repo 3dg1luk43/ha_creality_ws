@@ -140,20 +140,11 @@ number_mod.NumberDeviceClass = MagicMock()
 sys.modules["homeassistant.components.number"] = number_mod
 components_mod.number = number_mod
 
-# A MagicMock rather than a real module: the integration imports a moving set of
-# unit constants from here (including an older-core fallback block), and every
-# `from homeassistant.const import X` has to resolve. Named attributes are pinned
-# where a test asserts on the value.
-const_mod = MagicMock()
-const_mod.PERCENTAGE = "%"
-# Pinned so the minimum-core check is exercisable: MAJOR/MINOR would otherwise be
-# MagicMocks and int() on one raises, silently taking the "version unknown" path.
-const_mod.MAJOR_VERSION = 2026
-const_mod.MINOR_VERSION = 7
-const_mod.__version__ = "2026.7.0"
-const_mod.UnitOfTemperature.CELSIUS = "°C"
-sys.modules["homeassistant.const"] = const_mod
-ha_mod.const = const_mod
+# `homeassistant.const` is registered further down as `const_mod_ha`, a strict
+# module rather than a MagicMock. A permissive stub used to be installed here
+# too and was overwritten before any test ran, so it served no import and its
+# description of the behaviour (every name resolving, MAJOR/MINOR pinned) did
+# not match the stub that actually answers.
 
 # --- MOCK helpers.translation ---
 # Serves the integration's *real* translation files, flattened exactly the way

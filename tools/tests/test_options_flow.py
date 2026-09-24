@@ -19,6 +19,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from conftest import install_stub_attr, install_stub_module, restore_stubs
+
 # A `skipif` marker is evaluated *after* collection, so it cannot protect the
 # module-level `config_flow` import below -- and config_flow does `import
 # voluptuous as vol`, so without it this module raised a collection error
@@ -30,32 +32,9 @@ requires_voluptuous = pytest.mark.skipif(
     reason="voluptuous is not installed",
 )
 
-_ABSENT = object()
-_RESTORE: dict[str, object] = {}
-_RESTORE_ATTRS: list[tuple[object, str, object]] = []
-
-
-def _stub(name: str, module) -> None:
-    _RESTORE.setdefault(name, sys.modules.get(name, _ABSENT))
-    sys.modules[name] = module
-
-
 def teardown_module(_module):
     """Undo the process-wide stubs; they would otherwise leak to later modules."""
-    for obj, attr, previous in reversed(_RESTORE_ATTRS):
-        if previous is _ABSENT:
-            try:
-                delattr(obj, attr)
-            except AttributeError:
-                pass
-        else:
-            setattr(obj, attr, previous)
-    _RESTORE_ATTRS.clear()
-    for name, old in _RESTORE.items():
-        if old is _ABSENT:
-            sys.modules.pop(name, None)
-        else:
-            sys.modules[name] = old
+    restore_stubs(__name__)
 
 
 def _install_stubs():
@@ -83,7 +62,7 @@ def _install_stubs():
     # teardown_module runs far too late to help.
     config_entries.OperationNotAllowed = Exception
     config_entries.HANDLERS = MagicMock()
-    _stub("homeassistant.config_entries", config_entries)
+    install_stub_module(__name__, "homeassistant.config_entries", config_entries)
 
     data_entry_flow = types.ModuleType("homeassistant.data_entry_flow")
     data_entry_flow.FlowResult = dict
@@ -104,7 +83,7 @@ def _install_stubs():
             return self.schema(value)
 
     data_entry_flow.section = _Section
-    _stub("homeassistant.data_entry_flow", data_entry_flow)
+    install_stub_module(__name__, "homeassistant.data_entry_flow", data_entry_flow)
 
     # selector.*Selector are only used to build the schema; identity is enough.
     selector = types.ModuleType("homeassistant.helpers.selector")
@@ -118,15 +97,14 @@ def _install_stubs():
     selector.SelectSelectorMode = MagicMock()
     selector.TextSelectorType = MagicMock()
     selector.NumberSelectorMode = MagicMock()
-    _stub("homeassistant.helpers.selector", selector)
+    install_stub_module(__name__, "homeassistant.helpers.selector", selector)
 
-    # The attribute on the shared parent module, recorded so teardown can undo it.
-    # `_RESTORE` covers `sys.modules` only, so without this a later
-    # `from homeassistant.helpers import selector` kept receiving this stub.
+    # The attribute on the shared parent module. `sys.modules` is only half of
+    # a submodule stub, so without this a later
+    # `from homeassistant.helpers import selector` kept receiving this one.
     helpers = sys.modules.get("homeassistant.helpers")
     if helpers is not None:
-        _RESTORE_ATTRS.append((helpers, "selector", getattr(helpers, "selector", _ABSENT)))
-        helpers.selector = selector
+        install_stub_attr(__name__, helpers, "selector", selector)
 
 
 _install_stubs()

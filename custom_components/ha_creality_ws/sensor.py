@@ -2,7 +2,7 @@
 from __future__ import annotations
 import logging
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 from .utils import (
     build_spool_key as _build_spool_key,
@@ -334,8 +334,16 @@ class PrintStatusSensor(KEntity, SensorEntity):
             "state_raw": d.get("state"),
             "err": d.get("err"),
         }
-        err_code = d.get("err", {}).get("errcode", 0)
-        if err_code != 0:
+        # Most firmware reports `err` as a mapping, some as a bare code, and
+        # `derive_print_state` has handled both since the state it derives
+        # depends on it. Here it was still `.get()`-ed unconditionally, so a
+        # bare code raised AttributeError while the attribute dict was being
+        # built -- taking every attribute down, not just this one. `err` is
+        # published raw above either way.
+        err_raw = d.get("err")
+        err_code = err_raw.get("errcode", 0) if isinstance(err_raw, Mapping) else err_raw
+        err_value = _safe_float(err_code)
+        if err_value is not None and err_value != 0:
             attrs["error_code"] = err_code
             # The error message mapping function is not yet implemented, so it remains commented out.
             # attrs["error_message"] = self._map_error_code_to_message(err_code)
