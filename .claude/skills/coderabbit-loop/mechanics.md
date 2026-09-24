@@ -82,15 +82,19 @@ included review will be available in N minutes` in the same comment: triggered, 
 actually run. Grep the ack for `rate limited` and wait N minutes rather than polling.
 
 Capture the trigger timestamp (`date -u +%FT%TZ`) **before** posting the retrigger, and
-note the summary comment id once per PR. Capture the newest issue-comment id before
-posting too -- the ack is identified by id rather than timestamp:
+note the summary comment id once per PR. The ack is identified by id rather than
+timestamp, so anchor on the retrigger comment's own id:
 
 ```bash
-last_comment_id=$(gh api "repos/$owner/$repo/issues/$pr/comments" --paginate \
-  --jq '.[].id' | sort -n | tail -1)
-# A PR with no comments yet leaves this empty, which builds the invalid jq filter
-# `.id > ` -- and the `|| return 0` in the helper then reports "not refused" for
-# every iteration. 0 is below every real id, so it means "everything".
+# Anchor on the id of the retrigger comment *you just posted*, which `gh pr
+# comment` prints as the URL fragment. "The newest comment before I started"
+# leaves a lagging `resume` ack inside the scan window, and on this PR that
+# ack has landed after the `full review` comment more than once.
+url=$(gh pr comment "$pr" --body '@coderabbitai full review')
+last_comment_id=${url##*-}
+# A malformed URL would build the invalid jq filter `.id > ` -- and the
+# `|| return 0` in the helper then reports "not refused" for every iteration.
+# 0 is below every real id, so it means "everything".
 [[ $last_comment_id =~ ^[0-9]+$ ]] || last_comment_id=0
 ```
 
@@ -119,27 +123,39 @@ _CR_LOGINS='["coderabbitai","coderabbitai[bot]","coderabbit[bot]"]'
 _CR_REFUSAL_RE='rate limited|review limit is currently reached|next included review will be available'
 
 check_rate_limit() {
-  local ack ack_id wait_min
-  # Keyed on the comment id, not the timestamp. `date -u +%FT%TZ` has one-second
-  # precision, so an ack posted in the same second as the trigger compares equal
-  # and a strict `>` misses it -- and relaxing to `>=` would then match a
-  # *pre-existing* comment from that same second. Ids are monotonic per repo, so
-  # "newer than the last comment before I posted" is exact.
+  local ids id body wait_min
+  # Keyed on comment ids, not timestamps. `date -u +%FT%TZ` has one-second
+  # precision, so an ack posted in the same second as the trigger compares
+  # equal and a strict `>` misses it. Ids are monotonic per repo.
   [[ $last_comment_id =~ ^[0-9]+$ ]] || last_comment_id=0
-  # Ids first, then one fetch. Only this trigger's own ack -- the *lowest* new id
-  # -- may decide: matching every newer comment lets a later round's refusal
-  # report a round that did start as refused. And it has to be picked in the
-  # shell, because `--paginate --jq` runs the filter per page, so a jq-side
-  # `.[0]` emits one body per page and a refusal on page two still reaches grep.
-  ack_id=$(gh api "repos/$owner/$repo/issues/$pr/comments" --paginate --jq \
+  # *Every* new bot comment, not just the lowest. A round that needs
+  # `@coderabbitai resume` as well as `full review` gets **two** acks, and the
+  # resume one has been observed arriving 13 minutes late -- after the full
+  # review was posted. "Only the lowest new id may decide" then picked the
+  # resume ack, which carries no refusal, and the rate limit on the review
+  # itself went unseen; the poller ran its whole window against a review that
+  # was never going to start.
+  #
+  # Scanning all of them is safe for two reasons. The scan is anchored to the
+  # id of the retrigger comment you just posted (below), so a previous round's
+  # refusal is out of range. And the other refusal wording -- "Already
+  # reviewed the last commit" -- is deliberately *not* in `_CR_REFUSAL_RE`: it
+  # means the resume was a no-op, not that the review was declined.
+  #
+  # Ids first, then one fetch each, because `--paginate --jq` runs the filter
+  # per page, so a jq-side `.[0]` emits one body per page.
+  ids=$(gh api "repos/$owner/$repo/issues/$pr/comments" --paginate --jq \
     "[.[] | select(.user.login as \$l | $_CR_LOGINS | index(\$l)) | select(.id > $last_comment_id)] | .[].id" \
-    | sort -n | head -1) || return 0
-  [[ $ack_id =~ ^[0-9]+$ ]] || return 0   # nothing posted yet: not a refusal
-  ack=$(gh api "repos/$owner/$repo/issues/comments/$ack_id" --jq '.body') || return 0
-  grep -qiE "$_CR_REFUSAL_RE" <<<"$ack" || return 0
-  wait_min=$(grep -oiE "available in [0-9]+ minute" <<<"$ack" | grep -oE "[0-9]+" | head -1)
-  echo "RATE-LIMITED: no review started; retry in ${wait_min:-20} min"
-  return 1
+    | sort -n) || return 0
+  for id in $ids; do
+    [[ $id =~ ^[0-9]+$ ]] || continue
+    body=$(gh api "repos/$owner/$repo/issues/comments/$id" --jq '.body') || continue
+    grep -qiE "$_CR_REFUSAL_RE" <<<"$body" || continue
+    wait_min=$(grep -oiE "available in [0-9]+ minute" <<<"$body" | grep -oE "[0-9]+" | head -1)
+    echo "RATE-LIMITED: no review started; retry in ${wait_min:-20} min"
+    return 1
+  done
+  return 0
 }
 
 end=$((SECONDS+480))
