@@ -283,8 +283,15 @@ class KCFSCard extends HTMLElement {
     this._selectedCFS = 0; // Track selected CFS tab in normal mode
   }
 
-  static _sanitizeColor(value) {
-    if (isSentinel(value)) return "#cccccc";
+  /** The colour the printer reported, or null when it reported none usable.
+   *
+   * Split out from `_sanitizeColor` so that "no colour" and "grey" stay
+   * distinguishable. The display grey is a placeholder, and the edit dialog
+   * used to prefill it like a real value -- so changing only the material type
+   * and saving wrote `#cccccc` to the spool as though the printer had said so.
+   */
+  static _parseColor(value) {
+    if (isSentinel(value)) return null;
     const raw = String(value).trim();
     const hex = raw.startsWith("#") ? raw.slice(1) : raw;
     if (hex.length === 6 && /^[0-9a-fA-F]+$/.test(hex)) {
@@ -296,7 +303,11 @@ class KCFSCard extends HTMLElement {
     if (hex.length === 7 && hex.startsWith("0") && /^[0-9a-fA-F]+$/.test(hex)) {
       return `#${hex.slice(1).toLowerCase()}`;
     }
-    return "#cccccc";
+    return null;
+  }
+
+  static _sanitizeColor(value) {
+    return KCFSCard._parseColor(value) ?? "#cccccc";
   }
 
   /**
@@ -1270,7 +1281,8 @@ class KCFSCard extends HTMLElement {
         const type = filamentObj?.attributes?.type;
         const selected = filamentObj?.attributes?.selected;
         const rawColor = colorObj?.state || filamentObj?.attributes?.color_hex;
-        const color = KCFSCard._sanitizeColor(rawColor);
+        const parsedColor = KCFSCard._parseColor(rawColor);
+        const color = parsedColor ?? "#cccccc";
         const percent = KCFSCard._parsePercent(percentObj);
         const percentText = fmtState(percentObj);
         const entityId = filamentEid || colorEid || percentEid;
@@ -1286,6 +1298,9 @@ class KCFSCard extends HTMLElement {
           type,
           selected,
           color,
+          // Whether `color` above is the printer's or the display placeholder.
+          // Editing must not write the placeholder back as a real colour.
+          colorIsKnown: parsedColor !== null,
           percent,
           percentText,
           // Editing needs the printer's own ids and the current values to
@@ -2115,7 +2130,11 @@ class KCFSCard extends HTMLElement {
     // rejects #abc (falling back to #000000, so the swatch stops matching the
     // text field) and _saveMaterial demands six digits -- it would refuse a
     // colour the printer itself reported.
-    const prefill = toSixDigitHex(slot.color) || "";
+    // Only a colour the printer actually reported. `slot.color` falls back to
+    // the display grey, and prefilling that sent `#cccccc` to the printer for
+    // anyone who opened the dialog to change something else and pressed Save.
+    // `_saveMaterial` already omits an empty colour from the payload.
+    const prefill = slot.colorIsKnown ? toSixDigitHex(slot.color) || "" : "";
     const picker = document.createElement("input");
     picker.type = "color";
     picker.value = prefill || "#cccccc";

@@ -52,6 +52,17 @@ async function setup({ attributes = ATTRS, color = "#ffffff", status = "idle", f
 
 const saved = (calls) => calls.find((c) => c.service === "set_cfs_material")?.data;
 
+/** The colour dialog's hex text box. The harness cannot parse an attribute
+ *  selector, so the tree is walked for the one input carrying its placeholder. */
+function hexField(node) {
+  if (node?.placeholder === "#rrggbb") return node;
+  for (const child of node?.children ?? []) {
+    const found = hexField(child);
+    if (found) return found;
+  }
+  return null;
+}
+
 // --------------------------------------------------------------------------- //
 // Payload assembly
 // --------------------------------------------------------------------------- //
@@ -235,6 +246,32 @@ test("only one toast is shown at a time", async () => {
   card._showEditDialog(SLOT);
   const toasts = card.children.filter((c) => c.className === "cfs-toast");
   assert.equal(toasts.length, 1, "a second toast must replace the first");
+});
+
+test("an unreported colour does not prefill the display grey", async () => {
+  // `_sanitizeColor` shows #cccccc for a slot the printer gave no colour for.
+  // The form prefilled that like a real value, so opening the dialog to change
+  // the material type and pressing Save wrote #cccccc to the spool as though
+  // the printer had reported it.
+  const { card, calls } = await setup({ color: "unknown" });
+  const slot = card._findSlot(SLOT);
+  assert.equal(slot.color, "#cccccc", "the card still displays the grey");
+  assert.equal(slot.colorIsKnown, false, "but knows it is a placeholder");
+
+  const form = card._renderEditForm(slot, () => {});
+  const hex = hexField(form);
+  assert.equal(hex.value, "", "the grey must not arrive as a typed value");
+
+  await card._saveMaterial(slot, { type: "PETG", color: hex.value.trim() });
+  assert.ok(!("color" in saved(calls)), "and nothing is written to the spool");
+});
+
+test("a colour the printer did report still prefills", async () => {
+  const { card } = await setup({ color: "#06c84f" });
+  const slot = card._findSlot(SLOT);
+  assert.equal(slot.colorIsKnown, true);
+  const form = card._renderEditForm(slot, () => {});
+  assert.equal(hexField(form).value, "#06c84f");
 });
 
 test("a guessed target warns in the dialog", async () => {

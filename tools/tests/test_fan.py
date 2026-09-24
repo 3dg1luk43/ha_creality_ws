@@ -141,7 +141,14 @@ def test_fan_is_off_and_zero_when_the_printer_is_unreachable():
 
 # Optional third-party imports the simulator makes at module scope. Anything
 # outside this set is a defect in the simulator, not a missing extra.
-_SIMULATOR_OPTIONAL_DEPS = frozenset({"aiortc", "av", "websockets", "aiohttp"})
+_SIMULATOR_OPTIONAL_DEPS = frozenset(
+    # Everything the simulator imports at module level that CI does not install.
+    # `numpy` was missing, so the one dependency the workflow always lacks was
+    # the one the guard re-raised on, and Static Tests had been red since it
+    # landed. `h264_timing` is deliberately absent: it ships beside the
+    # simulator, so its loss is a regression, not an environment.
+    {"aiortc", "av", "websockets", "aiohttp", "numpy"}
+)
 
 
 def _test_server_source() -> str:
