@@ -159,3 +159,30 @@ def test_the_legacy_single_target_is_honoured():
 def test_nothing_is_sent_when_no_target_was_ever_configured():
     hass = _remove(fake_config_entry("abc123", options={}))
     assert hass.calls == []
+
+
+# --------------------------------------------------------------------------- #
+# The minimum-core gate can see a version at all
+# --------------------------------------------------------------------------- #
+
+
+def test_the_core_version_gate_can_read_a_version():
+    """`_core_version()` imports MAJOR_VERSION and MINOR_VERSION, not
+    `__version__`. The conftest stub defined neither, so the import raised and
+    it returned None -- and an unreadable version passes by design, so the gate
+    was permanently open and nothing could test it. A test that wound
+    `__version__` back was changing a value this never reads.
+    """
+    module = _load_package_init()
+    assert module._core_version() == (2099, 1), "the stub must report a version"
+
+    const = sys.modules["homeassistant.const"]
+    previous = (const.MAJOR_VERSION, const.MINOR_VERSION)
+    const.MAJOR_VERSION, const.MINOR_VERSION = 2026, 6
+    try:
+        running = _load_package_init()._core_version()
+    finally:
+        const.MAJOR_VERSION, const.MINOR_VERSION = previous
+
+    assert running == (2026, 6), "and a wound-back core must be seen as old"
+

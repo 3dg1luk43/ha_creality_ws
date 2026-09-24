@@ -1349,7 +1349,8 @@ class KCFSCard extends HTMLElement {
       const type = filamentObj?.attributes?.type;
       const selected = filamentObj?.attributes?.selected;
       const rawColor = colorObj?.state || filamentObj?.attributes?.color_hex;
-      const color = KCFSCard._sanitizeColor(rawColor);
+      const parsedColor = KCFSCard._parseColor(rawColor);
+      const color = parsedColor ?? "#cccccc";
       const percent = KCFSCard._parsePercent(percentObj);
       const percentText = fmtState(percentObj);
 
@@ -1361,6 +1362,10 @@ class KCFSCard extends HTMLElement {
         type,
         selected,
         color,
+        // Same as a box slot: the edit dialog must not offer the display grey
+        // as though the printer had reported it. Omitting this left the
+        // external spool's colour field always empty.
+        colorIsKnown: parsedColor !== null,
         percent,
         percentText,
         // The external box's id comes from the printer via the sensor; there is
@@ -1368,7 +1373,12 @@ class KCFSCard extends HTMLElement {
         // than guessing 0.
         printerBoxId: filamentObj?.attributes?.box_id ?? null,
         printerSlotId: filamentObj?.attributes?.slot_id ?? 0,
-        targetIsGuessed: filamentObj?.attributes?.box_id === undefined,
+        // Both ids, not just the box: `slot_id` falls back to 0 above, so a
+        // spool reporting a box but no slot would have been written to slot 0
+        // with nothing on screen saying the slot had been assumed.
+        targetIsGuessed:
+          filamentObj?.attributes?.box_id === undefined
+          || filamentObj?.attributes?.slot_id === undefined,
         vendor: filamentObj?.attributes?.vendor,
         materialName: filamentObj?.attributes?.name,
         rfid: filamentObj?.attributes?.rfid,

@@ -14,7 +14,7 @@ const test = (name, fn) => tests.push([name, fn]);
 const ATTRS = (slot) => ({ type: "PLA", vendor: "Creality", box_id: 1, slot_id: slot });
 
 /** A card in box mode with `count` populated slots, optionally an external spool. */
-function boxCard(count, { external = false } = {}) {
+function boxCard(count, { external = false, externalStates = {} } = {}) {
   const { KCFSCard } = loadCard();
   const card = new KCFSCard();
   const cfg = { view_mode: "box" };
@@ -39,7 +39,7 @@ function boxCard(count, { external = false } = {}) {
     };
   }
   card.setConfig(cfg);
-  card.hass = makeHass(states);
+  card.hass = makeHass({ ...states, ...externalStates });
   return card;
 }
 
@@ -113,6 +113,48 @@ test("no hardcoded white separators", () => {
 });
 
 let failed = 0;
+
+test("the external spool knows whether its colour is real", () => {
+  // `colorIsKnown` was added for box slots only, so the external spool fell to
+  // `undefined` and its edit dialog opened with an empty colour field even
+  // when the printer had reported one.
+  const card = boxCard(4, { external: true });
+  const external = card._collectData().external;
+  assert.equal(external.color, "#00ff00");
+  assert.equal(external.colorIsKnown, true);
+});
+
+test("an external spool with no reported colour says so", () => {
+  const card = boxCard(4, {
+    external: true,
+    externalStates: {
+      "sensor.printer_cfs_external_color": { state: "unknown", attributes: {} },
+    },
+  });
+  const external = card._collectData().external;
+  assert.equal(external.color, "#cccccc", "the card still displays the grey");
+  assert.equal(external.colorIsKnown, false, "but will not write it to the spool");
+});
+
+test("an external spool missing its slot id is flagged as guessed", () => {
+  // `printerSlotId` falls back to 0, and the guess used to be keyed on the box
+  // id alone -- so a spool reporting a box but no slot was written to slot 0
+  // with no warning that the slot had been assumed.
+  const card = boxCard(4, {
+    external: true,
+    externalStates: {
+      "sensor.printer_cfs_external_filament": {
+        state: "Creality Hyper PETG",
+        attributes: { type: "PETG", box_id: 2 },
+      },
+    },
+  });
+  const external = card._collectData().external;
+  assert.equal(external.printerBoxId, 2);
+  assert.equal(external.printerSlotId, 0);
+  assert.equal(external.targetIsGuessed, true);
+});
+
 for (const [name, fn] of tests) {
   try { fn(); console.log(`ok   ${name}`); }
   catch (err) { failed += 1; console.log(`FAIL ${name}\n     ${err.message}`); }

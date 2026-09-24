@@ -86,6 +86,13 @@ def test_no_em_dashes_anywhere():
             continue
         if b"\xe2\x80\x94" not in body:
             continue
+        if b"\x00" in body:
+            # Binary. The rule is about text a reviewer reads, and compressed
+            # data hits these three bytes by chance -- so the bundled WebP
+            # could fail this on an unrelated re-encode and report a line of
+            # image data as an em dash. A NUL is the same heuristic `git diff`
+            # uses to call a file binary.
+            continue
         for number, line in enumerate(body.split(b"\n"), 1):
             if b"\xe2\x80\x94" in line:
                 offenders.append(

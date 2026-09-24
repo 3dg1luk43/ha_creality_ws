@@ -414,6 +414,14 @@ const_mod_ha.EntityCategory = EntityCategory
 # the minimum so the version gate is satisfied by default; the suites that test
 # the gate itself patch it.
 const_mod_ha.__version__ = "2099.1.0"
+# `_core_version()` reads MAJOR/MINOR, not `__version__`. Without them its
+# import raised, it returned None, and `core_version_supported(None, ...)`
+# passes by design -- so the minimum-core gate could not be exercised at all,
+# and a test patching `__version__` was changing a value nothing reads.
+# Kept in step with `__version__` above: far in the future, so the gate is open
+# unless a test deliberately winds it back.
+const_mod_ha.MAJOR_VERSION = 2099
+const_mod_ha.MINOR_VERSION = 1
 
 
 class UnitOfTemperature(_StrEnumStub):

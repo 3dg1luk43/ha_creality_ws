@@ -7,7 +7,20 @@ How the bot actually behaves, and the exact commands.
 - **The bot login differs by endpoint.** `gh pr view --json comments` reports the
   author as `coderabbitai`. The raw REST `/issues/N/comments` reports
   `coderabbitai[bot]`. GraphQL threads may report either, plus `coderabbit[bot]`.
-  Filter on all three or findings silently vanish.
+  Filter on all three or findings silently vanish -- but filter on **exactly**
+  those three. A substring match (`test("coderabbit")`) is what the completion
+  and rate-limit checks used to use, and on a public PR anyone may comment, so
+  an account like `coderabbit-notifier` could end a round early, fake a
+  rate-limit wait, or feed the harvest. One anchored allowlist, used everywhere:
+
+  ```bash
+  # Exact membership, not a regex: `test("...\\[bot\\]...")` is three levels of
+  # escaping (shell, jq string, regex) and jq rejects a bare `\[`, which is how
+  # the first attempt at this silently matched nothing. Only the three logins
+  # observed in practice; a fourth variant stalls the poller visibly rather
+  # than letting an impostor satisfy it, which is the better failure.
+  _CR_LOGINS='["coderabbitai","coderabbitai[bot]","coderabbit[bot]"]'
+  ```
 - **Inline findings and the summary live in different places.** Inline findings are
   pull *review comments*. The summary/walkthrough is an *issue* comment. Fetching
   only one gives a partial picture.
@@ -102,6 +115,7 @@ sleep 120                        # covers the ack race
 #   * "Action not completed" / "Review rate limited."
 #   * "Action failed" / "Review failed." -- says only "your included review limit
 #     is currently reached", so a grep for "rate limited" sails straight past it.
+_CR_LOGINS='["coderabbitai","coderabbitai[bot]","coderabbit[bot]"]'
 _CR_REFUSAL_RE='rate limited|review limit is currently reached|next included review will be available'
 
 check_rate_limit() {
@@ -118,7 +132,7 @@ check_rate_limit() {
   # shell, because `--paginate --jq` runs the filter per page, so a jq-side
   # `.[0]` emits one body per page and a refusal on page two still reaches grep.
   ack_id=$(gh api "repos/$owner/$repo/issues/$pr/comments" --paginate --jq \
-    "[.[] | select(.user.login|test(\"coderabbit\")) | select(.id > $last_comment_id)] | .[].id" \
+    "[.[] | select(.user.login as \$l | $_CR_LOGINS | index(\$l)) | select(.id > $last_comment_id)] | .[].id" \
     | sort -n | head -1) || return 0
   [[ $ack_id =~ ^[0-9]+$ ]] || return 0   # nothing posted yet: not a refusal
   ack=$(gh api "repos/$owner/$repo/issues/comments/$ack_id" --jq '.body') || return 0
@@ -144,7 +158,7 @@ while [ $SECONDS -lt $end ]; do
   # page: a bare `!= "0"` test on the raw value compares against "0\n0" and goes
   # true on two empty pages. Sum them.
   realrev=$(gh api "repos/$owner/$repo/pulls/$pr/reviews" --paginate --jq \
-    "[.[] | select(.user.login|test(\"coderabbit\")) | select(.submitted_at > \"$trigger\") | select(.body != \"\")] | length" \
+    "[.[] | select(.user.login as \$l | $_CR_LOGINS | index(\$l)) | select(.submitted_at > \"$trigger\") | select(.body != \"\")] | length" \
     | awk '{s+=$1} END{print s+0}')
   if [ "$busy" = "0" ] && [ "$realrev" != "0" ]; then
     echo "REVIEW COMPLETE realrev=$realrev"; exit 0
@@ -181,7 +195,7 @@ query($owner:String!, $repo:String!, $pr:Int!, $endCursor:String) {
   .data.repository.pullRequest.reviewThreads.nodes[]
   | select(.isResolved == false and .isOutdated == false)
   | .comments.nodes[0]
-  | select(.author.login | test("^coderabbit(ai)?(\\[bot\\])?$"))
+  | select(.author.login as $l | ["coderabbitai","coderabbitai[bot]","coderabbit[bot]"] | index($l))
   | {id: .databaseId, path, line: (.line // .startLine // .originalLine), body}'
 ```
 
