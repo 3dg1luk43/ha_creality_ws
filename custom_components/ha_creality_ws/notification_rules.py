@@ -42,6 +42,7 @@ from .const import (
     NOTIFY_LIVE_INTERVAL_SECS,
     NOTIFY_LIVE_MIN_INTERVAL_SECS,
     NOTIFY_LIVE_TRANSITION_FLOOR_SECS,
+    NOTIFY_END_CONFIRM_SECS,
     NOTIFY_REARM_PROGRESS_MAX,
 )
 
@@ -223,6 +224,107 @@ def _fill(template: str | None, **values: str) -> str:
         return ""
 
 
+# --------------------------------------------------------------------------- #
+# User text templates
+# --------------------------------------------------------------------------- #
+
+# Every placeholder a user template may use. The set is deliberately closed:
+# a name nothing can fill is a typo, and silently rendering it as empty text
+# would hide the typo behind a notification that merely reads oddly.
+#
+# All of them are filled from telemetry the printer actually streams. Nothing
+# here is inferred, converted against an assumed filament density, or carried
+# over from an earlier job -- a number a user reads off a notification has to be
+# a number the printer said.
+TEMPLATE_FIELDS = (
+    "device",
+    "filename",
+    "progress",
+    "layer",
+    "total_layers",
+    "eta",
+    "elapsed",
+    "filament",
+    "nozzle",
+    "bed",
+    "state",
+    "error_code",
+    "error_key",
+    "minutes",
+)
+
+# `{name}` only, lowercase: the same spelling the shipped strings use, so a user
+# reading an example in the README writes the same thing. Anything else in the
+# template -- including a lone brace -- is literal text and survives untouched,
+# which is why there is no escaping rule to learn.
+_TEMPLATE_TOKEN = re.compile(r"\{([a-z_][a-z0-9_]*)\}")
+
+# An optional segment: dropped whole when any placeholder inside it is empty.
+# This printer's telemetry is full of values that are only sometimes there --
+# no layer count on a paused resume, no estimate in the first minute, no
+# filament length on an aborted job -- so without this every template would
+# either omit the interesting details or render " -- left" with nothing before
+# it. Not nestable: the inner class excludes both brackets, so only the
+# innermost pair of a nested pair would match, and one pass is easier to explain
+# than a half-recursive syntax.
+_TEMPLATE_OPTIONAL = re.compile(r"\[([^\[\]]*)\]")
+
+# Collapses the whitespace an emptied placeholder leaves behind.
+_TEMPLATE_GAP = re.compile(r"[ \t]{2,}")
+
+
+def template_unknown_fields(template: Any) -> list[str]:
+    """Placeholder names in ``template`` that nothing can fill.
+
+    The options flow refuses a template this returns anything for, which is the
+    only moment a typo can be reported to the person who made it: a notification
+    is composed on a WebSocket frame, where the sole recourse is the log.
+    """
+    if not isinstance(template, str):
+        return []
+    seen: list[str] = []
+    for name in _TEMPLATE_TOKEN.findall(template):
+        if name not in TEMPLATE_FIELDS and name not in seen:
+            seen.append(name)
+    return seen
+
+
+def render_user_template(template: Any, values: Mapping[str, Any]) -> str:
+    """Render a user's notification template. Empty when it cannot be used.
+
+    An empty return means "fall back to the shipped text", and every caller
+    does. Three things produce one: no template configured, a placeholder that
+    does not exist (the options flow rejects those, but a hand-edited
+    ``.storage`` does not go through it), and a template whose every segment
+    turned out to be unknown. That last case is the important one -- a blank
+    notification is worse than a generic one.
+    """
+    if not isinstance(template, str) or not template.strip():
+        return ""
+    if template_unknown_fields(template):
+        return ""
+
+    def _resolve(name: str) -> str:
+        value = values.get(name)
+        return "" if value is None else str(value)
+
+    def _optional(match: "re.Match[str]") -> str:
+        segment = match.group(1)
+        names = _TEMPLATE_TOKEN.findall(segment)
+        if not names:
+            # Brackets with no placeholder inside are the user's own text --
+            # "[PRINTER] finished" means the brackets -- so they stay. They only
+            # become syntax when they wrap something that can go missing.
+            return match.group(0)
+        if not all(_resolve(name).strip() for name in names):
+            return ""
+        return segment
+
+    text = _TEMPLATE_OPTIONAL.sub(_optional, template)
+    text = _TEMPLATE_TOKEN.sub(lambda m: _resolve(m.group(1)), text)
+    return _TEMPLATE_GAP.sub(" ", text).strip()
+
+
 def sanitize_tag(raw: Any) -> str:
     """Coerce anything into a legal notification tag."""
     cleaned = _TAG_ILLEGAL.sub("_", str(raw or "")).strip("_")
@@ -333,6 +435,145 @@ def _milestone_of(progress: Any) -> int:
     if value < 0:
         return -1
     return value // NOTIFY_LIVE_MILESTONE_STEP
+
+
+# --------------------------------------------------------------------------- #
+# Early-end detection
+# --------------------------------------------------------------------------- #
+
+# What a job that is genuinely under way looks like. Deliberately narrower than
+# ``BUSY_PRINT_STATES``: "processing" is state 0 with a file name still
+# attached, which is both the warm-up *before* a print and what the printer
+# sits in *after* one is cancelled. Arming on it would make the two
+# indistinguishable, so the watch below only ever arms on a job it has seen
+# actually printing.
+RUNNING_JOB_STATES = frozenset({"printing", "paused"})
+
+# States that say nothing about the job: the WebSocket is down, or the power
+# switch is off. A print cannot be declared stopped from a frame that only
+# means "we cannot see the printer".
+UNOBSERVABLE_JOB_STATES = frozenset({"unknown", "off"})
+
+
+class JobEvent(str, Enum):
+    """What just happened to the job being watched."""
+
+    ENDED_EARLY = "ended_early"
+    RESTARTED = "restarted"
+
+
+@dataclass(slots=True)
+class JobEndWatch:
+    """Notices that a print ended before it finished, however it was ended.
+
+    The printer reports *state*, not events, and it reports the same state for
+    several different things -- so a stop is only visible as a transition. This
+    watch is the whole of that: it remembers a job it has seen printing, and
+    calls the end when that job stops printing without having reached 100%.
+
+    It exists because ``state == 4`` ("stopped") is not the signal it looks
+    like. Stopping a print from the printer's own screen, from the Creality app
+    or from Home Assistant all end the same way in telemetry -- ``state`` goes
+    back to 0 with the file name still attached and the progress reset to 0,
+    which derives as "processing", the same word as a warm-up. Nothing fired,
+    and the live card kept refreshing at 0% for a print that had been cancelled
+    minutes earlier. Some firmware clears the file name instead, which dismissed
+    the card and put nothing in its place.
+
+    ``progress`` and ``job_name`` are remembered from the last frame that showed
+    the job running, because both are gone by the time the end is visible: the
+    notification has to say "stopped at 42%", and 42 is not in the frame that
+    reveals the stop.
+    """
+
+    job_name: str = ""
+    progress: int = -1
+    seen_running: bool = False
+    ended: bool = False
+    # Set when the job stopped looking like it is running, for the ambiguous
+    # states only. None means "nothing to confirm".
+    pending_since: float | None = None
+
+    def reset(self) -> None:
+        """Forget the job entirely, for a new one."""
+        self.job_name = ""
+        self.progress = -1
+        self.seen_running = False
+        self.ended = False
+        self.pending_since = None
+
+    def pending(self) -> bool:
+        """Whether an end is waiting to be confirmed or ruled out."""
+        return self.pending_since is not None
+
+    def observe(
+        self,
+        *,
+        state: str,
+        progress: int,
+        filename: str,
+        now_mono: float,
+    ) -> JobEvent | None:
+        """Fold one telemetry frame in, and say what it means.
+
+        ``None`` is the ordinary answer: the job is running, or there is nothing
+        being watched, or an ambiguous state has not persisted long enough to
+        call.
+        """
+        if state in RUNNING_JOB_STATES:
+            restarted = self.ended
+            if restarted:
+                # A job printing again after we called the end of one is a new
+                # print, whoever started it. This is what re-arms the one-shot
+                # latches, and it is far more direct than the job clock: a stop
+                # resets `printJobTime` to 0, so reprinting the same file never
+                # made it run *backwards* and the "new cycle" test missed it.
+                self.reset()
+            self.seen_running = True
+            if filename:
+                self.job_name = filename
+            if progress >= 0:
+                self.progress = progress
+            self.pending_since = None
+            return JobEvent.RESTARTED if restarted else None
+
+        if not self.seen_running or self.ended:
+            return None
+
+        if state in UNOBSERVABLE_JOB_STATES:
+            # Deliberately clears the timer rather than pausing it: a print is
+            # only declared stopped off frames that actually described the
+            # printer, so the confirmation starts again from the first one that
+            # does.
+            self.pending_since = None
+            return None
+
+        if progress >= 100:
+            # A finished job, which the completion notification owns. Not left
+            # to the caller's own latch alone: this is the frame *before* that
+            # latch is set, and starting a confirmation here would race it.
+            self.pending_since = None
+            return None
+
+        # Two signals need no confirming. `state == 4` is the printer saying so
+        # outright, and a file name it has cleared means the job is gone from
+        # the printer's own point of view.
+        if state == "stopped" or not filename:
+            self.ended = True
+            self.pending_since = None
+            return JobEvent.ENDED_EARLY
+
+        # Everything else is ambiguous enough to sit on: a single "idle" or
+        # "processing" frame mid-print is something this printer does, and it
+        # must not cost the user a "print stopped" notification.
+        if self.pending_since is None:
+            self.pending_since = now_mono
+            return None
+        if now_mono - self.pending_since < NOTIFY_END_CONFIRM_SECS:
+            return None
+        self.ended = True
+        self.pending_since = None
+        return JobEvent.ENDED_EARLY
 
 
 # --------------------------------------------------------------------------- #
@@ -749,7 +990,6 @@ def build_event_payload(
     message: str,
     kind: str,
     channel: str,
-    progress: Any = 100,
     group: str | None = None,
     visuals: NotifyVisuals | None = None,
     links: NotifyLinks | None = None,
@@ -761,6 +1001,17 @@ def build_event_payload(
     ``alert_once``: a terminal banner posted on the live card's own tag would
     otherwise replace it *silently* and the "print finished" ping would never
     sound.
+
+    Carries **no progress bar either**, which is the whole difference between
+    this and a live push. A completion banner used to ship ``progress: 100``, so
+    the notification announcing that a print had finished still rendered the
+    live card's bar, full, with nothing left to track -- and on Android it
+    arrives on the live card's own tag, which made the "finished" notice read as
+    one more refresh of the card rather than as the end of it. A confirmation
+    needs its text, its tick and the snapshot of the bed, and none of the
+    chrome of something still in progress. ``EVENT_SOON`` wanted the same thing
+    for its own reason: with a bar it rendered as a second live card sitting
+    under the real one.
 
     ``ends_activity`` marks the terminal ones, which are posted on the live tag
     and close the iOS Live Activity with ``activity: "end"``. The card is
@@ -780,11 +1031,6 @@ def build_event_payload(
     }
     if ends_activity:
         data["activity"] = "end"
-
-    pct = _clamp_progress(progress)
-    if pct is not None:
-        data["progress"] = pct
-        data["progress_max"] = 100
 
     if visuals is not None:
         if visuals.preview_url:

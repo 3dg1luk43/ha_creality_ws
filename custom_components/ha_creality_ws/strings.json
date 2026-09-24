@@ -71,18 +71,19 @@
     "step": {
       "init": {
         "title": "Printer Configuration",
-        "description": "Choose a settings group to edit. Each group opens its own page so its options always load fresh.",
+        "description": "Choose a settings group to edit. Each group opens its own page so its options always load fresh, and submitting a page saves it right away. Done only closes this dialog.",
         "menu_options": {
           "camera": "Camera",
           "notifications": "Notifications",
+          "notification_text": "Notification text",
           "power": "Power switch",
           "connection": "Connection & performance",
-          "save": "Save and apply"
+          "done": "Done"
         }
       },
       "camera": {
         "title": "Camera",
-        "description": "Camera streaming mode. Auto detects from the printer model. WebRTC via go2rtc is the default for K2-family printers; WebRTC direct is an alternative that signals the printer itself (no go2rtc) - try it if the default does not work, e.g. on newer K1C firmware. Custom lets you point at any http(s) MJPEG/snapshot URL or an rtsp:// stream (served via go2rtc). Leave the go2rtc RTSP port at 0 unless HLS / camera.record needs a non-default port. Submit returns to the menu; use Save and apply there to apply changes.",
+        "description": "Camera streaming mode. Auto detects from the printer model. WebRTC via go2rtc is the default for K2-family printers; WebRTC direct is an alternative that signals the printer itself (no go2rtc) - try it if the default does not work, e.g. on newer K1C firmware. Custom lets you point at any http(s) MJPEG/snapshot URL or an rtsp:// stream (served via go2rtc). Leave the go2rtc RTSP port at 0 unless HLS / camera.record needs a non-default port. Submit saves this page and returns to the menu.",
         "data": {
           "camera_mode": "Camera Streaming Mode",
           "go2rtc_url": "External go2rtc Host/URL (if needed)",
@@ -107,6 +108,18 @@
           "notify_tap_path": "Dashboard path to open on tap"
         }
       },
+      "notification_text": {
+        "title": "Notification text",
+        "description": "Write your own wording for any of these notifications, or leave a field empty to keep the built-in, translated text. Available placeholders: {fields}. One the printer has not reported renders as nothing, so wrap anything optional in square brackets and the whole bracketed part disappears while its value is unknown, as in {example}. The title is always the printer name: Android fixes a live card's title when the card starts and cannot change it afterwards.",
+        "data": {
+          "notify_template_live": "Live print card text",
+          "notify_template_completed": "Print finished text",
+          "notify_template_stopped": "Print stopped text",
+          "notify_template_soon": "Finishing soon text",
+          "notify_template_error": "Printer error text",
+          "notify_template_runout": "Filament runout text"
+        }
+      },
       "power": {
         "title": "Power switch",
         "description": "Optional power switch entity ID (e.g. switch.smart_plug_name) to enable accurate 'Off' state detection.",
@@ -124,7 +137,8 @@
       }
     },
     "error": {
-      "invalid_camera_url": "Enter a full URL including the scheme, e.g. http://192.168.1.50:8080/?action=stream or rtsp://192.168.1.50:554/stream."
+      "invalid_camera_url": "Enter a full URL including the scheme, e.g. http://192.168.1.50:8080/?action=stream or rtsp://192.168.1.50:554/stream.",
+      "unknown_placeholder": "That is not a placeholder this integration can fill. Check the list in the description above, and mind the spelling."
     }
   },
   "entity": {

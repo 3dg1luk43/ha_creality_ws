@@ -71,18 +71,19 @@
     "step": {
       "init": {
         "title": "Configuración de la impresora",
-        "description": "Elige un grupo de ajustes para editar. Cada grupo se abre en su propia página, por lo que sus opciones siempre se cargan actualizadas.",
+        "description": "Elige un grupo de ajustes para editar. Cada grupo se abre en su propia página, por lo que sus opciones siempre se cargan actualizadas, y al enviar una página se guarda de inmediato. «Hecho» solo cierra este diálogo.",
         "menu_options": {
           "camera": "Cámara",
           "notifications": "Notificaciones",
+          "notification_text": "Texto de las notificaciones",
           "power": "Interruptor de encendido",
           "connection": "Conexión y rendimiento",
-          "save": "Guardar y aplicar"
+          "done": "Hecho"
         }
       },
       "camera": {
         "title": "Cámara",
-        "description": "Modo de transmisión de la cámara. «Auto» lo detecta a partir del modelo de impresora. WebRTC a través de go2rtc es la opción predeterminada en las impresoras de la familia K2; WebRTC directo es una alternativa que hace la señalización contra la propia impresora (sin go2rtc): pruébala si la predeterminada no funciona, por ejemplo en firmware reciente de la K1C. El modo personalizado permite apuntar a cualquier URL http(s) MJPEG/snapshot o a un flujo rtsp:// (servido a través de go2rtc). Deja el puerto RTSP de go2rtc en 0 salvo que HLS o camera.record necesiten un puerto distinto del predeterminado. Al enviar el formulario vuelves al menú; usa allí Guardar y aplicar para que los cambios surtan efecto.",
+        "description": "Modo de transmisión de la cámara. «Auto» lo detecta a partir del modelo de impresora. WebRTC a través de go2rtc es la opción predeterminada en las impresoras de la familia K2; WebRTC directo es una alternativa que hace la señalización contra la propia impresora (sin go2rtc): pruébala si la predeterminada no funciona, por ejemplo en firmware reciente de la K1C. El modo personalizado permite apuntar a cualquier URL http(s) MJPEG/snapshot o a un flujo rtsp:// (servido a través de go2rtc). Deja el puerto RTSP de go2rtc en 0 salvo que HLS o camera.record necesiten un puerto distinto del predeterminado. Al enviar el formulario se guarda esta página y vuelves al menú.",
         "data": {
           "camera_mode": "Modo de transmisión de la cámara",
           "go2rtc_url": "Servidor o dirección externa de go2rtc (si es necesario)",
@@ -107,6 +108,18 @@
           "notify_tap_path": "Ruta del panel que se abre al pulsar"
         }
       },
+      "notification_text": {
+        "title": "Texto de las notificaciones",
+        "description": "Escribe tu propio texto para cualquiera de estas notificaciones, o deja un campo vacío para conservar el texto integrado y ya traducido. Marcadores de posición disponibles: {fields}. Uno cuyo valor no haya comunicado la impresora no muestra nada, así que encierra entre corchetes todo lo que sea opcional: la parte entre corchetes desaparece por completo mientras su valor sea desconocido, como en {example}. El título es siempre el nombre de la impresora: en Android el título de la tarjeta en vivo se fija al crearse la tarjeta y ya no puede cambiarse.",
+        "data": {
+          "notify_template_live": "Texto de la tarjeta de impresión en vivo",
+          "notify_template_completed": "Texto al terminar la impresión",
+          "notify_template_stopped": "Texto al detenerse la impresión",
+          "notify_template_soon": "Texto de impresión a punto de finalizar",
+          "notify_template_error": "Texto de error de la impresora",
+          "notify_template_runout": "Texto de filamento agotado"
+        }
+      },
       "power": {
         "title": "Interruptor de encendido",
         "description": "ID de entidad opcional de un interruptor de encendido (p. ej. switch.smart_plug_name) para detectar con precisión el estado «Apagada».",
@@ -124,7 +137,8 @@
       }
     },
     "error": {
-      "invalid_camera_url": "Introduce una URL completa incluyendo el esquema, p. ej. http://192.168.1.50:8080/?action=stream o rtsp://192.168.1.50:554/stream."
+      "invalid_camera_url": "Introduce una URL completa incluyendo el esquema, p. ej. http://192.168.1.50:8080/?action=stream o rtsp://192.168.1.50:554/stream.",
+      "unknown_placeholder": "Ese no es un marcador de posición que esta integración pueda rellenar. Consulta la lista que aparece en la descripción de arriba y comprueba que esté bien escrito."
     }
   },
   "entity": {

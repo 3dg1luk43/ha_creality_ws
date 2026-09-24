@@ -22,7 +22,7 @@ This custom [Home Assistant](https://www.home-assistant.io/) integration provide
 * **Camera:** auto-detects stream type by model (MJPEG or WebRTC).
 * **Lovelace card**: dependency-free, uses HA fonts, progress ring, contextual chips, telemetry pills.
 * **Style Editor**: Built-in theme customization with color picker for all card elements.
-* **Live print notifications** to any number of phones: a countdown timer and progress bar on the iOS Lock Screen and the Android status bar, the G-code preview as the icon, a camera snapshot when a print ends, and optional Pause/Resume/Stop buttons. See [Notifications](#notifications).
+* **Live print notifications** to any number of phones: a countdown timer and progress bar on the iOS Lock Screen and the Android status bar, the G-code preview as the icon, a camera snapshot when a print ends, and optional Pause/Resume/Stop buttons. Every message can be [written in your own words](#custom-notification-text). See [Notifications](#notifications).
 
 ---
 
@@ -60,6 +60,8 @@ To install a specific pre-release version via HACS:
 2. **Restart** Home Assistant.
 
 ## Configuration
+
+The **Configure** dialog is a menu of pages -- Camera, Notifications, Notification text, Power switch, Connection & performance. **Each page is saved when you submit it**, and the integration reloads to apply it. **Done** only closes the dialog, so closing it any other way loses nothing either.
 
 ### 1) Add the integration (UI)
 
@@ -231,9 +233,11 @@ Enable **Live print card**. During a print you get one card that updates in plac
 - the **G‑code preview** as the notification icon
 - **Pause / Resume / Stop** buttons, if you enable them
 
-It ends by itself when the print finishes, and is replaced by a completion notification carrying a **camera snapshot** of the bed. A print that is cancelled or aborted gets its own notification saying where it stopped, rather than the card simply vanishing.
+It ends by itself when the print finishes, and is replaced by a completion notification carrying a **camera snapshot** of the bed. That one is a plain confirmation: no progress bar and no countdown, because there is nothing left to track. A print that is cancelled or aborted gets its own notification saying where it stopped, rather than the card simply vanishing.
 
 **Notify when a print ends** covers both outcomes -- finished *and* stopped. Being told a print completed is only half the story if you are not also told when it didn't.
+
+A stop is reported whoever performed it: the printer's own screen, the Creality app, this integration's Stop button or the button on the notification itself. None of those announces itself in the printer's telemetry -- what arrives is an ordinary frame in the same state the printer reports while warming up -- so the integration watches for the transition instead, and the notification names the file and the percentage the print had reached. A stop the printer states outright is announced immediately; the ambiguous form is held for about 15 seconds first, so a single odd frame mid-print cannot tell you your print was stopped when it wasn't.
 
 **Requirements:** Home Assistant **2026.7.0 or newer** (this is the integration's minimum), plus **iOS 17.2+** or **Android 16+**. On older phones the same notification still arrives and still replaces itself in place -- you lose the timer and the bar, not the notification.
 
@@ -258,6 +262,43 @@ Set **Dashboard path to open on tap** to something like `/lovelace/printer`. It 
 ### Buttons
 
 **Show Pause/Resume/Stop buttons** is off by default. Pause and Resume go through exactly the same path as the corresponding button entities. **Stop** is marked destructive and requires device authentication, so a mis‑tap on a lock screen cannot end a long print.
+
+### Custom notification text
+
+**Configure → Notification text** lets you write the wording yourself, for any of the six notifications the integration composes: the live card, print finished, print stopped, finishing soon, printer error and filament runout. Leave a field empty -- or clear it again -- to keep the built-in, translated text.
+
+Placeholders are wrapped in single braces:
+
+| Placeholder | Value |
+|---|---|
+| `{device}` | the printer's name, the same one used as the notification title |
+| `{filename}` | the print file, without its directory |
+| `{progress}` | percent complete, a whole number |
+| `{layer}`, `{total_layers}` | the current layer and the job's total |
+| `{eta}` | time remaining, e.g. `1h 04m` |
+| `{elapsed}` | how long the job has been running |
+| `{filament}` | filament used so far, in metres |
+| `{nozzle}`, `{bed}` | current temperatures, in whole degrees |
+| `{state}` | `printing`, `paused`, `stopped`, ... |
+| `{error_code}`, `{error_key}` | the printer's error numbers (the error notification) |
+| `{minutes}` | minutes left (the finishing-soon reminder) |
+
+Every one comes from the printer's own telemetry, read from the single frame that triggered the notification. There is no placeholder for a value the printer does not report -- filament *weight*, for one, which would take a density it never sends.
+
+**Values that are not always there.** The printer reports no estimate in the first minute of a job, no layer count on some firmwares, and no filament length on a job that never started. A placeholder it has not reported renders as nothing, which on its own leaves `3DBenchy.gcode  left`. Wrap the optional part in **square brackets** and the whole bracketed section disappears while any placeholder inside it is unknown:
+
+```
+{filename} -- {progress}%[ -- {eta} left][ -- layer {layer}/{total_layers}]
+```
+
+- `3DBenchy.gcode -- 42% -- 1h 04m left -- layer 126/300` while everything is known
+- `3DBenchy.gcode -- 42%` in the first minute, with no dangling separator
+
+Brackets that contain no placeholder are your own text and stay as you typed them, so `[PRINTER] done` renders literally. A `0` is a value, not a missing one: `[{progress}%]` renders `0%` rather than vanishing.
+
+Anything not recognised is refused when you submit the page, so a typo like `{filament_grams}` is reported there rather than quietly delivering the built-in text forever. If one gets in another way (a hand-edited `.storage`), the notification still arrives -- with the built-in wording, and a warning in the log.
+
+**The title is always the printer's name.** Android fixes a live card's title when the activity starts and cannot change it afterwards, so job detail belongs in the text. For full control over title, text and delivery, use the bus events below.
 
 ### Language
 

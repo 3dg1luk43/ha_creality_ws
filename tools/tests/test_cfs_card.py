@@ -65,7 +65,7 @@ def test_the_javascript_suites_are_discoverable():
     for expected in (
         "test_collector.mjs", "test_edit_dialog.mjs", "test_device_scoping.mjs",
         "test_interactions.mjs", "test_view_mode.mjs", "test_box_view.mjs",
-        "test_presets.mjs",
+        "test_presets.mjs", "test_time_left.mjs",
     ):
         assert expected in JS_SUITES, f"{expected} is missing from {JS_SUITES}"
 

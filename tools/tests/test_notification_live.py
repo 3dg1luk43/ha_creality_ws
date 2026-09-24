@@ -17,10 +17,12 @@ from conftest import fake_config_entry
 
 from custom_components.ha_creality_ws.const import (
     CLEAR_NOTIFICATION_MARKER,
+    NOTIFY_END_CONFIRM_SECS,
     NOTIFY_LIVE_INTERVAL_SECS,
     NOTIFY_LIVE_MILESTONE_STEP,
     NOTIFY_LIVE_MIN_INTERVAL_SECS,
     NOTIFY_LIVE_STALE_CLEAR_SECS,
+    STALE_AFTER_SECS,
 )
 from custom_components.ha_creality_ws.coordinator import KCoordinator
 
@@ -589,9 +591,17 @@ def test_starting_a_different_file_dismisses_the_previous_card():
 
 
 def test_stopping_and_reprinting_the_same_file_shows_a_card_again():
-    """A stopped print never sets `_notified_completed`, which is the only thing
-    that re-arms the jitter latch -- so retiring the card on any non-busy frame
-    meant the same file could never show a card again."""
+    """The card is retired by a stop and comes back for the reprint.
+
+    Retiring it is not optional: after a stop this printer reports state 0 with
+    the file still named, which derives as "processing" and counts as busy, so a
+    card left un-retired is stood straight back up at 0%.
+
+    What makes retiring it safe is `JobEndWatch`: a job printing again re-arms
+    the latches. It used to be `_notified_completed`, which a stop never sets --
+    so back then retiring the card here meant the same file could never show one
+    again, and the card had to be left alive instead.
+    """
     coord, hass = _coordinator()
     _frame(coord, hass, **_printing(30))
     assert coord._live_card.card_active is True
@@ -601,7 +611,7 @@ def test_stopping_and_reprinting_the_same_file_shows_a_card_again():
     stopped = _frame(coord, hass, **_printing(30, state=4))
     assert len(_events(stopped)) == 1
     assert len(_clears(stopped)) == 1
-    assert coord._live_card.job_finished is False, "a stop must not retire the card"
+    assert coord._live_card.job_finished is True
 
     coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
     again = _frame(coord, hass, **_printing(1, printJobTime=5, printLeftTime=3600))
@@ -1178,3 +1188,179 @@ def test_the_soon_reminder_has_no_progress_bar():
     assert "progress_max" not in soon
     assert "progress_indeterminate" not in soon
 
+
+# --------------------------------------------------------------------------- #
+# A print that is stopped rather than finished
+# --------------------------------------------------------------------------- #
+# Stopping a print from the printer's own screen, from the Creality app or from
+# Home Assistant all end the same way in telemetry, and none of them announces
+# itself: `state` goes back to 0 with the file name still attached and the
+# progress reset to 0, which derives as "processing" and counts as busy. Nothing
+# fired, and the card's last word on the print was a refresh reading 0%.
+
+
+def _stopped_as_reported():
+    """A frame shaped like the one a cancelled print actually produces.
+
+    Taken from `set_stop` in the test server, which mirrors the real firmware:
+    the progress, the job clock and the layer are all reset, `state` goes back
+    to 0, and the file name stays exactly where it was.
+    """
+    return _printing(0, printJobTime=0, printLeftTime=0, state=0, layer=0)
+
+
+def _confirm(coord, hass, frames=1):
+    """Feed the stop, let its confirmation window elapse, feed more frames.
+
+    The window is measured between frames, so the clock has to move *between*
+    them: a printer that goes quiet the instant a job ends is not a printer we
+    can declare anything about.
+    """
+    out = list(_frame(coord, hass, **_stopped_as_reported()))
+    hass.loop.advance(NOTIFY_END_CONFIRM_SECS + 1)
+    for _ in range(frames):
+        out.extend(_frame(coord, hass, **_stopped_as_reported()))
+    return out
+
+
+def test_a_stop_the_printer_does_not_announce_is_still_announced():
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(40))
+
+    # The frame the stop arrives on says nothing a state word could catch.
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    assert _frame(coord, hass, **_stopped_as_reported()) == [], (
+        "a job that may have just ended must not repaint the card at 0%"
+    )
+
+    payloads = _confirm(coord, hass)
+    events = _events(payloads)
+    assert len(events) == 1
+    # The progress from before the stop, not the 0 the printer now reports.
+    assert events[0]["message"] == _STRINGS["stopped"].format(
+        filename="3DBenchy.gcode", progress=40
+    )
+    # Posted on the card's tag, and the card dismissed first so the ongoing
+    # Android notification actually goes away.
+    assert len(_clears(payloads)) == 1
+    assert events[0]["data"]["tag"].endswith("_live")
+    assert "progress" not in events[0]["data"]
+
+
+def test_a_stop_that_clears_the_file_name_is_announced_at_once():
+    """This frame is the only chance: `_check_notifications` returns early on
+    every later one, because there is no job left to describe."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(40))
+
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    payloads = _frame(coord, hass, printFileName="", printProgress=0, state=0)
+
+    events = _events(payloads)
+    assert len(events) == 1
+    assert "3DBenchy.gcode" in events[0]["message"]
+    assert len(_clears(payloads)) == 1
+
+
+def test_the_bus_event_fires_for_a_stop_nothing_else_would_have_caught():
+    """The language-neutral escape hatch has to cover the same ends the
+    built-in notification does."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(40))
+    _confirm(coord, hass)
+
+    stopped = [d for name, d in hass.events if name.endswith("_print_stopped")]
+    assert len(stopped) == 1
+    assert stopped[0]["filename"] == "3DBenchy.gcode"
+    # The percentage the print reached, not the 0 the frame that revealed the
+    # stop reports: an automation writing its own text needs the same number
+    # the built-in notification quotes.
+    assert stopped[0]["progress"] == 40
+
+
+def test_a_stop_is_announced_once_however_many_frames_follow():
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(40))
+    _confirm(coord, hass, frames=5)
+
+    for _ in range(5):
+        hass.loop.advance(NOTIFY_LIVE_INTERVAL_SECS + 1)
+        assert _frame(coord, hass, **_stopped_as_reported()) == []
+
+
+def test_one_idle_frame_mid_print_costs_no_notification():
+    """The printer does emit one, and the card has to come back rather than be
+    replaced by "your print was stopped"."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(40))
+
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    assert _frame(coord, hass, **_stopped_as_reported()) == []
+
+    hass.loop.advance(1)
+    back = _frame(coord, hass, **_printing(41))
+    assert _events(back) == []
+    assert len(_live(back)) == 1
+    assert coord._notified_stopped is False
+
+
+def test_a_dropped_connection_is_not_a_stopped_print():
+    """Every entity goes unavailable when telemetry stops, and the derived state
+    is "unknown" -- which says nothing about the job. Announcing a stop off it
+    would turn a Wi-Fi blip into "your print was stopped"."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(40))
+
+    coord.client._last = hass.loop.now - (STALE_AFTER_SECS + 5)
+    hass.loop.advance(NOTIFY_END_CONFIRM_SECS + 1)
+    payloads = _frame(coord, hass, **_printing(40))
+
+    assert _events(payloads) == []
+    assert coord._notified_stopped is False
+
+
+def test_stopping_the_same_file_twice_is_announced_twice():
+    """Nothing used to re-arm the latch: a stop does not change the file name,
+    and it resets `printJobTime` to 0 so the job clock never runs backwards
+    either. The second stop went unannounced."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(40))
+    assert len(_events(_confirm(coord, hass))) == 1
+
+    # Printing again is what says a new job has begun.
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    again = _frame(coord, hass, **_printing(5, printJobTime=50))
+    assert len(_live(again)) == 1, "the reprint gets its own card"
+    assert coord._notified_stopped is False
+
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    _frame(coord, hass, **_stopped_as_reported())
+    assert len(_events(_confirm(coord, hass))) == 1
+
+
+def test_the_card_still_comes_down_when_end_notifications_are_off():
+    """No banner is coming to replace it, so the dismissal is the only thing
+    that will take it off the phone."""
+    coord, hass = _coordinator()
+    coord._notify_completed = False
+    _frame(coord, hass, **_printing(40))
+
+    payloads = _confirm(coord, hass)
+
+    assert _events(payloads) == []
+    assert len(_clears(payloads)) == 1
+    assert coord._live_card.card_active is False
+
+
+def test_a_finished_print_is_not_announced_as_stopped_as_well():
+    """The printer resets the progress to 0 a while after a job ends, which is
+    the same shape a stop has. Reading it as one would follow every completion
+    with "stopped at 99%"."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(50))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    done = _frame(coord, hass, **_printing(100, printLeftTime=0))
+    assert len(_events(done)) == 1
+
+    payloads = _confirm(coord, hass, frames=3)
+    assert _events(payloads) == []

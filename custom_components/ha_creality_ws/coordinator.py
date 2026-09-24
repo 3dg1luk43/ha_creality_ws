@@ -29,6 +29,8 @@ from .notification_rules import (
     PHASE_PAUSED,
     PHASE_PRINTING,
     PHASE_START,
+    JobEndWatch,
+    JobEvent,
     LiveCardState,
     LiveSnapshot,
     NotifyLinks,
@@ -53,6 +55,7 @@ from .notification_rules import (
     is_mobile_target,
     notify_service_slug,
     is_new_job_cycle,
+    render_user_template,
     sanitize_tag,
     stringify_data,
 )
@@ -69,6 +72,7 @@ from .const import (
     CONF_NOTIFY_ERROR,
     CONF_NOTIFY_MINUTES_TO_END,
     CONF_MINUTES_TO_END_VALUE,
+    NOTIFY_TEMPLATE_OPTIONS,
     LATE_DISCOVERY_FIELDS,
     BUS_EVENT_PRINT_ERROR,
     BUS_EVENT_PRINT_FINISHED,
@@ -160,7 +164,18 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._notify_preview_image = True
         self._notify_camera_snapshot = True
         self._notify_tap_path = ""
+        # Notification name -> the user's own text for it. Empty unless someone
+        # filled a field in, and every consumer falls back to the shipped,
+        # translated sentence, so the default path is untouched by this.
+        self._notify_templates: dict[str, str] = {}
+        # (notification, template) pairs already complained about; see
+        # `_custom_message`.
+        self._notify_template_warned: set[tuple[str, str]] = set()
         self._live_card = LiveCardState()
+        # Watches the running job so a print that is stopped -- from the
+        # printer's screen, the Creality app or Home Assistant -- is noticed.
+        # See `JobEndWatch`: none of those three announces itself in telemetry.
+        self._job_end_watch = JobEndWatch()
         # Notifications retired in state but not yet taken off the phone.
         # Settled at the end of the frame: the card's debt is cancelled if a
         # terminal banner went out to replace it, the reminder's never is,
@@ -241,6 +256,15 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._notify_preview_image = bool(options.get(CONF_NOTIFY_PREVIEW_IMAGE, True))
         self._notify_camera_snapshot = bool(options.get(CONF_NOTIFY_CAMERA_SNAPSHOT, True))
         self._notify_tap_path = str(options.get(CONF_NOTIFY_TAP_PATH) or "").strip()
+        # Blank and whitespace-only are both "use the shipped text": a user who
+        # clears a field must get the default back, and an options dict is
+        # never rewritten to drop the key.
+        self._notify_templates = {}
+        self._notify_template_warned.clear()
+        for name, key in NOTIFY_TEMPLATE_OPTIONS.items():
+            text = options.get(key)
+            if isinstance(text, str) and text.strip():
+                self._notify_templates[name] = text.strip()
         # A rename or a disabled entity invalidates these, and an options
         # change is the one moment we know we are being re-read.
         self._entity_id_cache.clear()
@@ -753,6 +777,49 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if job_time is not None:
             self._last_job_time = job_time
 
+        # 0) Has the job we were watching stopped running?
+        #
+        # Before everything below, because both of the things that reveal a stop
+        # also destroy the evidence for it: a cleared file name trips the
+        # filename-change reset a few lines down, which dismisses the card and
+        # re-arms the latches, and the `if not fname` return after it means this
+        # frame is the only chance to say anything at all.
+        #
+        # Skipped once the completion has been announced. A finished print is
+        # the completion branch's business, and this printer resets the progress
+        # to 0 a while after a job ends -- which the watch would otherwise read
+        # as a print that stopped at 99%.
+        state = self._job_state()
+        if fname and getattr(self, "_last_filename", None) != fname:
+            # A different file is a different job, so the watch forgets the one
+            # it was following -- before this frame is folded in, or the reset
+            # would throw away the very observation that armed it.
+            #
+            # Only when there *is* a new name: a name the printer has cleared is
+            # the job being watched going away, and the watch's memory of it is
+            # the only thing that can still say what stopped and how far it got.
+            self._job_end_watch.reset()
+        if self._notified_completed:
+            self._job_end_watch.reset()
+            job_event = None
+        else:
+            job_event = self._job_end_watch.observe(
+                state=state,
+                progress=prog_val,
+                filename=display_filename(fname) or (fname or ""),
+                now_mono=self.hass.loop.time(),
+            )
+
+        if job_event is JobEvent.RESTARTED:
+            # A job printing again after one ended: re-arm everything that is
+            # once per print. The file name has not necessarily changed (the
+            # same file reprinted) and the job clock does not go backwards after
+            # a stop, so neither of the two older signals catches this.
+            _LOGGER.debug("A print is running again; re-arming the job latches")
+            self._reset_for_new_job(prog_val)
+        elif job_event is JobEvent.ENDED_EARLY and not self._notified_stopped:
+            await self._announce_early_end(deliver=deliver)
+
         # Check if we started a new print (filename changed)
         # Store last filename in instance to compare
         if getattr(self, "_last_filename", None) != fname:
@@ -840,10 +907,11 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # and a card that simply vanishes explains nothing. Completion wins when
         # both apply, because derive_print_state ranks progress >= 100 above
         # state 4.
-        if self._job_state() == "stopped" and not self._notified_stopped:
+        if state == "stopped" and not self._notified_stopped:
             if self._notify_completed and deliver:
                 await self._notify_event(
-                    self._t("stopped", filename=job, progress=prog_val),
+                    self._custom_message("stopped")
+                    or self._t("stopped", filename=job, progress=prog_val),
                     kind=EVENT_STOPPED,
                 )
             self._fire_print_event(BUS_EVENT_PRINT_STOPPED, d, job)
@@ -855,7 +923,8 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             key = (d.get("err") or {}).get("key", 0)
             if self._notify_error and deliver:
                 await self._notify_event(
-                    self._t("error", code=code, key=key, filename=job),
+                    self._custom_message("error", error_key=key)
+                    or self._t("error", code=code, key=key, filename=job),
                     kind=ALERT_ERROR,
                 )
             self._fire_print_event(BUS_EVENT_PRINT_ERROR, d, job)
@@ -872,7 +941,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if is_runout and not self._notified_filament_runout:
             if self._notify_error and deliver:
                 await self._notify_event(
-                    self._t("filament_runout", filename=job), kind=ALERT_RUNOUT
+                    self._custom_message("filament_runout")
+                    or self._t("filament_runout", filename=job),
+                    kind=ALERT_RUNOUT,
                 )
             self._notified_filament_runout = True
         elif not is_runout and self._notified_filament_runout:
@@ -903,7 +974,10 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if 0 < left_min <= target_min and not self._notified_minutes_to_end:
                 if self._notify_minutes_to_end and deliver:
                     await self._notify_event(
-                        self._t(
+                        self._custom_message(
+                            "finishing_soon", minutes=int(left_min)
+                        )
+                        or self._t(
                             "finishing_soon", filename=job, minutes=int(left_min)
                         ),
                         kind=EVENT_SOON,
@@ -930,6 +1004,63 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 mobile_only=True,
             )
 
+    async def _announce_early_end(self, *, deliver: bool) -> None:
+        """Say that a print ended before it finished, and tidy up after it.
+
+        Reached from the transition watch rather than from a state word, so the
+        frame this runs on has already lost the two things the message needs --
+        the file name may be cleared and the progress reset to 0. Both come from
+        the watch, which remembers them from the last frame that showed the job
+        running. "Stopped at 0%" was what the printer's own telemetry would have
+        said.
+
+        The card is retired here rather than left to `_update_live_card`: after
+        a stop the printer sits in a state this integration counts as busy
+        (state 0 with the file still named), so a card left un-finished would be
+        stood straight back up at 0% by the very next frame.
+        """
+        watch = self._job_end_watch
+        job = watch.job_name or display_filename(self._last_filename) or ""
+        progress = max(watch.progress, 0)
+        _LOGGER.info(
+            "Print %s ended at %s%% without finishing; announcing it", job, progress
+        )
+
+        # A banner is posted on the card's own tag and replaces it, so the card
+        # is retired *silently* when one is coming. When none is -- the user
+        # does not want end notifications, or has no target -- this is the only
+        # thing that will take it off the phone.
+        banner = self._notify_completed and deliver
+        if self._live_card.card_active:
+            self._clear_live_card(finished=True, send=not banner)
+        else:
+            self._live_card.finish()
+        self._card_dismiss_owed = False
+
+        if banner:
+            await self._notify_event(
+                self._custom_message("stopped", filename=job, progress=progress)
+                or self._t("stopped", filename=job, progress=progress),
+                kind=EVENT_STOPPED,
+            )
+
+        # The finishing-soon reminder has its own tag, so no banner supersedes
+        # it. A print stopped in its last minutes would otherwise leave
+        # "finishing in 5 minutes" sitting on the phone for good, and this frame
+        # can be the last one that carries a job at all.
+        if deliver and (self._notified_minutes_to_end or self._soon_dismiss_owed):
+            self._notify_dispatch(
+                build_clear_payload(f"{self._notify_tag_base()}_soon"),
+                kind="soon:clear",
+                mobile_only=True,
+            )
+        self._soon_dismiss_owed = False
+
+        self._fire_print_event(
+            BUS_EVENT_PRINT_STOPPED, self.data or {}, job, progress=progress
+        )
+        self._notified_stopped = True
+
     def _reset_for_new_job(self, prog_val: int) -> None:
         """Re-arm the per-job notification latches for a new job.
 
@@ -944,6 +1075,12 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._live_card.reset_for_new_job(progress=prog_val)
         self._notified_started = False
         self._notified_stopped = False
+        # Also once per print: a job stopped near the end latches this, and the
+        # latch only used to clear on a *file name* change -- so reprinting the
+        # same file got no reminder. The filename-change caller resets it a few
+        # lines later anyway, so this is only ever new information for the other
+        # two callers.
+        self._notified_minutes_to_end = False
 
     def _resolve_entity_id(self, platform: str, unique_suffix: str) -> str | None:
         """Entity id of one of our own entities, via the unique id we minted.
@@ -1080,7 +1217,16 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         The remaining time is only spelled out when there is no chronometer to
         show it -- otherwise the on-device timer is both live and more accurate
         than a number frozen at the last push.
+
+        A user template replaces the whole composition, `{eta}` included. That
+        is deliberate: someone who writes the remaining time into their own card
+        text wants to read it there, and the number is refreshed on every push
+        like every other placeholder.
         """
+        custom = self._custom_message("live")
+        if custom:
+            return custom
+
         parts: list[str] = []
         if snap.filename:
             parts.append(snap.filename)
@@ -1115,14 +1261,29 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self._notify_live:
             return
 
+        if self._job_end_watch.pending():
+            # The job may have just been stopped, and this printer reports a
+            # stopped job as state 0 with the progress reset -- which is still
+            # "busy" below, so without this the card's last word on a cancelled
+            # print was an immediate refresh reading 0% and "0s left". Nothing
+            # is retired either: if the end is confirmed the banner replaces the
+            # card in place, and if the frame was only a blip the next one
+            # refreshes it with real values.
+            return
+
         if not snap.job_active:
             if self._live_card.card_active:
-                # Only reaching 100% retires the card. The jitter this latch
-                # defends against happens there and nowhere else, whereas a
-                # stopped print -- or one transient "idle"/"off" frame -- has to
-                # leave the card able to come back. A stopped job never sets
-                # `_notified_completed`, so nothing else would ever re-arm it and
-                # the same file could never show a card again.
+                # Only reaching 100% retires the card *here*. The jitter this
+                # latch defends against happens there and nowhere else, whereas
+                # one transient "idle"/"off" frame has to leave the card able to
+                # come back.
+                #
+                # A print that was stopped is retired too, but by
+                # `_announce_early_end`, which has decided it really did end and
+                # has a banner to put in its place. That is also the only thing
+                # that re-arms it: reaching this line with `finished=True` for a
+                # stopped job used to mean the same file could never show a card
+                # again, because nothing knew a new print had begun.
                 finished = snap.progress is not None and snap.progress >= 100
                 # Retire the state but send nothing yet. A terminal banner is
                 # usually posted on this same tag moments later and replaces the
@@ -1232,13 +1393,20 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             self._live_card.clear()
 
-    def _fire_print_event(self, event: str, d: dict[str, Any], job: str) -> None:
+    def _fire_print_event(
+        self, event: str, d: dict[str, Any], job: str, *, progress: Any = None
+    ) -> None:
         """Fire a language-neutral bus event describing the job.
 
         Deliberately independent of whether any notify target is configured:
         this is what a multi-language household uses to write its own
         notification text in an automation, since a body composed here can only
         ever follow the server's language.
+
+        `progress` overrides what the frame says, for the one event whose frame
+        no longer describes the job it is about: a stopped print is revealed by
+        telemetry that has already reset the progress to 0, and an automation
+        reading this event needs the same number the notification quotes.
         """
         try:
             self.hass.bus.async_fire(
@@ -1248,7 +1416,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "host": self.client._host,
                     "device_name": self._notify_title(),
                     "filename": job,
-                    "progress": self._notify_progress(),
+                    "progress": (
+                        self._notify_progress() if progress is None else progress
+                    ),
                     "layer": self._int_or_none(d.get("layer")),
                     "total_layers": self._int_or_none(d.get("TotalLayer")),
                     "left_seconds": self._print_seconds_left(d),
@@ -1411,6 +1581,97 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             return ""
 
+    def _template_values(self, **extra: Any) -> dict[str, str]:
+        """Every placeholder a user template may use, already rendered.
+
+        All of it read from one telemetry frame, so a template cannot mix a
+        percentage from this second with an estimate from the last. Durations
+        and the filament length go through the same translated formatters the
+        shipped sentences use, which is what keeps "4h 12m" and "1.2 m" spelled
+        the same way whoever composed the text.
+
+        A value the printer has not reported is the empty string rather than a
+        zero or a dash. That is what an optional `[...]` segment tests, and the
+        reason it can: a real 0% is "0", an unknown one is "".
+
+        `extra` carries the values only one notification has -- the minutes on
+        the finishing-soon reminder, the code on an error -- so a template for
+        one notification can reference them and every other template drops them
+        as unknown.
+        """
+        d = self.data or {}
+        strings = self._notify_strings or {}
+        progress = self._notify_progress()
+        layer = self._int_or_none(d.get("layer"))
+        total_layers = self._int_or_none(d.get("TotalLayer"))
+        code = self._error_code(d)
+        values: dict[str, str] = {
+            "device": self._notify_title(),
+            "filename": display_filename(d.get("printFileName")),
+            "progress": "" if progress is None else str(progress),
+            "layer": "" if layer is None else str(layer),
+            "total_layers": "" if total_layers is None else str(total_layers),
+            "eta": format_duration(self._print_seconds_left(d), strings),
+            "elapsed": format_duration(d.get("printJobTime"), strings),
+            "filament": format_filament_length(
+                d.get("usedMaterialLength"), strings.get("filament_length")
+            ),
+            "nozzle": self._whole_degrees(d.get("nozzleTemp")),
+            "bed": self._whole_degrees(d.get("bedTemp0")),
+            "state": self._job_state(),
+            # 0 is "no error", so it renders empty and an optional segment
+            # holding it disappears rather than announcing error 0.
+            "error_code": str(code) if code else "",
+            "error_key": "",
+            "minutes": "",
+        }
+        for name, value in extra.items():
+            values[name] = "" if value is None else str(value)
+        return values
+
+    @staticmethod
+    def _whole_degrees(value: Any) -> str:
+        """A temperature for a notification body, or empty when there is none.
+
+        Rounded: a notification is read at a glance, and the printer reports a
+        decimal of noise that says nothing at that distance.
+        """
+        number = safe_float(value)
+        if number is None or not math.isfinite(number):
+            return ""
+        return str(round(number))
+
+    def _custom_message(self, name: str, /, **extra: Any) -> str:
+        """The user's own text for one notification, or empty to use ours.
+
+        The single gate for every template, so "a template that cannot render
+        falls back to the shipped sentence" is one rule in one place rather than
+        six call sites that each have to remember it.
+
+        Nothing is computed for a notification with no template: this is on the
+        live card's path, which runs on every WebSocket frame, and building the
+        value bag there would mean formatting six numbers per frame to throw
+        them away. `name` is positional-only so an `extra` value could never
+        collide with it, the same reason `_t` is.
+        """
+        template = self._notify_templates.get(name)
+        if not template:
+            return ""
+        text = render_user_template(template, self._template_values(**extra))
+        if not text:
+            # Once per template rather than once per push: the live card is
+            # pushed up to 600 times a job, and a template that renders to
+            # nothing usually does so for a whole print.
+            warned = (name, template)
+            if warned not in self._notify_template_warned:
+                self._notify_template_warned.add(warned)
+                _LOGGER.warning(
+                    "Custom %s notification text could not be rendered; "
+                    "using the built-in text instead",
+                    name,
+                )
+        return text
+
     def _notify_title(self) -> str:
         """Printer name, used as the notification title.
 
@@ -1504,10 +1765,6 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 message=message,
                 kind=kind,
                 channel=self._t(NOTIFY_CHANNEL_KEY_SOON),
-                # No progress bar. With one it renders as a second live card
-                # sitting under the real one -- same title, same bar, no way to
-                # tell at a glance which is the card that keeps updating.
-                progress=None,
                 group=tag_base,
                 # No bed snapshot: the print is not finished, and the preview
                 # already says what is on the plate.
@@ -1519,13 +1776,16 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # card in place rather than arriving beside a card that has to be
             # dismissed separately -- and with no preceding clear, which would
             # make it visibly flicker.
+            #
+            # A confirmation, not a last refresh of the card: no progress bar,
+            # no countdown, no action buttons. `build_event_payload` is what
+            # leaves the bar out, for every flavour and on purpose.
             payload = build_event_payload(
                 tag=f"{tag_base}_live",
                 title=title,
                 message=message,
                 kind=kind,
                 channel=self._t(NOTIFY_CHANNEL_KEY_DONE),
-                progress=self._notify_progress(),
                 group=tag_base,
                 visuals=self._notify_media(include_snapshot=True),
                 links=links,
@@ -1554,6 +1814,10 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         unless *both* numbers are available -- a half-filled detailed sentence
         would read worse than the simple one.
         """
+        custom = self._custom_message("completed")
+        if custom:
+            return custom
+
         duration = format_duration(d.get("printJobTime"), self._notify_strings or {})
         filament = format_filament_length(
             d.get("usedMaterialLength"), (self._notify_strings or {}).get("filament_length")

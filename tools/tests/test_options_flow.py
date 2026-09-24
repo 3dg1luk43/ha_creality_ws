@@ -116,6 +116,10 @@ from custom_components.ha_creality_ws.config_flow import (  # noqa: E402
 )
 from custom_components.ha_creality_ws.const import (  # noqa: E402
     CAM_MODE_CUSTOM,
+    CONF_POLLING_RATE,
+    CONF_NOTIFY_TEMPLATE_COMPLETED,
+    CONF_NOTIFY_TEMPLATE_LIVE,
+    CONF_HOST,
     CAM_MODE_WEBRTC,
     CAM_MODE_WEBRTC_DIRECT,
     CONF_CAMERA_MODE,
@@ -157,6 +161,9 @@ def _handler(options):
     # recorded rather than executed.
     handler.async_step_init = _record("menu")
     handler.async_show_form = lambda **kw: {"step": "form", **kw}
+    # The real base class writes the options and closes the dialog; recording
+    # the call is enough to assert what would have been written.
+    handler.async_create_entry = lambda **kw: {"step": "created", **kw}
     return handler
 
 
@@ -467,3 +474,173 @@ def test_the_offered_targets_are_deduplicated_and_sorted():
         "notify.my_entity",
         "notify.signal_messenger",
     ]
+
+
+# --------------------------------------------------------------------------- #
+# Saving
+# --------------------------------------------------------------------------- #
+# Every section used to stage into `_working` and only "Save and apply"
+# persisted it, which made the one menu item you could not skip look like the
+# one you could -- closing the dialog, the way a settings dialog normally ends,
+# threw the lot away.
+
+
+def _updates(handler):
+    """The kwargs of the single entry update a submit should have made."""
+    calls = handler.hass.config_entries.async_update_entry.call_args_list
+    assert len(calls) == 1, f"expected exactly one entry update, got {len(calls)}"
+    return calls[0].kwargs
+
+
+@requires_voluptuous
+def test_submitting_a_section_saves_it_there_and_then():
+    handler = _handler({})
+
+    result = _submit(handler, {CONF_CAMERA_MODE: CAM_MODE_WEBRTC_DIRECT})
+
+    assert result["step"] == "menu"
+    assert _updates(handler)["options"][CONF_CAMERA_MODE] == CAM_MODE_WEBRTC_DIRECT
+
+
+@requires_voluptuous
+def test_a_refused_submit_saves_nothing():
+    """An invalid camera URL re-renders the form. Writing the half-applied
+    working copy would persist a mode whose URL the user has not fixed yet."""
+    handler = _handler({})
+
+    result = _submit(handler, {
+        CONF_CAMERA_MODE: CAM_MODE_CUSTOM,
+        CONF_CUSTOM_CAMERA_URL: "not-a-url",
+    })
+
+    assert result["step"] == "form"
+    assert handler.hass.config_entries.async_update_entry.call_args_list == []
+
+
+@requires_voluptuous
+def test_a_new_host_and_the_options_go_out_in_one_update():
+    """The host lives in `data` and everything else in `options`. Updating them
+    separately fired the update listener twice and reloaded the entry twice for
+    one submit."""
+    handler = _handler({})
+
+    asyncio.run(handler.async_step_connection({
+        CONF_HOST: " 5.6.7.8 ",
+        CONF_POLLING_RATE: 3,
+    }))
+
+    updates = _updates(handler)
+    assert updates["data"][CONF_HOST] == "5.6.7.8"
+    assert updates["options"][CONF_POLLING_RATE] == 3
+
+
+@requires_voluptuous
+def test_an_unchanged_host_is_not_written_back():
+    """Home Assistant skips an update that changes nothing, but only if we do
+    not hand it a `data` dict to compare in the first place."""
+    handler = _handler({})
+
+    asyncio.run(handler.async_step_connection({CONF_HOST: "1.2.3.4"}))
+
+    assert "data" not in _updates(handler)
+
+
+@requires_voluptuous
+def test_done_closes_the_dialog_with_what_is_already_stored():
+    handler = _handler({CONF_NOTIFY_TARGETS: ["notify.mobile_app_pixel"]})
+
+    result = asyncio.run(handler.async_step_done(None))
+
+    assert result["step"] == "created"
+    assert result["data"] == {CONF_NOTIFY_TARGETS: ["notify.mobile_app_pixel"]}
+
+
+# --------------------------------------------------------------------------- #
+# The notification-text step
+# --------------------------------------------------------------------------- #
+
+
+def _submit_text(handler, user_input):
+    return asyncio.run(handler.async_step_notification_text(user_input))
+
+
+@requires_voluptuous
+def test_a_template_is_saved_and_offered_back():
+    handler = _handler({})
+    template = "{filename} is {progress}% done"
+
+    result = _submit_text(handler, {CONF_NOTIFY_TEMPLATE_LIVE: template})
+
+    assert result["step"] == "menu"
+    assert _updates(handler)["options"][CONF_NOTIFY_TEMPLATE_LIVE] == template
+    reopened = _defaults(_submit_text(handler, None))
+    assert reopened[CONF_NOTIFY_TEMPLATE_LIVE] == template
+
+
+@requires_voluptuous
+def test_an_unknown_placeholder_is_refused():
+    """The only moment the typo can be shown to the person who made it: a
+    notification is composed on a WebSocket frame, where the best available
+    recourse is a line in the log."""
+    handler = _handler({})
+
+    result = _submit_text(
+        handler, {CONF_NOTIFY_TEMPLATE_COMPLETED: "used {filament_grams}"}
+    )
+
+    assert result["step"] == "form"
+    assert result["errors"] == {
+        CONF_NOTIFY_TEMPLATE_COMPLETED: "unknown_placeholder"
+    }
+    assert handler.hass.config_entries.async_update_entry.call_args_list == []
+
+
+@requires_voluptuous
+def test_a_refused_template_is_offered_back_as_the_user_typed_it():
+    """Re-rendering the stored value instead would take the typo away along
+    with any chance of correcting it."""
+    handler = _handler({})
+    typed = "used {filament_grams}"
+
+    result = _submit_text(handler, {CONF_NOTIFY_TEMPLATE_COMPLETED: typed})
+
+    assert _defaults(result)[CONF_NOTIFY_TEMPLATE_COMPLETED] == typed
+
+
+@requires_voluptuous
+def test_one_bad_field_does_not_take_a_good_one_with_it():
+    """The valid field is still re-offered with what the user typed, so a
+    corrected submit keeps both -- but nothing is stored until the whole page
+    is valid, or "Done" would later save the good half of a page the user was
+    still being shown an error for."""
+    handler = _handler({})
+
+    result = _submit_text(handler, {
+        CONF_NOTIFY_TEMPLATE_LIVE: "{filename} {progress}%",
+        CONF_NOTIFY_TEMPLATE_COMPLETED: "{nope}",
+    })
+
+    assert set(result["errors"]) == {CONF_NOTIFY_TEMPLATE_COMPLETED}
+    assert _defaults(result)[CONF_NOTIFY_TEMPLATE_LIVE] == "{filename} {progress}%"
+    assert CONF_NOTIFY_TEMPLATE_LIVE not in handler._working
+
+
+@requires_voluptuous
+def test_an_emptied_template_is_stored_as_empty_rather_than_none():
+    """Clearing the box is how the built-in text comes back, and a stored None
+    is what `options.get(key, default)` returns instead of the default."""
+    handler = _handler({CONF_NOTIFY_TEMPLATE_LIVE: "{filename}"})
+
+    _submit_text(handler, {CONF_NOTIFY_TEMPLATE_LIVE: None})
+
+    assert _updates(handler)["options"][CONF_NOTIFY_TEMPLATE_LIVE] == ""
+
+
+@requires_voluptuous
+def test_the_step_offers_every_template_option():
+    """A key in NOTIFY_TEMPLATE_OPTIONS with no field is text the coordinator
+    reads and nobody can set."""
+    from custom_components.ha_creality_ws.const import NOTIFY_TEMPLATE_OPTIONS
+
+    fields = _rendered_fields(_submit_text(_handler({}), None))
+    assert fields == set(NOTIFY_TEMPLATE_OPTIONS.values())

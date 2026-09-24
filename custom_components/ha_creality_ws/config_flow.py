@@ -3,7 +3,11 @@ import asyncio
 import logging
 from typing import Any
 from urllib.parse import urlparse
-from .notification_rules import coerce_targets
+from .notification_rules import (
+    TEMPLATE_FIELDS,
+    coerce_targets,
+    template_unknown_fields,
+)
 import voluptuous as vol
 from homeassistant import config_entries #type: ignore[import]
 from homeassistant.config_entries import ConfigFlowResult #type: ignore[import]
@@ -44,6 +48,7 @@ from .const import (
     CONF_MINUTES_TO_END_VALUE,
     CONF_POLLING_RATE,
     DEFAULT_POLLING_RATE,
+    NOTIFY_TEMPLATE_OPTIONS,
 )
 from .utils import ModelDetection
 
@@ -166,13 +171,47 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_create_entry(title=title, data={CONF_HOST: host, "_cached_mac": mac})
 
 
+def _placeholder_help() -> str:
+    """The available template placeholders, as one comma-separated line.
+
+    Generated from the single source of truth in `notification_rules`, so a new
+    placeholder documents itself in the UI. Not prose: the surrounding sentence
+    lives in strings.json and is translated; this is only the list of names,
+    which are not translatable, being what the user has to type.
+
+    Fed in as a `description_placeholders` value rather than written into the
+    sentence, and so is the example below. The frontend renders a step
+    description through ICU MessageFormat, where a `{name}` it was given no
+    value for is an error that replaces the entire description with
+    "Translation error" -- so the one place a brace may appear literally in
+    strings.json is inside a value substituted into it.
+    """
+    return ", ".join(f"{{{name}}}" for name in TEMPLATE_FIELDS)
+
+
+def _placeholder_example() -> str:
+    """A template showing the optional-segment syntax, in no language at all.
+
+    Punctuation only, deliberately: an example reading "4h left" would need
+    translating, and it arrives through `description_placeholders`, which is not
+    translated. The syntax is the whole lesson here anyway.
+    """
+    return "{filename} {progress}%[ - {eta}]"
+
+
 # --------- Options Flow ---------
 class OptionsFlowHandler(config_entries.OptionsFlow):
     def __init__(self) -> None:
         super().__init__()
-        # Working copy of options edited across sub-steps. Changes are staged here
-        # by each section's submit and only persisted (one reload) by "Save and
-        # apply". The menu back arrow returns without staging. None until first use.
+        # The options as this dialog has them, rebuilt from the entry the first
+        # time a step runs. Each section's submit folds its fields in here and
+        # then writes the whole thing to the entry, so a section is saved the
+        # moment it is submitted.
+        #
+        # This used to be a staging buffer that only "Save and apply" persisted,
+        # and the menu offered no hint that it was the one item you could not
+        # skip: closing the dialog -- which is how a settings dialog normally
+        # ends -- silently discarded everything. None until first use.
         self._working: dict[str, Any] | None = None
         self._working_host: str | None = None
 
@@ -181,6 +220,31 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if self._working is None:
             self._working = dict(self.config_entry.options)
             self._working_host = self.config_entry.data.get(CONF_HOST, "")
+
+    def _persist(self) -> None:
+        """Write the working copy to the config entry, now.
+
+        Called by every section's submit. The update listener reloads the entry,
+        which is what applies the change -- so one submit is one reload, and a
+        section the user never opened cannot be rewritten by one they did.
+
+        A host change goes out in the *same* call as the options: it lives in
+        `data` rather than `options`, and updating the two separately fired the
+        listener twice and reloaded the entry twice for one submit.
+
+        Home Assistant compares before it writes, so re-submitting a section
+        unchanged is not an update and does not reload anything.
+        """
+        assert self._working is not None
+        updates: dict[str, Any] = {"options": dict(self._working)}
+        if self._working_host and self._working_host != self.config_entry.data.get(CONF_HOST):
+            updates["data"] = {**self.config_entry.data, CONF_HOST: self._working_host}
+        self.hass.config_entries.async_update_entry(self.config_entry, **updates)
+
+    async def _saved(self) -> ConfigFlowResult:
+        """Persist the section just submitted and go back to the menu."""
+        self._persist()
+        return await self.async_step_init()
 
     async def _detect_camera_type(self) -> str:
         """Detect the camera type for this printer."""
@@ -227,35 +291,40 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         single step when a dropdown changes, so conditional fields (e.g. the
         custom camera URL) would otherwise show stale based on the saved mode.
 
-        Section submits stage changes into the working copy and come back here;
-        "Save and apply" persists everything in one go. The dialog's back arrow
-        returns to this menu without staging the current section.
+        Submitting a section saves it. "Done" only closes the dialog, and so
+        does the dialog's own close button: there is nothing left to lose by
+        using it. The back arrow abandons the section it is in, which is the one
+        thing it should do.
+
+        A list rather than a mapping, so the labels come from `menu_options` in
+        strings.json and are translated. Passing a mapping makes the frontend
+        render its values verbatim, which left every locale reading English.
         """
         self._ensure_working()
         return self.async_show_menu(
             step_id="init",
-            menu_options={
-                "camera": "Camera",
-                "notifications": "Notifications",
-                "power": "Power switch",
-                "connection": "Connection & performance",
-                "save": "Save and apply",
-            },
+            menu_options=[
+                "camera",
+                "notifications",
+                "notification_text",
+                "power",
+                "connection",
+                "done",
+            ],
         )
 
-    async def async_step_save(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Persist all staged changes (single reload)."""
+    async def async_step_done(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Close the dialog.
+
+        Every section has already been written, so this saves nothing new.
+        Returning the same options is deliberately not a no-op *call*: Home
+        Assistant compares them against the entry and only fires the update
+        listener if something differs, so closing changes nothing and reloads
+        nothing.
+        """
         self._ensure_working()
         assert self._working is not None
-        # Apply a host change to the entry data (separate from options).
-        if self._working_host and self._working_host != self.config_entry.data.get(CONF_HOST):
-            self.hass.config_entries.async_update_entry(
-                self.config_entry, data={**self.config_entry.data, CONF_HOST: self._working_host}
-            )
-            self.hass.async_create_task(
-                self.hass.config_entries.async_reload(self.config_entry.entry_id)
-            )
-        return self.async_create_entry(title="", data=self._working)
+        return self.async_create_entry(title="", data=dict(self._working))
 
     async def async_step_camera(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Camera settings. Conditional fields follow the selected mode."""
@@ -344,7 +413,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 self._working.pop(CONF_GO2RTC_RTSP_PORT, None)
 
             if not errors:
-                return await self.async_step_init()
+                return await self._saved()
 
         current_go2rtc_url = self._working.get(CONF_GO2RTC_URL, DEFAULT_GO2RTC_URL)
         current_go2rtc_port = self._working.get(CONF_GO2RTC_PORT, DEFAULT_GO2RTC_PORT)
@@ -450,7 +519,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 if isinstance(t, str) and t.strip()
             ]
             self._working.update(cleaned)
-            return await self.async_step_init()
+            return await self._saved()
 
         # Seeded through the same coercion the coordinator uses, so a user
         # upgrading from the single-device option sees it pre-selected here and
@@ -497,6 +566,76 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             data_schema=vol.Schema(schema_dict),
         )
 
+    async def async_step_notification_text(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Custom text for each notification this integration composes.
+
+        Blank means "use the shipped, translated sentence", so an untouched
+        printer behaves exactly as before and clearing a field is how you get
+        the default back.
+
+        A template naming a placeholder that does not exist is refused here
+        rather than at notification time. This is the only moment the mistake
+        can be shown to the person who made it: a notification is composed on a
+        WebSocket frame, where a warning in the log is the best that can be
+        done -- and the field would silently keep delivering the built-in text
+        while the user believed their own was configured.
+        """
+        self._ensure_working()
+        assert self._working is not None
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            # Collected first and applied only once the whole page is valid. A
+            # refused submit has to leave the stored options exactly as they
+            # were, or the good half of it would be saved by the next thing
+            # that writes them -- "Done", most likely -- while the user was
+            # still looking at an error.
+            cleaned: dict[str, str] = {}
+            for key in NOTIFY_TEMPLATE_OPTIONS.values():
+                text = str(user_input.get(key) or "").strip()
+                if template_unknown_fields(text):
+                    errors[key] = "unknown_placeholder"
+                else:
+                    cleaned[key] = text
+            if not errors:
+                self._working.update(cleaned)
+                return await self._saved()
+
+        schema_dict: dict[str, Any] = {}
+        for key in NOTIFY_TEMPLATE_OPTIONS.values():
+            # The rejected text, not the stored one: a re-render that replaced
+            # what the user typed with what was saved would take their typo
+            # away along with any chance of fixing it.
+            current = (
+                str((user_input or {}).get(key) or "")
+                if user_input is not None
+                else str(self._working.get(key) or "")
+            )
+            schema_dict[
+                vol.Optional(key, default=current)
+            ] = selector.TextSelector(
+                selector.TextSelectorConfig(
+                    type=selector.TextSelectorType.TEXT,
+                    autocomplete="off",
+                    multiline=True,
+                )
+            )
+
+        # The placeholder list is built here and passed in, so the step
+        # description can name every one of them without strings.json having to
+        # be edited whenever one is added.
+        return self.async_show_form(
+            step_id="notification_text",
+            data_schema=vol.Schema(schema_dict),
+            errors=errors,
+            description_placeholders={
+                "fields": _placeholder_help(),
+                "example": _placeholder_example(),
+            },
+        )
+
     async def async_step_power(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Power switch detection settings."""
         self._ensure_working()
@@ -511,7 +650,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 # Disabled, or enabled without a valid entity -> clear the entity.
                 self._working[CONF_POWER_SWITCH_ENABLED] = bool(power_enabled)
                 self._working[CONF_POWER_SWITCH] = None
-            return await self.async_step_init()
+            return await self._saved()
 
         current_power_switch_raw = self._working.get(CONF_POWER_SWITCH)
         current_power_enabled = self._working.get(CONF_POWER_SWITCH_ENABLED, False)
@@ -550,7 +689,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             if new_host:
                 self._working_host = new_host
             self._working[CONF_POLLING_RATE] = user_input.get(CONF_POLLING_RATE, DEFAULT_POLLING_RATE)
-            return await self.async_step_init()
+            return await self._saved()
 
         schema_dict: dict[str, Any] = {
             vol.Optional(CONF_HOST, default=self._working_host or ""): selector.TextSelector(

@@ -13,6 +13,7 @@ import pytest
 
 from custom_components.ha_creality_ws.const import (
     CLEAR_NOTIFICATION_MARKER,
+    NOTIFY_END_CONFIRM_SECS,
     NOTIFY_LIVE_MAX_PUSHES_PER_JOB,
     NOTIFY_LIVE_MILESTONE_STEP,
     NOTIFY_LIVE_MIN_INTERVAL_SECS,
@@ -21,11 +22,15 @@ from custom_components.ha_creality_ws.const import (
 from custom_components.ha_creality_ws.notification_rules import (
     ALERT_ERROR,
     ALERT_RUNOUT,
+    TEMPLATE_FIELDS,
     PHASE_PAUSED,
     PHASE_PRINTING,
     PHASE_START,
     EVENT_COMPLETED,
     EVENT_SOON,
+    EVENT_STOPPED,
+    JobEndWatch,
+    JobEvent,
     LiveCardState,
     LiveSnapshot,
     NotifyLinks,
@@ -42,7 +47,9 @@ from custom_components.ha_creality_ws.notification_rules import (
     format_filament_length,
     is_mobile_target,
     is_new_job_cycle,
+    render_user_template,
     sanitize_tag,
+    template_unknown_fields,
 )
 
 TAG_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -776,3 +783,322 @@ def test_an_unknown_lifecycle_flavour_falls_back_rather_than_raising():
     data = build_event_payload(tag="t", title="K1C", message="m", kind="???",
                               channel=CHANNEL)["data"]
     assert data["notification_icon"] == "mdi:check-circle"
+
+
+# --------------------------------------------------------------------------- #
+# A lifecycle banner is a confirmation, not a last refresh of the card
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("kind", [EVENT_COMPLETED, EVENT_STOPPED, EVENT_SOON])
+def test_a_lifecycle_banner_never_carries_a_progress_bar(kind):
+    """The completion banner used to ship `progress: 100`, so the notification
+    telling you a print had *finished* still rendered a progress bar, full, with
+    nothing left to track. It lands on the live card's own tag, which made the
+    end of the print read as one more refresh of the card."""
+    data = build_event_payload(
+        tag="ha_creality_ws_abc123_live",
+        title="K1C",
+        message="3DBenchy.gcode finished in 4h 12m",
+        kind=kind,
+        channel=STRINGS["channel_finished"],
+    )["data"]
+    for key in ("progress", "progress_max", "progress_indeterminate",
+                "chronometer", "when", "live_update"):
+        assert key not in data, key
+
+
+def test_the_banner_keeps_what_a_confirmation_is_actually_for():
+    """Dropping the bar must not quietly drop the rest: the text, a sound, the
+    tick and the picture of the bed are the whole notification."""
+    payload = build_event_payload(
+        tag="ha_creality_ws_abc123_live",
+        title="K1C",
+        message="3DBenchy.gcode finished in 4h 12m",
+        kind=EVENT_COMPLETED,
+        channel=STRINGS["channel_finished"],
+        visuals=NotifyVisuals(snapshot_url="/api/camera_proxy/camera.k1c_cam"),
+        ends_activity=True,
+    )
+    data = payload["data"]
+    assert payload["message"] == "3DBenchy.gcode finished in 4h 12m"
+    assert data["notification_icon"] == "mdi:check-circle"
+    assert data["image"] == "/api/camera_proxy/camera.k1c_cam"
+    assert data["importance"] == "high"
+    assert "alert_once" not in data
+    # Still ends the iOS Live Activity the card started.
+    assert data["activity"] == "end"
+
+
+# --------------------------------------------------------------------------- #
+# User text templates
+# --------------------------------------------------------------------------- #
+
+VALUES = {
+    "device": "K1C",
+    "filename": "3DBenchy.gcode",
+    "progress": "42",
+    "layer": "120",
+    "total_layers": "300",
+    "eta": "1h 04m",
+    "elapsed": "42m",
+    "filament": "1.2 m",
+    "nozzle": "220",
+    "bed": "60",
+    "state": "printing",
+    "error_code": "",
+    "error_key": "",
+    "minutes": "",
+}
+
+
+def test_a_template_renders_the_values_it_names():
+    assert render_user_template(
+        "{device}: {filename} at {progress}%", VALUES
+    ) == "K1C: 3DBenchy.gcode at 42%"
+
+
+def test_text_around_the_placeholders_survives_untouched():
+    """There is no escaping rule: anything that is not a known placeholder,
+    including a lone brace, is literal text."""
+    assert render_user_template("Done! {device} }{ ok", VALUES) == "Done! K1C }{ ok"
+
+
+def test_an_optional_segment_is_dropped_when_its_value_is_unknown():
+    """The reason the syntax exists: this printer reports no estimate in the
+    first minute of a print, and "3DBenchy.gcode -- left" reads as a bug."""
+    values = {**VALUES, "eta": ""}
+    assert render_user_template(
+        "{filename}[ -- {eta} left]", values
+    ) == "3DBenchy.gcode"
+    assert render_user_template(
+        "{filename}[ -- {eta} left]", VALUES
+    ) == "3DBenchy.gcode -- 1h 04m left"
+
+
+def test_an_optional_segment_needs_every_value_it_names():
+    """Partially filled is the case an optional segment exists to avoid: "layer
+    120/" is worse than no layer count at all."""
+    values = {**VALUES, "total_layers": ""}
+    assert render_user_template("[layer {layer}/{total_layers}]", values) == ""
+
+
+def test_a_zero_is_a_value_and_keeps_its_segment():
+    """0% is something the printer said; unknown is not. An optional segment
+    that vanished at 0 would leave a card blank for the first minute."""
+    values = {**VALUES, "progress": "0"}
+    assert render_user_template("[{progress}% done]", values) == "0% done"
+
+
+def test_a_bracketed_segment_with_no_placeholder_is_literal():
+    """Someone writing [PRINTER] in their own text means the brackets."""
+    assert render_user_template("[PRINTER] {device}", VALUES) == "[PRINTER] K1C"
+
+
+def test_the_gap_an_emptied_placeholder_leaves_is_closed_up():
+    """Unbracketed placeholders are still allowed to go missing, and two spaces
+    in the middle of a notification look like a rendering fault."""
+    values = {**VALUES, "eta": ""}
+    assert render_user_template("{filename} {eta} left", values) == (
+        "3DBenchy.gcode left"
+    )
+
+
+def test_an_unknown_placeholder_refuses_the_whole_template():
+    """It has to fall back rather than render the typo: `{filament_grams}` is a
+    value this printer does not stream, and delivering the literal text would
+    tell the user their template works."""
+    assert template_unknown_fields("{filament_grams} used") == ["filament_grams"]
+    assert render_user_template("{filament_grams} used", VALUES) == ""
+
+
+def test_a_known_placeholder_is_not_reported_as_unknown():
+    every = " ".join(f"{{{name}}}" for name in TEMPLATE_FIELDS)
+    assert template_unknown_fields(every) == []
+
+
+def test_each_unknown_placeholder_is_reported_once():
+    """The options-flow error names them, and a template repeating one typo
+    should not list it twice."""
+    assert template_unknown_fields("{nope} {nope} {nah}") == ["nope", "nah"]
+
+
+@pytest.mark.parametrize("template", ["", "   ", None, 42, "[{eta}]"])
+def test_nothing_usable_renders_as_nothing(template):
+    """Empty means "use the shipped text" to every caller. The last case is the
+    one that matters: a template whose every segment turned out unknown must
+    fall back, because a blank notification is worse than a generic one."""
+    assert render_user_template(template, {**VALUES, "eta": ""}) == ""
+
+
+# --------------------------------------------------------------------------- #
+# Noticing that a print was stopped
+# --------------------------------------------------------------------------- #
+# Stopping a print from the printer's screen, from the Creality app or from Home
+# Assistant all look the same in telemetry, and none of them looks like an
+# event: `state` goes back to 0 with the file name still attached and the
+# progress reset to 0, which derives as "processing" -- the same word as a
+# warm-up. So the end is a transition, and this is the thing that watches for
+# it.
+
+STOP_AS_REPORTED = dict(state="processing", progress=0, filename="3DBenchy.gcode")
+
+
+def _watching(progress=42, filename="3DBenchy.gcode"):
+    """A watch that has seen this job printing."""
+    watch = JobEndWatch()
+    assert watch.observe(
+        state="printing", progress=progress, filename=filename, now_mono=0.0
+    ) is None
+    return watch
+
+
+def test_a_stop_is_announced_once_the_ambiguous_state_persists():
+    """What the printer actually reports when a print is cancelled: state 0,
+    progress 0, file name still there. Nothing in that frame says "stopped"."""
+    watch = _watching()
+
+    assert watch.observe(**STOP_AS_REPORTED, now_mono=1.0) is None
+    assert watch.pending() is True
+    assert watch.observe(
+        **STOP_AS_REPORTED, now_mono=1.0 + NOTIFY_END_CONFIRM_SECS
+    ) is JobEvent.ENDED_EARLY
+
+
+def test_the_progress_and_name_reported_are_the_ones_from_before_the_stop():
+    """The frame that reveals the stop has already lost both: the printer resets
+    the progress to 0, and some firmware clears the file name. "Stopped at 0%"
+    is what the telemetry alone would have said."""
+    watch = _watching(progress=42)
+    watch.observe(**STOP_AS_REPORTED, now_mono=1.0)
+    watch.observe(**STOP_AS_REPORTED, now_mono=1.0 + NOTIFY_END_CONFIRM_SECS)
+
+    assert watch.progress == 42
+    assert watch.job_name == "3DBenchy.gcode"
+
+
+def test_a_single_idle_frame_mid_print_is_not_a_stop():
+    """This printer does emit one, and it must not cost the user a
+    notification."""
+    watch = _watching()
+
+    assert watch.observe(**STOP_AS_REPORTED, now_mono=1.0) is None
+    assert watch.observe(
+        state="printing", progress=43, filename="3DBenchy.gcode", now_mono=2.0
+    ) is None
+    assert watch.pending() is False
+
+    # And the clock starts again from the next one, rather than counting the
+    # time the print spent running.
+    assert watch.observe(
+        **STOP_AS_REPORTED, now_mono=2.0 + NOTIFY_END_CONFIRM_SECS
+    ) is None
+
+
+def test_the_printer_saying_so_outright_needs_no_confirming():
+    """`state == 4` is unambiguous, and a user who just pressed stop should not
+    wait for a timer to elapse."""
+    watch = _watching()
+
+    assert watch.observe(
+        state="stopped", progress=0, filename="3DBenchy.gcode", now_mono=1.0
+    ) is JobEvent.ENDED_EARLY
+
+
+def test_a_cleared_file_name_needs_no_confirming_either():
+    """Some firmware ends a cancelled job by dropping the name instead. The job
+    is gone from the printer's own point of view, and this is the last frame
+    that can say anything about it -- the notification path returns early from
+    the next one."""
+    watch = _watching()
+
+    assert watch.observe(
+        state="idle", progress=0, filename="", now_mono=1.0
+    ) is JobEvent.ENDED_EARLY
+
+
+def test_a_stop_is_announced_only_once():
+    watch = _watching()
+    watch.observe(state="stopped", progress=0, filename="x.gcode", now_mono=1.0)
+
+    for tick in range(2, 40):
+        assert watch.observe(
+            **STOP_AS_REPORTED, now_mono=float(tick)
+        ) is None, tick
+
+
+def test_a_lost_connection_is_not_a_stopped_print():
+    """"unknown" is the WebSocket being down and "off" is the power switch.
+    Neither says anything about the job, and announcing a stop off one of them
+    would turn every network blip into "your print was stopped"."""
+    for blind in ("unknown", "off"):
+        watch = _watching()
+        assert watch.observe(
+            state=blind, progress=0, filename="3DBenchy.gcode", now_mono=1.0
+        ) is None
+        assert watch.pending() is False, blind
+        # Nor does the printer coming back with the job gone count the time it
+        # was away: the confirmation starts from the first frame that actually
+        # described the printer.
+        assert watch.observe(
+            **STOP_AS_REPORTED, now_mono=1.0 + NOTIFY_END_CONFIRM_SECS
+        ) is None, blind
+
+
+def test_a_finished_print_is_never_a_stopped_one():
+    """The completion notification owns a job that reached 100%. This is the
+    frame *before* the caller's completion latch is set, so the guard cannot be
+    left to the caller alone."""
+    watch = _watching(progress=99)
+
+    assert watch.observe(
+        state="completed", progress=100, filename="3DBenchy.gcode", now_mono=1.0
+    ) is None
+    assert watch.pending() is False
+
+
+def test_a_job_never_seen_printing_is_never_ended():
+    """A warm-up (state 0, file named, 0%) reports the same state a cancelled
+    job does, so the watch only ever arms on a job it has seen printing."""
+    watch = JobEndWatch()
+
+    for tick in range(40):
+        assert watch.observe(**STOP_AS_REPORTED, now_mono=float(tick)) is None
+
+
+def test_printing_again_after_an_end_is_a_new_job():
+    """The signal that re-arms the once-per-print latches. The older ones both
+    miss it: reprinting the same file does not change the file name, and a stop
+    resets `printJobTime` to 0 so the job clock never runs backwards."""
+    watch = _watching()
+    watch.observe(state="stopped", progress=0, filename="3DBenchy.gcode", now_mono=1.0)
+
+    assert watch.observe(
+        state="printing", progress=1, filename="3DBenchy.gcode", now_mono=2.0
+    ) is JobEvent.RESTARTED
+    # And it is following the new job, not the one it just buried.
+    assert watch.ended is False
+    assert watch.progress == 1
+
+
+def test_a_pause_is_not_an_end():
+    """A paused print is still a live job -- it has a card on the phone and a
+    Resume button on it."""
+    watch = _watching()
+
+    for tick in range(40):
+        assert watch.observe(
+            state="paused", progress=42, filename="3DBenchy.gcode", now_mono=float(tick)
+        ) is None
+    assert watch.pending() is False
+
+
+def test_a_reset_watch_equals_a_fresh_one():
+    """A field added without a matching reset leaks the previous job into the
+    next one -- the same guard `LiveCardState` has."""
+    watch = _watching()
+    watch.observe(**STOP_AS_REPORTED, now_mono=1.0)
+    watch.observe(**STOP_AS_REPORTED, now_mono=1.0 + NOTIFY_END_CONFIRM_SECS)
+    watch.reset()
+
+    assert watch == JobEndWatch()

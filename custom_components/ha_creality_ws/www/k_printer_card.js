@@ -122,6 +122,26 @@ function generateCardId(config) {
   return btoa(key).replace(/[^a-zA-Z0-9]/g, '').substring(0, 16);
 }
 
+// Home Assistant rewrites a DURATION sensor's state into whichever display unit
+// the user picked in the entity settings, so the seconds sensor this card expects
+// arrives as 0.2 once someone switches it to hours. Scale back to seconds before
+// formatting; an unrecognised or missing unit is taken as seconds, which is the
+// integration's own native unit.
+const DURATION_UNIT_SECONDS = {
+  "\u00b5s": 1e-6, "\u03bcs": 1e-6, us: 1e-6, ms: 1e-3,
+  s: 1, sec: 1, secs: 1, second: 1, seconds: 1,
+  min: 60, mins: 60, minute: 60, minutes: 60,
+  h: 3600, hr: 3600, hrs: 3600, hour: 3600, hours: 3600,
+  d: 86400, day: 86400, days: 86400,
+  w: 604800, week: 604800, weeks: 604800,
+};
+function durationToSeconds(stateObj) {
+  const n = Number(stateObj?.state);
+  if (!Number.isFinite(n)) return 0;
+  const unit = String(stateObj?.attributes?.unit_of_measurement ?? "").trim();
+  const scale = DURATION_UNIT_SECONDS[unit] ?? DURATION_UNIT_SECONDS[unit.toLowerCase()];
+  return n * (scale ?? 1);
+}
 function fmtTimeLeft(seconds) {
   // Floor to whole seconds so a fractional value (some firmwares report a float)
   // renders as e.g. 2:25 instead of 2:25.6789 and doesn't reflow the row every poll.
@@ -719,7 +739,7 @@ class KPrinterCard extends HTMLElement {
     const name = this._cfg.name || "3D Printer";
     const status = g(this._cfg.status) ?? "unknown";
     const pct = clamp(Number.isFinite(gNum(this._cfg.progress)) ? gNum(this._cfg.progress) : 0, 0, 100);
-    const timeLeft = gNum(this._cfg.time_left) || 0;
+    const timeLeft = durationToSeconds(gObj(this._cfg.time_left));
     const nozzleStr = fmtWithUnit(this._cfg.nozzle);
     const bedStr = fmtWithUnit(this._cfg.bed);
     const boxStr = fmtWithUnit(this._cfg.box);

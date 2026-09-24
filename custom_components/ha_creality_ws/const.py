@@ -115,6 +115,18 @@ NOTIFY_PRIME_GRACE_SECS = 10.0
 # restart of the job clock, counts as a new cycle.
 NOTIFY_REARM_PROGRESS_MAX = 90
 
+# How long a job has to stop looking like it is running before it is announced
+# as stopped. Stopping a print does not announce itself in this telemetry (see
+# `JobEndWatch`): what arrives is an ordinary-looking frame in a state the
+# printer also reports while warming up, so the end is a transition that has to
+# be held for a moment before it is believed. A single "idle" or "processing"
+# frame mid-print is something this printer does, and it must not cost the user
+# a "print stopped" notification.
+#
+# Only the ambiguous states wait. `state == 4` and a cleared file name are the
+# printer saying so outright and are acted on at once.
+NOTIFY_END_CONFIRM_SECS = 15.0
+
 # --- Multi-target delivery -------------------------------------------------- #
 # CONF_NOTIFY_DEVICE above held a single service name. It is still read, and is
 # never deleted, so that rolling back to an earlier release keeps a user's
@@ -126,6 +138,36 @@ CONF_NOTIFY_ACTIONS = "notify_actions"
 CONF_NOTIFY_PREVIEW_IMAGE = "notify_preview_image"
 CONF_NOTIFY_CAMERA_SNAPSHOT = "notify_camera_snapshot"
 CONF_NOTIFY_TAP_PATH = "notify_tap_path"
+
+# --- Custom notification text ----------------------------------------------- #
+# One option per notification whose body this integration composes. Blank means
+# "use the shipped, translated text", which is what every existing entry has, so
+# the feature costs nothing until someone fills a field in.
+#
+# The keys are the notification names a user recognises from the toggles above
+# rather than the internal EVENT_*/ALERT_* constants: these end up in
+# strings.json and in a user's .storage, and renaming one later would silently
+# drop their text.
+CONF_NOTIFY_TEMPLATE_LIVE = "notify_template_live"
+CONF_NOTIFY_TEMPLATE_COMPLETED = "notify_template_completed"
+CONF_NOTIFY_TEMPLATE_STOPPED = "notify_template_stopped"
+CONF_NOTIFY_TEMPLATE_SOON = "notify_template_soon"
+CONF_NOTIFY_TEMPLATE_ERROR = "notify_template_error"
+CONF_NOTIFY_TEMPLATE_RUNOUT = "notify_template_runout"
+
+# Which notification each option overrides, keyed by the name the coordinator
+# knows it by. Five of these are also strings.json keys, because that
+# notification is one shipped sentence; "live" is not, its body being composed
+# from several segments, and a template replaces the whole composition. Kept as
+# one mapping so an option can never exist with nothing to apply to.
+NOTIFY_TEMPLATE_OPTIONS = {
+    "live": CONF_NOTIFY_TEMPLATE_LIVE,
+    "completed": CONF_NOTIFY_TEMPLATE_COMPLETED,
+    "stopped": CONF_NOTIFY_TEMPLATE_STOPPED,
+    "finishing_soon": CONF_NOTIFY_TEMPLATE_SOON,
+    "error": CONF_NOTIFY_TEMPLATE_ERROR,
+    "filament_runout": CONF_NOTIFY_TEMPLATE_RUNOUT,
+}
 
 # Sentinel message that dismisses a notification (and ends a Live Activity)
 # carrying the same tag. It is only meaningful to the companion app: any other
