@@ -6,12 +6,27 @@ notification on every Home Assistant restart.
 """
 
 import asyncio
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from custom_components.ha_creality_ws.const import NOTIFY_PRIME_GRACE_SECS
 from custom_components.ha_creality_ws.coordinator import KCoordinator
+
+_STRINGS = json.loads(
+    (
+        Path(__file__).resolve().parents[2]
+        / "custom_components/ha_creality_ws/strings.json"
+    ).read_text(encoding="utf-8")
+)["common"]
+
+# These tests are about *which* notification fires, not how it is worded, and
+# the host stands in for the printer name because the stub telemetry never
+# reports a hostname. Built from the shipped string so changing the default
+# wording does not fail two dozen unrelated assertions.
+DONE = _STRINGS["completed"].format(device="1.2.3.4")
 
 
 class HassStub:
@@ -93,7 +108,7 @@ def test_completion_after_startup_still_notifies(monkeypatch):
 
     coord.data = {"printFileName": "job.gcode", "printProgress": 100}
     _run(coord._check_notifications({}))
-    assert sent == ["Print job.gcode completed successfully!"]
+    assert sent == [DONE]
 
     _run(coord._check_notifications({}))
     assert len(sent) == 1
@@ -113,7 +128,7 @@ def test_new_job_after_a_stale_completion_notifies(monkeypatch):
 
     coord.data = {"printFileName": "new_job.gcode", "printProgress": 100}
     _run(coord._check_notifications({}))
-    assert sent == ["Print new_job.gcode completed successfully!"]
+    assert sent == [DONE]
 
 
 def test_priming_waits_for_a_frame_with_progress(monkeypatch):
@@ -169,7 +184,7 @@ def test_minutes_to_end_reads_the_real_telemetry_field(monkeypatch):
 
     coord.data = {"printFileName": "job.gcode", "printProgress": 96, "printLeftTime": 120}
     _run(coord._check_notifications({}))
-    assert sent == ["Print job.gcode finishing in 2 minutes."]
+    assert sent == [_STRINGS["finishing_soon"].format(device="1.2.3.4", minutes=2)]
 
 
 def test_minutes_to_end_already_inside_window_at_startup_is_silent(monkeypatch):
@@ -222,7 +237,7 @@ def test_a_genuine_zero_percent_frame_re_arms_completion(monkeypatch):
 
     coord.data = {"printFileName": "job.gcode", "printProgress": 100, "dProgress": 100}
     _run(coord._check_notifications({}))
-    assert sent == ["Print job.gcode completed successfully!"]
+    assert sent == [DONE]
 
 
 def test_priming_reads_progress_the_same_way_as_the_check(monkeypatch):
@@ -238,7 +253,7 @@ def test_priming_reads_progress_the_same_way_as_the_check(monkeypatch):
 
     coord.data = {"printFileName": "job.gcode", "printProgress": 100, "dProgress": 100}
     _run(coord._check_notifications({}))
-    assert sent == ["Print job.gcode completed successfully!"]
+    assert sent == [DONE]
 
 
 def test_a_new_job_does_not_notify_off_the_previous_jobs_progress(monkeypatch):
@@ -265,7 +280,7 @@ def test_a_new_job_does_not_notify_off_the_previous_jobs_progress(monkeypatch):
     _run(coord._check_notifications({}))
     coord.data = {"printFileName": "job_b.gcode", "printProgress": 100}
     _run(coord._check_notifications({}))
-    assert sent == ["Print job_b.gcode completed successfully!"]
+    assert sent == [DONE]
 
 
 def test_a_new_job_starting_from_zero_still_notifies(monkeypatch):
@@ -280,7 +295,7 @@ def test_a_new_job_starting_from_zero_still_notifies(monkeypatch):
 
     coord.data = {"printFileName": "job_b.gcode", "printProgress": 100}
     _run(coord._check_notifications({}))
-    assert sent == ["Print job_b.gcode completed successfully!"]
+    assert sent == [DONE]
 
 
 def test_dprogress_is_still_used_when_printprogress_is_absent(monkeypatch):
@@ -293,7 +308,7 @@ def test_dprogress_is_still_used_when_printprogress_is_absent(monkeypatch):
 
     coord.data = {"printFileName": "job.gcode", "dProgress": 100}
     _run(coord._check_notifications({}))
-    assert sent == ["Print job.gcode completed successfully!"]
+    assert sent == [DONE]
 
 
 def test_reprint_after_a_stale_startup_completion_notifies(monkeypatch):
@@ -311,7 +326,7 @@ def test_reprint_after_a_stale_startup_completion_notifies(monkeypatch):
 
     coord.data = {"printFileName": "demo.gcode", "printProgress": 100}
     _run(coord._check_notifications({}))
-    assert sent == ["Print demo.gcode completed successfully!"]
+    assert sent == [DONE]
 
 
 def test_end_of_print_progress_jitter_notifies_once(monkeypatch):
@@ -345,7 +360,7 @@ def test_end_of_print_progress_jitter_notifies_once(monkeypatch):
         coord.data = frame(progress, job_time, left)
         _run(coord._check_notifications({}))
 
-    assert sent == ["Print tower.gcode completed successfully!"]
+    assert sent == [DONE]
 
 
 def test_a_restarted_job_clock_re_arms_completion(monkeypatch):
@@ -365,7 +380,7 @@ def test_a_restarted_job_clock_re_arms_completion(monkeypatch):
 
     coord.data = {"printFileName": "job.gcode", "printProgress": 100, "printJobTime": 900}
     _run(coord._check_notifications({}))
-    assert sent == ["Print job.gcode completed successfully!"]
+    assert sent == [DONE]
 
 
 def test_reprinting_the_same_file_notifies_again_with_a_job_clock(monkeypatch):

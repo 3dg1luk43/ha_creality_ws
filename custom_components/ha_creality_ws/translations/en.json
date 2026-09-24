@@ -37,19 +37,19 @@
     "body_progress": "{progress}%",
     "body_paused": "Paused at {progress}%",
     "body_paused_unknown": "Paused",
-    "body_layer": "Layer {layer}/{total_layers}",
-    "body_time_left": "{duration} left",
+    "body_layer": "{layer}/{total_layers}",
+    "body_time_left": "{duration}",
     "body_fallback": "Printing",
     "duration_hours_minutes": "{hours}h {minutes}m",
     "duration_minutes": "{minutes}m",
     "duration_seconds": "{seconds}s",
     "filament_length": "{metres} m",
-    "completed": "Print {filename} completed successfully!",
-    "stopped": "Print {filename} was stopped at {progress}%",
-    "completed_detailed": "Print {filename} completed in {duration}, using {filament} of filament",
-    "error": "Printer Error {code} (Key: {key}) occurred during {filename}",
-    "filament_runout": "Filament runout detected during {filename}",
-    "finishing_soon": "Print {filename} finishing in {minutes} minutes."
+    "completed": "{device} finished.",
+    "stopped": "{device} stopped at {progress}%",
+    "completed_detailed": "{device} finished. {filament} consumed.",
+    "error": "{device} error - {key} [{code}]",
+    "filament_runout": "{device} filament ran out. Print is {state}. Change the filament.",
+    "finishing_soon": "{device} will finish in {minutes} minutes."
   },
   "exceptions": {
     "unsupported_ha_version": {
@@ -135,7 +135,7 @@
           },
           "text": {
             "name": "Custom text",
-            "description": "Write your own wording, or leave a field empty to keep the built-in, translated text. A placeholder the printer has not reported renders as nothing, so wrap anything optional in square brackets and the whole bracketed part disappears while its value is unknown, as in {example}. The title is always the printer name: Android fixes a live card's title when the card starts and cannot change it afterwards.",
+            "description": "Write your own wording, or leave a field empty to keep the built-in, translated text. A placeholder the printer has not reported renders as nothing, so wrap anything optional in square brackets and the whole bracketed part disappears while its value is unknown, as in {example}. The brackets themselves are the syntax and are not shown; double them ([[ and ]]) for a bracket you want to keep. The title is always the printer name: Android fixes a live card's title when the card starts and cannot change it afterwards.",
             "data": {
               "notify_template_live": "Live print card",
               "notify_template_completed": "Print finished",

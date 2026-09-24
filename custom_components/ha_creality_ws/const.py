@@ -169,6 +169,35 @@ NOTIFY_TEMPLATE_OPTIONS = {
     "filament_runout": CONF_NOTIFY_TEMPLATE_RUNOUT,
 }
 
+# Options only the notification path reads. A change confined to these is
+# applied in place; anything else reloads the entry.
+#
+# A reload drops the WebSocket, flips every entity unavailable and restarts the
+# camera stream. That is the right price for a new IP address or a different
+# camera mode, and much too high for rewording a notification -- especially now
+# that the options flow saves each page as it is submitted, so an evening spent
+# tuning notification text used to cost a reload per page.
+#
+# `tools/tests/test_options_flow.py` checks this against the fields the
+# notifications page actually renders, so a new option cannot be added to that
+# page without deciding which side of this line it falls on.
+NOTIFY_ONLY_OPTION_KEYS = frozenset(
+    {
+        CONF_NOTIFY_DEVICE,
+        CONF_NOTIFY_TARGETS,
+        CONF_NOTIFY_LIVE,
+        CONF_NOTIFY_ACTIONS,
+        CONF_NOTIFY_PREVIEW_IMAGE,
+        CONF_NOTIFY_CAMERA_SNAPSHOT,
+        CONF_NOTIFY_TAP_PATH,
+        CONF_NOTIFY_COMPLETED,
+        CONF_NOTIFY_ERROR,
+        CONF_NOTIFY_MINUTES_TO_END,
+        CONF_MINUTES_TO_END_VALUE,
+    }
+    | set(NOTIFY_TEMPLATE_OPTIONS.values())
+)
+
 # Sentinel message that dismisses a notification (and ends a Live Activity)
 # carrying the same tag. It is only meaningful to the companion app: any other
 # notify platform would render it as visible body text, so it must never be
@@ -241,8 +270,10 @@ NOTIFY_CHANNEL_KEY_ALERT = "channel_alerts"
 NOTIFY_CHANNEL_KEY_SOON = "channel_soon"
 
 # Joins the segments of a live-card body. Punctuation rather than prose, so it
-# stays here instead of in strings.json.
-NOTIFY_BODY_SEPARATOR = " · "
+# stays here instead of in strings.json. A hyphen rather than a middot: the
+# middot renders as a hollow box in some Android notification fonts, and the
+# body is three short numbers that need separating, not a typographic list.
+NOTIFY_BODY_SEPARATOR = " - "
 
 # `preview_reason` values that mean the image entity would serve its 1x1
 # placeholder. Anything else -- including an unset value, which just means

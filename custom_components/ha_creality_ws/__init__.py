@@ -964,12 +964,24 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
 
 
 async def options_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Handle options update - force full reload to apply power switch changes."""
-    # Before the reload wipes the in-memory live-card state: if the card is
-    # being switched off, this is the last moment anything knows one is still
-    # showing on a phone.
+    """Apply an options change: in place where that is enough, else a reload."""
     coord = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if coord is not None:
+        # A change confined to the notification settings needs no reload. One
+        # would drop the WebSocket, flip every entity unavailable and restart
+        # the camera stream, all to reword a notification -- and the options
+        # flow saves each page as it is submitted, so that used to happen once
+        # per page while someone was still editing.
+        try:
+            if coord.notifications_only_change(entry.options):
+                coord.apply_notification_options(entry.options)
+                return
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("Failed to apply notification options; reloading")
+
+        # Before the reload wipes the in-memory live-card state: if the card is
+        # being switched off, this is the last moment anything knows one is still
+        # showing on a phone.
         try:
             coord.notify_options_changed(entry.options)
         except Exception:  # pylint: disable=broad-except

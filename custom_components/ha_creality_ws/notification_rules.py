@@ -291,6 +291,17 @@ _TEMPLATE_OPTIONAL = re.compile(r"\[([^\[\]]*)\]")
 # Collapses the whitespace an emptied placeholder leaves behind.
 _TEMPLATE_GAP = re.compile(r"[ \t]{2,}")
 
+# `[[` and `]]` are a literal bracket. Needed because the obvious way to write
+# an error code in brackets -- `{error_key} [{error_code}]` -- is also exactly
+# the optional-segment syntax, so it rendered the code with the brackets eaten.
+# Doubling is the convention `str.format` uses for the same problem.
+#
+# Swapped for characters no text field can produce before the segment pass, so
+# an escaped bracket cannot open or close a segment, and swapped back last, so
+# a placeholder value that happens to contain a bracket is never re-read.
+_ESCAPED_OPEN = "\x00"
+_ESCAPED_CLOSE = "\x01"
+
 
 def template_unknown_fields(
     template: Any, allowed: Collection[str]
@@ -323,6 +334,10 @@ def render_user_template(template: Any, values: Mapping[str, Any]) -> str:
     ``.storage`` does not go through it), and a template whose every segment
     turned out to be unknown. That last case is the important one -- a blank
     notification is worse than a generic one.
+
+    ``[[`` and ``]]`` render as a literal bracket, which is the only escaping
+    rule there is. Single brackets around a placeholder are an optional
+    segment: the brackets themselves are the syntax and do not survive.
     """
     if not isinstance(template, str) or not template.strip():
         return ""
@@ -348,8 +363,10 @@ def render_user_template(template: Any, values: Mapping[str, Any]) -> str:
             return ""
         return segment
 
-    text = _TEMPLATE_OPTIONAL.sub(_optional, template)
+    text = template.replace("[[", _ESCAPED_OPEN).replace("]]", _ESCAPED_CLOSE)
+    text = _TEMPLATE_OPTIONAL.sub(_optional, text)
     text = _TEMPLATE_TOKEN.sub(lambda m: _resolve(m.group(1)), text)
+    text = text.replace(_ESCAPED_OPEN, "[").replace(_ESCAPED_CLOSE, "]")
     return _TEMPLATE_GAP.sub(" ", text).strip()
 
 

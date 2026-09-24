@@ -251,7 +251,7 @@ def test_no_template_leaves_the_shipped_text_alone():
     coord, hass = _coordinator()
     banner = _finish(coord, hass)[0]
     assert banner["message"] == _STRINGS["completed_detailed"].format(
-        filename="3DBenchy.gcode", duration="1h 00m", filament="4.2 m"
+        device="K1C", filament="4.2 m"
     )
 
 
@@ -272,7 +272,7 @@ def test_a_template_naming_something_that_does_not_exist_falls_back(template):
     banner = _finish(coord, hass)[0]
     assert "{" not in banner["message"]
     assert banner["message"] == _STRINGS["completed_detailed"].format(
-        filename="3DBenchy.gcode", duration="1h 00m", filament="4.2 m"
+        device="K1C", filament="4.2 m"
     )
 
 
@@ -287,7 +287,6 @@ def test_a_template_that_renders_to_nothing_falls_back():
     card = _cards(_frame(coord, hass, **no_estimate))[0]
     assert card["message"] == NOTIFY_BODY_SEPARATOR.join(
         (
-            "3DBenchy.gcode",
             _STRINGS["body_progress"].format(progress=42),
             _STRINGS["body_layer"].format(layer=126, total_layers=300),
         )

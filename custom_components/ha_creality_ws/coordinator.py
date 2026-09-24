@@ -5,7 +5,7 @@ import asyncio
 import json
 import math
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator  # type: ignore[import]
 from homeassistant.helpers.aiohttp_client import async_get_clientsession  # type: ignore[import]
@@ -73,6 +73,7 @@ from .const import (
     CONF_NOTIFY_ERROR,
     CONF_NOTIFY_MINUTES_TO_END,
     CONF_MINUTES_TO_END_VALUE,
+    NOTIFY_ONLY_OPTION_KEYS,
     NOTIFY_TEMPLATE_OPTIONS,
     LATE_DISCOVERY_FIELDS,
     BUS_EVENT_PRINT_ERROR,
@@ -169,6 +170,8 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # filled a field in, and every consumer falls back to the shipped,
         # translated sentence, so the default path is untouched by this.
         self._notify_templates: dict[str, str] = {}
+        # The options as of the last `_load_options`; see `notifications_only_change`.
+        self._loaded_options: dict[str, Any] | None = None
         # (notification, template) pairs already complained about; see
         # `_custom_message`.
         self._notify_template_warned: set[tuple[str, str]] = set()
@@ -251,6 +254,11 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self.config_entry:
             return
         options = self.config_entry.options
+        # A copy, kept so `notifications_only_change` can tell what a later
+        # options update actually touched. The entry's own mapping is mutated
+        # in place by Home Assistant, so holding a reference would compare the
+        # new options against themselves and find nothing changed.
+        self._loaded_options = dict(options)
         self._notify_targets = coerce_targets(options)
         self._notify_live = bool(options.get(CONF_NOTIFY_LIVE, False))
         self._notify_actions = bool(options.get(CONF_NOTIFY_ACTIONS, False))
@@ -912,7 +920,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._notify_completed and deliver:
                 await self._notify_event(
                     self._custom_message("stopped")
-                    or self._t("stopped", filename=job, progress=prog_val),
+                    or self._t(
+                        "stopped", device=self._notify_title(), progress=prog_val
+                    ),
                     kind=EVENT_STOPPED,
                 )
             self._fire_print_event(BUS_EVENT_PRINT_STOPPED, d, job)
@@ -925,7 +935,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._notify_error and deliver:
                 await self._notify_event(
                     self._custom_message("error", error_key=key)
-                    or self._t("error", code=code, key=key, filename=job),
+                    or self._t(
+                        "error", device=self._notify_title(), code=code, key=key
+                    ),
                     kind=ALERT_ERROR,
                 )
             self._fire_print_event(BUS_EVENT_PRINT_ERROR, d, job)
@@ -943,7 +955,11 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._notify_error and deliver:
                 await self._notify_event(
                     self._custom_message("filament_runout")
-                    or self._t("filament_runout", filename=job),
+                    or self._t(
+                        "filament_runout",
+                        device=self._notify_title(),
+                        state=self._job_state(),
+                    ),
                     kind=ALERT_RUNOUT,
                 )
             self._notified_filament_runout = True
@@ -979,7 +995,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             "finishing_soon", minutes=int(left_min)
                         )
                         or self._t(
-                            "finishing_soon", filename=job, minutes=int(left_min)
+                            "finishing_soon",
+                            device=self._notify_title(),
+                            minutes=int(left_min),
                         ),
                         kind=EVENT_SOON,
                     )
@@ -1041,7 +1059,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if banner:
             await self._notify_event(
                 self._custom_message("stopped", filename=job, progress=progress)
-                or self._t("stopped", filename=job, progress=progress),
+                or self._t(
+                    "stopped", device=self._notify_title(), progress=progress
+                ),
                 kind=EVENT_STOPPED,
             )
 
@@ -1212,25 +1232,24 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
         return int(number)
 
-    def _live_message(self, snap: LiveSnapshot, *, include_eta: bool) -> str:
+    def _live_message(self, snap: LiveSnapshot) -> str:
         """The card body. Every segment is dropped when its source is unknown.
 
-        The remaining time is only spelled out when there is no chronometer to
-        show it -- otherwise the on-device timer is both live and more accurate
-        than a number frozen at the last push.
+        Progress, layer and remaining time, and deliberately not the file name:
+        the card's title is the printer, iOS gets the job name as the activity's
+        subtitle, and a long `.gcode` name pushed the numbers off the end of an
+        Android status bar. The numbers are what the card is read for.
 
-        A user template replaces the whole composition, `{eta}` included. That
-        is deliberate: someone who writes the remaining time into their own card
-        text wants to read it there, and the number is refreshed on every push
-        like every other placeholder.
+        The remaining time is spelled out even while the chronometer is
+        counting down to the same moment. The two do not disagree -- both come
+        from the same `when` -- and the text is the only one of them a
+        notification history, a watch face or a lock screen preview shows.
         """
         custom = self._custom_message("live")
         if custom:
             return custom
 
         parts: list[str] = []
-        if snap.filename:
-            parts.append(snap.filename)
         if snap.activity_state == "paused":
             parts.append(
                 self._t("body_paused", progress=snap.progress)
@@ -1245,10 +1264,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "body_layer", layer=snap.layer, total_layers=snap.total_layers
                 )
             )
-        if include_eta:
-            remaining = format_duration(snap.seconds_left, self._notify_strings or {})
-            if remaining:
-                parts.append(self._t("body_time_left", duration=remaining))
+        remaining = format_duration(snap.seconds_left, self._notify_strings or {})
+        if remaining:
+            parts.append(self._t("body_time_left", duration=remaining))
         return NOTIFY_BODY_SEPARATOR.join(p for p in parts if p) or self._t(
             "body_fallback"
         )
@@ -1329,7 +1347,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         payload = build_live_payload(
             tag=f"{tag_base}_live",
             title=self._notify_title(),
-            message=self._live_message(snap, include_eta=expired or when is None),
+            message=self._live_message(snap),
             phase=phase,
             progress=snap.progress,
             when=when,
@@ -1700,27 +1718,92 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     def notify_options_changed(self, options: Any) -> None:
-        """Dismiss a live card that the incoming options are about to disable.
+        """Take the live card off any phone the new options no longer cover.
 
-        Any options change reloads the entry, and the rebuilt `LiveCardState`
-        starts empty -- so this is the last moment anything knows an activity is
-        still up on a phone. Only fired when the card is actually being switched
-        off (or its last target removed): otherwise the reload re-adopts the
-        card on the next frame, and dismissing here would make it visibly
-        flicker and spend an iOS push-to-start slot for nothing.
+        Whatever happens next -- an in-place apply or a full reload -- this is
+        the last moment anything knows which targets are carrying a card, so a
+        phone that is being dropped has to be told here or it keeps a card that
+        will never update and never go away.
+
+        Two ways to be dropped, and both are handled: the card switched off (or
+        its last target removed), and a target removed from a list of several.
+        The second one used to be missed entirely, because "still wanted" was
+        asked of the setting rather than of each phone.
+
+        A target that survives is deliberately left alone. It keeps the card it
+        has, and the next frame refreshes it in place -- dismissing first would
+        make it flicker and spend an iOS push-to-start slot for nothing.
         """
         if not self._live_card.card_active:
             return
         try:
-            still_wanted = bool(options.get(CONF_NOTIFY_LIVE, False)) and bool(
-                coerce_targets(options)
-            )
+            wanted = bool(options.get(CONF_NOTIFY_LIVE, False))
+            keep = set(coerce_targets(options)) if wanted else set()
         except Exception:  # pylint: disable=broad-except
             return
-        if still_wanted:
+
+        dropped = [t for t in self._notify_targets if t not in keep]
+        if not dropped:
             return
-        _LOGGER.info("Live print card switched off; dismissing it")
-        self._clear_live_card()
+        if not keep:
+            _LOGGER.info("Live print card switched off; dismissing it")
+            self._clear_live_card()
+            return
+
+        _LOGGER.info(
+            "Dismissing the live print card on %d target(s) it was removed from",
+            len(dropped),
+        )
+        payload = build_clear_payload(f"{self._notify_tag_base()}_live")
+        for target in dropped:
+            if is_mobile_target(target) and is_live_capable(self._target_os(target)):
+                self.hass.async_create_task(
+                    self._async_deliver_one(target, payload)
+                )
+
+    def notifications_only_change(self, options: Mapping[str, Any]) -> bool:
+        """Whether an options update touched nothing but the notification path.
+
+        Compared against the options this coordinator was last built from, not
+        against defaults: the question is what the user just changed, and a
+        setting they have never touched is not a change.
+
+        Anything unrecognised counts as needing a reload, including nothing at
+        all -- an update that leaves the options identical is a change to the
+        entry's `data`, which is where the host lives.
+        """
+        previous = self._loaded_options
+        if previous is None:
+            return False
+        touched = {
+            key
+            for key in set(previous) | set(options)
+            if previous.get(key) != options.get(key)
+        }
+        return bool(touched) and touched <= NOTIFY_ONLY_OPTION_KEYS
+
+    def apply_notification_options(self, options: Any) -> None:
+        """Adopt new notification options without reloading the entry.
+
+        A reload drops the WebSocket, flips every entity unavailable and
+        restarts the camera stream, which is a heavy price for changing the
+        wording of a notification -- and the options flow now saves each page as
+        it is submitted, so that price used to be paid several times while
+        someone edited their settings.
+
+        The card is *resynced* rather than left alone: its text, its buttons and
+        its pictures all come from these options, and the state is cleared so
+        the next telemetry frame re-pushes a card built from the new ones. That
+        replaces the card in place, on its own tag, exactly as a mid-print
+        restart does -- rather than leaving the old text on the phone until the
+        five-minute refresh comes round.
+        """
+        self.notify_options_changed(options)
+        resync = self._live_card.card_active
+        self._load_options()
+        if resync and self._notify_live and self._notify_targets:
+            self._live_card.clear()
+        _LOGGER.info("Notification settings applied without a reload")
 
     def _notify_tag_base(self) -> str:
         """Stable tag prefix for this printer.
@@ -1813,31 +1896,29 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._notify_dispatch(payload, kind=kind)
 
     def _completion_message(self, d: dict[str, Any], job: str) -> str:
-        """Completion text, with elapsed time and filament used when known.
+        """Completion text, naming the filament used when the printer said.
 
-        Two whole sentences rather than one sentence plus bolted-on fragments,
-        so each reads naturally in every language. Falls back to the plain form
-        unless *both* numbers are available -- a half-filled detailed sentence
-        would read worse than the simple one.
+        Two whole sentences rather than one sentence plus a bolted-on fragment,
+        so each reads naturally in every language -- and so the shorter one is
+        a complete sentence rather than a truncated version of the longer.
+        Falls back to it whenever the length is missing, which is what an
+        aborted or very short job reports.
         """
         custom = self._custom_message("completed")
         if custom:
             return custom
 
-        duration = format_duration(d.get("printJobTime"), self._notify_strings or {})
+        device = self._notify_title()
         filament = format_filament_length(
             d.get("usedMaterialLength"), (self._notify_strings or {}).get("filament_length")
         )
-        if duration and filament:
+        if filament:
             detailed = self._t(
-                "completed_detailed",
-                filename=job,
-                duration=duration,
-                filament=filament,
+                "completed_detailed", device=device, filament=filament
             )
             if detailed:
                 return detailed
-        return self._t("completed", filename=job)
+        return self._t("completed", device=device)
 
     def _notify_progress(self) -> int | None:
         """Progress for a notification body, or None when the printer has not said."""

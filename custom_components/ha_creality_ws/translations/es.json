@@ -37,19 +37,19 @@
     "body_progress": "{progress}%",
     "body_paused": "En pausa al {progress}%",
     "body_paused_unknown": "En pausa",
-    "body_layer": "Capa {layer}/{total_layers}",
-    "body_time_left": "{duration} restantes",
+    "body_layer": "{layer}/{total_layers}",
+    "body_time_left": "{duration}",
     "body_fallback": "Imprimiendo",
     "duration_hours_minutes": "{hours} h {minutes} min",
     "duration_minutes": "{minutes} min",
     "duration_seconds": "{seconds} s",
     "filament_length": "{metres} m",
-    "completed": "¡La impresión de {filename} se ha completado correctamente!",
-    "stopped": "La impresión de {filename} se ha detenido al {progress}%",
-    "completed_detailed": "La impresión de {filename} se ha completado en {duration} y ha usado {filament} de filamento",
-    "error": "Error {code} de la impresora (clave: {key}) durante la impresión de {filename}",
-    "filament_runout": "Se ha agotado el filamento durante la impresión de {filename}",
-    "finishing_soon": "La impresión de {filename} terminará en {minutes} minutos."
+    "completed": "{device} ha terminado.",
+    "stopped": "{device} se ha detenido al {progress}%",
+    "completed_detailed": "{device} ha terminado. Filamento consumido: {filament}.",
+    "error": "Error de {device} - {key} [{code}]",
+    "filament_runout": "{device} se ha quedado sin filamento. Estado de la impresión: {state}. Cambia el filamento.",
+    "finishing_soon": "{device} terminará en {minutes} minutos."
   },
   "exceptions": {
     "unsupported_ha_version": {
@@ -135,7 +135,7 @@
           },
           "text": {
             "name": "Texto personalizado",
-            "description": "Escribe tu propio texto, o deja un campo vacío para conservar el texto integrado y ya traducido. Un marcador de posición cuyo valor no haya comunicado la impresora no muestra nada, así que encierra entre corchetes todo lo que sea opcional: la parte entre corchetes desaparece por completo mientras su valor sea desconocido, como en {example}. El título es siempre el nombre de la impresora: en Android el título de la tarjeta en vivo se fija al crearse la tarjeta y ya no puede cambiarse.",
+            "description": "Escribe tu propio texto, o deja un campo vacío para conservar el texto integrado y ya traducido. Un marcador de posición cuyo valor no haya comunicado la impresora no muestra nada, así que encierra entre corchetes todo lo que sea opcional: la parte entre corchetes desaparece por completo mientras su valor sea desconocido, como en {example}. Los corchetes en sí son la sintaxis y no se muestran; duplícalos ([[ y ]]) cuando quieras conservar un corchete literal. El título es siempre el nombre de la impresora: en Android el título de la tarjeta en vivo se fija al crearse la tarjeta y ya no puede cambiarse.",
             "data": {
               "notify_template_live": "Tarjeta de impresión en vivo",
               "notify_template_completed": "Impresión terminada",

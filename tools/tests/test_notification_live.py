@@ -33,6 +33,12 @@ _STRINGS = json.loads(
     ).read_text(encoding="utf-8")
 )["common"]
 
+# The shipped wording, built rather than quoted: these tests are about which
+# notification arrives and in what order, and pinning the prose made every one
+# of them fail the first time a default was reworded. "K1C" is the hostname the
+# stub telemetry reports.
+_COMPLETED = _STRINGS["completed"].format(device="K1C")
+
 
 class Clock:
     """Stands in for hass.loop, which the rules engine only asks for time()."""
@@ -232,14 +238,17 @@ def test_a_print_starts_exactly_one_card():
     assert _live(_frame(coord, hass, **_printing(5))) == []
 
 
-def test_the_card_body_names_the_job_and_the_layer():
+def test_the_card_body_is_the_numbers_and_not_the_file_name():
+    """The title is the printer and iOS gets the job name as the activity's
+    subtitle, so repeating it in the body only pushed the numbers off the end of
+    an Android status bar."""
     coord, hass = _coordinator()
-    message = _live(_frame(coord, hass, **_printing(42)))[0]["message"]
-    # Basenamed: the printer reports the whole path.
-    assert "3DBenchy.gcode" in message
-    assert "/usr/data" not in message
-    assert "42%" in message
-    assert "Layer 126/300" in message
+    payload = _live(_frame(coord, hass, **_printing(42)))[0]
+
+    assert payload["message"] == "42% - 126/300 - 1h 00m"
+    # Where the job name does belong, basenamed: the printer reports a path.
+    assert payload["data"]["subtitle"] == "3DBenchy.gcode"
+    assert "/usr/data" not in json.dumps(payload)
 
 
 def test_when_is_wall_clock_not_the_loop_clock():
@@ -348,7 +357,7 @@ def test_finishing_ends_the_activity_and_then_announces_it():
 
     events = _events(payloads)
     assert len(events) == 1
-    assert "completed successfully" in events[0]["message"]
+    assert events[0]["message"] == _COMPLETED
     # It must actually alert: it would otherwise replace the card in silence.
     assert "alert_once" not in events[0]["data"]
 
@@ -409,7 +418,7 @@ def test_end_of_print_jitter_produces_one_card_push_and_one_completion():
         )
         live_pushes += len(_live(payloads))
         completions += len(
-            [p for p in _events(payloads) if "completed" in p["message"]]
+            [p for p in _events(payloads) if p["message"] == _COMPLETED]
         )
     assert (live_pushes, completions) == (1, 1)
 
@@ -517,7 +526,7 @@ def test_a_degraded_card_spells_out_the_remaining_time():
     message = _live(_frame(coord, hass, **_printing(30, printLeftTime=4500)))[0][
         "message"
     ]
-    assert "1h 15m left" in message
+    assert message.endswith("1h 15m")
 
 
 def test_the_card_does_not_flap_back_after_a_job_finishes():
@@ -587,7 +596,8 @@ def test_starting_a_different_file_dismisses_the_previous_card():
     assert len(_clears(payloads)) == 1
     # ...and the new job gets its own card in the same frame.
     assert len(_live(payloads)) == 1
-    assert "bracket.gcode" in _live(payloads)[0]["message"]
+    # The card's body is the numbers; the job name rides in the activity state.
+    assert _live(payloads)[0]["data"]["subtitle"] == "bracket.gcode"
 
 
 def test_stopping_and_reprinting_the_same_file_shows_a_card_again():
@@ -695,8 +705,9 @@ def test_a_stopped_print_says_so_instead_of_the_card_just_vanishing():
 
     events = _events(payloads)
     assert len(events) == 1
-    assert "stopped at 30%" in events[0]["message"]
-    assert "3DBenchy.gcode" in events[0]["message"]
+    assert events[0]["message"] == _STRINGS["stopped"].format(
+        device="K1C", progress=30
+    )
     assert events[0]["data"]["notification_icon"] == "mdi:stop-circle"
     # It has to alert, like the completion banner.
     assert "alert_once" not in events[0]["data"]
@@ -719,7 +730,7 @@ def test_completion_wins_when_a_finished_job_also_reports_stopped():
     coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
     payloads = _events(_frame(coord, hass, **_printing(100, state=4, printLeftTime=0)))
     assert len(payloads) == 1
-    assert "completed" in payloads[0]["message"]
+    assert payloads[0]["message"] == _COMPLETED
     assert coord._notified_stopped is False
 
 
@@ -1238,7 +1249,7 @@ def test_a_stop_the_printer_does_not_announce_is_still_announced():
     assert len(events) == 1
     # The progress from before the stop, not the 0 the printer now reports.
     assert events[0]["message"] == _STRINGS["stopped"].format(
-        filename="3DBenchy.gcode", progress=40
+        device="K1C", progress=40
     )
     # Posted on the card's tag, and the card dismissed first so the ongoing
     # Android notification actually goes away.
@@ -1258,7 +1269,9 @@ def test_a_stop_that_clears_the_file_name_is_announced_at_once():
 
     events = _events(payloads)
     assert len(events) == 1
-    assert "3DBenchy.gcode" in events[0]["message"]
+    assert events[0]["message"] == _STRINGS["stopped"].format(
+        device="K1C", progress=40
+    )
     assert len(_clears(payloads)) == 1
 
 
@@ -1364,3 +1377,108 @@ def test_a_finished_print_is_not_announced_as_stopped_as_well():
 
     payloads = _confirm(coord, hass, frames=3)
     assert _events(payloads) == []
+
+
+# --------------------------------------------------------------------------- #
+# Applying a settings change
+# --------------------------------------------------------------------------- #
+
+
+def _options(**overrides):
+    base = {"notify_targets": ["notify.mobile_app_pixel"], "notify_live": True}
+    base.update(overrides)
+    return base
+
+
+def test_changing_only_the_notification_settings_needs_no_reload():
+    """A reload drops the WebSocket, flips every entity unavailable and
+    restarts the camera stream. That is much too high a price for rewording a
+    notification, and the options flow now saves a page at a time."""
+    coord, hass = _coordinator()
+    coord.config_entry.options = _options()
+    coord._load_options()
+
+    assert coord.notifications_only_change(
+        _options(notify_template_live="{progress}%")
+    ) is True
+    assert coord.notifications_only_change(_options(polling_rate=5)) is False
+    # Nothing changed in the options at all: the update was to the entry's
+    # `data`, which is where the host lives, and that does need a reload.
+    assert coord.notifications_only_change(_options()) is False
+
+
+def test_applying_new_text_resyncs_the_card_instead_of_waiting():
+    """Without a reload nothing rebuilds the card state, so the phone would
+    keep the old wording until the five-minute refresh came round."""
+    coord, hass = _coordinator()
+    coord.config_entry.options = _options()
+    coord._load_options()
+    _frame(coord, hass, **_printing(40))
+    assert coord._live_card.card_active is True
+
+    options = _options(notify_template_live="{progress}% of {filename}")
+    coord.config_entry.options = options
+    coord.apply_notification_options(options)
+
+    hass.loop.advance(1)
+    pushed = _live(_frame(coord, hass, **_printing(41)))
+    assert len(pushed) == 1, "the very next frame re-pushes the card"
+    assert pushed[0]["message"] == "41% of 3DBenchy.gcode"
+
+
+def test_a_phone_removed_from_the_targets_has_its_card_taken_away():
+    """It will never be pushed to again, so nothing else would ever update or
+    dismiss the card it is holding."""
+    coord, hass = _coordinator(
+        targets=("notify.mobile_app_pixel", "notify.mobile_app_ipad")
+    )
+    coord.config_entry.options = _options(
+        notify_targets=["notify.mobile_app_pixel", "notify.mobile_app_ipad"]
+    )
+    coord._load_options()
+    _frame(coord, hass, **_printing(40))
+
+    options = _options(notify_targets=["notify.mobile_app_pixel"])
+    coord.config_entry.options = options
+    coord.apply_notification_options(options)
+    pending, hass.tasks = hass.tasks, []
+    asyncio.get_event_loop().run_until_complete(asyncio.gather(*pending))
+
+    dismissed = [
+        target for target, _service, payload in
+        [(c[1], c[0], c[2]) for c in hass.calls]
+        if payload["message"] == CLEAR_NOTIFICATION_MARKER
+    ]
+    assert dismissed == ["mobile_app_ipad"]
+
+
+def test_a_phone_that_stays_keeps_its_card():
+    """Dismissing it would make the card flicker and spend an iOS
+    push-to-start slot for nothing: the next frame refreshes it in place."""
+    coord, hass = _coordinator()
+    coord.config_entry.options = _options()
+    coord._load_options()
+    _frame(coord, hass, **_printing(40))
+
+    options = _options(notify_template_live="{progress}%")
+    coord.config_entry.options = options
+    coord.apply_notification_options(options)
+    pending, hass.tasks = hass.tasks, []
+    asyncio.get_event_loop().run_until_complete(asyncio.gather(*pending))
+
+    assert [c[2]["message"] for c in hass.calls] == []
+
+
+def test_switching_the_card_off_still_dismisses_it():
+    coord, hass = _coordinator()
+    coord.config_entry.options = _options()
+    coord._load_options()
+    _frame(coord, hass, **_printing(40))
+
+    options = _options(notify_live=False)
+    coord.config_entry.options = options
+    coord.apply_notification_options(options)
+    pending, hass.tasks = hass.tasks, []
+    asyncio.get_event_loop().run_until_complete(asyncio.gather(*pending))
+
+    assert [c[2]["message"] for c in hass.calls] == [CLEAR_NOTIFICATION_MARKER]

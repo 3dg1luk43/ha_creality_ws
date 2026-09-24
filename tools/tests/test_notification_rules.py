@@ -890,6 +890,38 @@ def test_a_zero_is_a_value_and_keeps_its_segment():
     assert render_user_template("[{progress}% done]", values) == "0% done"
 
 
+def test_doubled_brackets_are_a_literal_bracket():
+    """The obvious way to write an error code in brackets is also exactly the
+    optional-segment syntax, so `{error_key} [{error_code}]` rendered the code
+    with its brackets eaten. Doubling is the way to ask for them, the same
+    convention `str.format` uses for the same problem."""
+    values = {"error_key": "1", "error_code": "7"}
+    assert render_user_template(
+        "error - {error_key} [[{error_code}]]", values
+    ) == "error - 1 [7]"
+    # And the single-bracket form still means "optional", which is what makes
+    # the escape necessary rather than merely tidy.
+    assert render_user_template(
+        "error - {error_key} [{error_code}]", values
+    ) == "error - 1 7"
+
+
+def test_an_escaped_bracket_cannot_open_a_segment():
+    """A half-escaped mess must not swallow the rest of the template: the
+    escapes are swapped out before the segment pass, so they cannot pair up with
+    a real bracket."""
+    values = {"eta": ""}
+    assert render_user_template("[[{eta}]] left", values) == "[] left"
+
+
+def test_a_bracket_in_a_value_is_never_re_read():
+    """Escapes are restored last, so a file name with a bracket in it cannot
+    turn into syntax."""
+    assert render_user_template(
+        "{filename}", {"filename": "bracket[v2].gcode"}
+    ) == "bracket[v2].gcode"
+
+
 def test_a_bracketed_segment_with_no_placeholder_is_literal():
     """Someone writing [PRINTER] in their own text means the brackets."""
     assert render_user_template("[PRINTER] {device}", VALUES) == "[PRINTER] K1C"

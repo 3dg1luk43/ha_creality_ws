@@ -873,3 +873,27 @@ def test_a_placeholder_is_only_accepted_where_it_can_be_filled():
     handler = _handler({})
     accepted = _submit_text(handler, {CONF_NOTIFY_TEMPLATE_SOON: "{minutes} left"})
     assert accepted["step"] == "menu"
+
+
+@requires_voluptuous
+def test_every_field_on_this_page_is_one_that_needs_no_reload():
+    """`NOTIFY_ONLY_OPTION_KEYS` is what lets a notification change skip the
+    reload. A field added to this page and forgotten there would go on tearing
+    the WebSocket down to reword a notification; a field from another page added
+    to it by mistake would stop reloading when it has to."""
+    from custom_components.ha_creality_ws.const import NOTIFY_ONLY_OPTION_KEYS
+    from custom_components.ha_creality_ws.config_flow import _NOTIFY_SECTIONS
+
+    rendered = _rendered_fields(_render_notifications(_handler({})))
+    assert rendered <= NOTIFY_ONLY_OPTION_KEYS, sorted(
+        rendered - NOTIFY_ONLY_OPTION_KEYS
+    )
+    # And nothing in the set that the page cannot reach, bar the legacy
+    # single-device key, which is read for migration and never rendered.
+    from custom_components.ha_creality_ws.const import CONF_NOTIFY_DEVICE
+
+    grouped = {key for fields in _NOTIFY_SECTIONS.values() for key in fields}
+    reachable = grouped | {CONF_NOTIFY_TARGETS, CONF_NOTIFY_DEVICE}
+    assert NOTIFY_ONLY_OPTION_KEYS == reachable, sorted(
+        NOTIFY_ONLY_OPTION_KEYS ^ reachable
+    )

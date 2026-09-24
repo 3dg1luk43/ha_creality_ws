@@ -409,11 +409,18 @@ def test_the_new_key_wins_and_an_emptied_list_stays_empty():
 
 
 def test_the_filename_in_a_message_is_basenamed():
-    """K1C reports a full path and the old messages interpolated it raw."""
+    """K1C reports a full path and the old messages interpolated it raw.
+
+    Asserted through a user template now that no shipped message names the file:
+    `{filename}` is where a full path would show up today, and the sensor
+    attributes deliberately keep publishing the raw value, so basenaming has to
+    happen on the way into the notification rather than at the source.
+    """
     coord, hass = _coordinator(["notify.mobile_app_pixel"])
     coord._notify_primed = True
     coord._notify_completed = True
     coord._notified_completed = False
+    coord._notify_templates = {"completed": "{filename} done"}
     coord._last_filename = "/usr/data/printer_data/gcodes/3DBenchy.gcode"
     coord.data = {
         "printFileName": "/usr/data/printer_data/gcodes/3DBenchy.gcode",
@@ -427,7 +434,7 @@ def test_the_filename_in_a_message_is_basenamed():
         for c in _flush(hass)
         if c[2]["message"] != CLEAR_NOTIFICATION_MARKER
     ]
-    assert bodies == ["Print 3DBenchy.gcode completed successfully!"]
+    assert bodies == ["3DBenchy.gcode done"]
 
 
 def test_a_new_file_fires_the_started_event():

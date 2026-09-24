@@ -61,7 +61,9 @@ To install a specific pre-release version via HACS:
 
 ## Configuration
 
-The **Configure** dialog is a menu of pages -- Camera, Notifications, Power switch, Connection & performance. **Pressing Submit on a page saves that page** and reloads the integration to apply it. There is nothing to confirm afterwards and no final "save" step: close the dialog whenever you are finished.
+The **Configure** dialog is a menu of pages -- Camera, Notifications, Power switch, Connection & performance. **Pressing Submit on a page saves that page** and applies it. There is nothing to confirm afterwards and no final "save" step: close the dialog whenever you are finished.
+
+Notification settings are applied **without reloading the integration**: the WebSocket stays up, no entity goes unavailable and the camera stream is not restarted, so you can tune notification text during a print. A card already on a phone is rebuilt from the new settings on the very next telemetry frame, and a phone you removed from the targets has its card taken away. Every other page still reloads the integration, because a new IP address or camera mode has to.
 
 ### 1) Add the integration (UI)
 
@@ -229,9 +231,11 @@ If you previously set the single **Notification Device**, it is migrated automat
 Enable **Live print card**. During a print you get one card that updates in place, on the iOS Lock Screen and in the Dynamic Island, and in the Android status bar and notification shade:
 
 - a **countdown timer** to the estimated finish, which ticks on the phone itself
-- a **progress bar** and the current layer
+- a **progress bar**, and the percentage, layer and remaining time as text
 - the **G‑code preview** as the notification icon
 - **Pause / Resume / Stop** buttons, if you enable them
+
+The text is the numbers and not the file name: the title is already the printer, iOS carries the job name as the activity's subtitle, and a long `.gcode` name pushed the numbers off the end of an Android status bar. Write your own text if you want it back -- see [Custom notification text](#custom-notification-text).
 
 It ends by itself when the print finishes, and is replaced by a completion notification carrying a **camera snapshot** of the bed. That one is a plain confirmation: no progress bar and no countdown, because there is nothing left to track. A print that is cancelled or aborted gets its own notification saying where it stopped, rather than the card simply vanishing.
 
@@ -243,7 +247,7 @@ A stop is reported whoever performed it: the printer's own screen, the Creality 
 
 **Update rate.** A state change (start, pause, resume, finish) is pushed immediately, because a deliberate user action has to show up at once. Everything else is rate limited: the card refreshes on a five-minute clock, a whole percent of progress can force an earlier refresh, and nothing is sent less than 30 seconds apart. That is not a compromise: the push relay allows about 500 notifications per device per day, iOS throttles frequent Live Activity updates and eventually drops them, and the countdown needs no pushes at all because it runs on the phone.
 
-**Long prints.** iOS ends any Live Activity after **8 hours** -- an Apple limit, not something an app can extend. Past that the card keeps updating as an ordinary notification, with the remaining time written into the text instead of shown as a timer, and you still get the completion notification. Android has no such limit.
+**Long prints.** iOS ends any Live Activity after **8 hours** -- an Apple limit, not something an app can extend. Past that the card keeps updating as an ordinary notification -- you lose the ticking timer, not the remaining time, which is written into the text either way -- and you still get the completion notification. Android has no such limit.
 
 ### Tapping the notification
 
@@ -300,6 +304,8 @@ Every value comes from the printer's own telemetry, read from the single frame t
 - `3DBenchy.gcode -- 42%` in the first minute, with no dangling separator
 
 Brackets that contain no placeholder are your own text and stay as you typed them, so `[PRINTER] done` renders literally. A `0` is a value, not a missing one: `[{progress}%]` renders `0%` rather than vanishing.
+
+The brackets around an optional part are syntax and are not shown. For a bracket you want to *keep*, double it -- `{error_key} [[{error_code}]]` renders `1 [7]`, while `{error_key} [{error_code}]` renders `1 7` because there the brackets mean "optional".
 
 Anything not recognised is refused when you submit the page, so a typo like `{filament_grams}` is reported there rather than quietly delivering the built-in text forever. If one gets in another way (a hand-edited `.storage`), the notification still arrives -- with the built-in wording, and a warning in the log.
 
