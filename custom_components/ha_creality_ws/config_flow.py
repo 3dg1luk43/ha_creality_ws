@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import logging
+from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlparse
 from .notification_rules import (
@@ -11,6 +12,7 @@ from .notification_rules import (
 import voluptuous as vol
 from homeassistant import config_entries #type: ignore[import]
 from homeassistant.config_entries import ConfigFlowResult #type: ignore[import]
+from homeassistant.data_entry_flow import section #type: ignore[import]
 from homeassistant.helpers import selector #type: ignore[import]
 from homeassistant.helpers.aiohttp_client import async_get_clientsession #type: ignore[import]
 from .const import (
@@ -171,13 +173,72 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_create_entry(title=title, data={CONF_HOST: host, "_cached_mac": mac})
 
 
-def _placeholder_help() -> str:
-    """The available template placeholders, as one comma-separated line.
+# The collapsible groups on the notifications page, and what each field falls
+# back to. One map, read three times: it is what the form renders defaults from,
+# what decides whether a group opens folded, and what a submitted section is
+# flattened against. Three copies of the same defaults is how a checkbox ends up
+# rendering as off while the code treats it as on.
+SECTION_EVENTS = "events"
+SECTION_EXTRAS = "extras"
+SECTION_TEXT = "text"
+
+_NOTIFY_SECTIONS: dict[str, dict[str, Any]] = {
+    SECTION_EVENTS: {
+        CONF_NOTIFY_LIVE: False,
+        CONF_NOTIFY_COMPLETED: False,
+        CONF_NOTIFY_ERROR: False,
+        CONF_NOTIFY_MINUTES_TO_END: False,
+        CONF_MINUTES_TO_END_VALUE: 5,
+    },
+    SECTION_EXTRAS: {
+        CONF_NOTIFY_ACTIONS: False,
+        CONF_NOTIFY_PREVIEW_IMAGE: True,
+        CONF_NOTIFY_CAMERA_SNAPSHOT: True,
+        CONF_NOTIFY_TAP_PATH: "",
+    },
+    SECTION_TEXT: {key: "" for key in NOTIFY_TEMPLATE_OPTIONS.values()},
+}
+
+_NOTIFY_DEFAULTS: dict[str, Any] = {
+    key: default
+    for fields in _NOTIFY_SECTIONS.values()
+    for key, default in fields.items()
+}
+
+
+def _flatten_sections(user_input: Mapping[str, Any]) -> dict[str, Any]:
+    """One flat dict from a submit whose fields live in sections.
+
+    A section arrives as a nested dict under its own name. Everything past this
+    point -- validation, the working copy, the options in `.storage` -- is flat,
+    and deliberately so: the grouping is a property of the form, not of the
+    settings, so moving a field between groups must not move it in a user's
+    config or orphan what they already saved.
+    """
+    flat: dict[str, Any] = {}
+    for key, value in user_input.items():
+        if key in _NOTIFY_SECTIONS and isinstance(value, Mapping):
+            flat.update(value)
+        else:
+            flat[key] = value
+    return flat
+
+
+def _placeholder_help(name: str) -> str:
+    """The placeholders one notification can fill, as a comma-separated line.
+
+    Per notification, because they are not all the same: the finishing-soon
+    reminder is the only one that knows how many minutes are left, and a print
+    that has been stopped has had most of its numbers reset by the printer
+    before anything can read them. Offering a placeholder that cannot be filled
+    is worse than not offering it -- it renders as nothing, which reads as a bug
+    in the user's template rather than a mistake in the list.
 
     Generated from the single source of truth in `notification_rules`, so a new
-    placeholder documents itself in the UI. Not prose: the surrounding sentence
-    lives in strings.json and is translated; this is only the list of names,
-    which are not translatable, being what the user has to type.
+    placeholder documents itself in the UI, in every language, without six
+    near-identical lists to keep in step. Not prose: the surrounding sentence
+    lives in strings.json and is translated; these are the names the user has to
+    type.
 
     Fed in as a `description_placeholders` value rather than written into the
     sentence, and so is the example below. The frontend renders a step
@@ -186,7 +247,7 @@ def _placeholder_help() -> str:
     "Translation error" -- so the one place a brace may appear literally in
     strings.json is inside a value substituted into it.
     """
-    return ", ".join(f"{{{name}}}" for name in TEMPLATE_FIELDS)
+    return ", ".join(f"{{{field}}}" for field in TEMPLATE_FIELDS[name])
 
 
 def _placeholder_example() -> str:
@@ -291,10 +352,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         single step when a dropdown changes, so conditional fields (e.g. the
         custom camera URL) would otherwise show stale based on the saved mode.
 
-        Submitting a section saves it. "Done" only closes the dialog, and so
-        does the dialog's own close button: there is nothing left to lose by
-        using it. The back arrow abandons the section it is in, which is the one
-        thing it should do.
+        Submitting a page saves it, and there is deliberately nothing here to
+        press afterwards: the way out is the dialog's own close button, like
+        every other dialog in Home Assistant, and it cannot lose anything.
+        A "Save and apply" item used to sit at the bottom of this menu, which
+        made the one thing you could not skip look like one more thing you
+        could -- closing the dialog, which is how a settings dialog normally
+        ends, silently threw the lot away.
 
         A list rather than a mapping, so the labels come from `menu_options` in
         strings.json and are translated. Passing a mapping makes the frontend
@@ -303,28 +367,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         self._ensure_working()
         return self.async_show_menu(
             step_id="init",
-            menu_options=[
-                "camera",
-                "notifications",
-                "notification_text",
-                "power",
-                "connection",
-                "done",
-            ],
+            menu_options=["camera", "notifications", "power", "connection"],
         )
-
-    async def async_step_done(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Close the dialog.
-
-        Every section has already been written, so this saves nothing new.
-        Returning the same options is deliberately not a no-op *call*: Home
-        Assistant compares them against the entry and only fires the update
-        listener if something differs, so closing changes nothing and reloads
-        nothing.
-        """
-        self._ensure_working()
-        assert self._working is not None
-        return self.async_create_entry(title="", data=dict(self._working))
 
     async def async_step_camera(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Camera settings. Conditional fields follow the selected mode."""
@@ -505,135 +549,189 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         ]
 
     async def async_step_notifications(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Notification settings."""
-        self._ensure_working()
-        assert self._working is not None
-        if user_input is not None:
-            # Never persist None. `options.get(key, DEFAULT)` returns the stored
-            # None rather than the default, and the int()/float() casts at setup
-            # then fail for good -- a cleared field would brick the entry.
-            cleaned = {k: v for k, v in user_input.items() if v is not None}
-            cleaned[CONF_NOTIFY_TARGETS] = [
-                t.strip()
-                for t in (cleaned.get(CONF_NOTIFY_TARGETS) or [])
-                if isinstance(t, str) and t.strip()
-            ]
-            self._working.update(cleaned)
-            return await self._saved()
+        """Everything about notifications, on one page.
 
-        # Seeded through the same coercion the coordinator uses, so a user
-        # upgrading from the single-device option sees it pre-selected here and
-        # the first save persists the new shape.
-        current_targets = coerce_targets(self._working)
-        notify_completed = self._working.get(CONF_NOTIFY_COMPLETED, False)
-        notify_error = self._working.get(CONF_NOTIFY_ERROR, False)
-        notify_minutes_to_end = self._working.get(CONF_NOTIFY_MINUTES_TO_END, False)
-        minutes_to_end_value = self._working.get(CONF_MINUTES_TO_END_VALUE, 5)
-        notify_live = self._working.get(CONF_NOTIFY_LIVE, False)
-        notify_actions = self._working.get(CONF_NOTIFY_ACTIONS, False)
-        notify_preview = self._working.get(CONF_NOTIFY_PREVIEW_IMAGE, True)
-        notify_snapshot = self._working.get(CONF_NOTIFY_CAMERA_SNAPSHOT, True)
-        notify_tap_path = self._working.get(CONF_NOTIFY_TAP_PATH, "")
+        Targets first, because nothing else on the page does anything without
+        one, then three collapsible groups. It used to be two separate pages
+        with ten fields in a flat list between them, which meant the custom text
+        for a notification was nowhere near the switch that turns it on.
 
-        schema_dict: dict[str, Any] = {
-            vol.Optional(CONF_NOTIFY_TARGETS, default=current_targets): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=self._notify_target_options(current_targets),
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                    multiple=True,
-                    custom_value=True,
-                )
-            ),
-            vol.Optional(CONF_NOTIFY_LIVE, default=notify_live): selector.BooleanSelector(),
-            vol.Optional(CONF_NOTIFY_COMPLETED, default=notify_completed): selector.BooleanSelector(),
-            vol.Optional(CONF_NOTIFY_ERROR, default=notify_error): selector.BooleanSelector(),
-            vol.Optional(CONF_NOTIFY_MINUTES_TO_END, default=notify_minutes_to_end): selector.BooleanSelector(),
-            vol.Optional(CONF_MINUTES_TO_END_VALUE, default=minutes_to_end_value): selector.NumberSelector(
-                selector.NumberSelectorConfig(min=1, max=60, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="min")
-            ),
-            vol.Optional(CONF_NOTIFY_ACTIONS, default=notify_actions): selector.BooleanSelector(),
-            vol.Optional(CONF_NOTIFY_PREVIEW_IMAGE, default=notify_preview): selector.BooleanSelector(),
-            vol.Optional(CONF_NOTIFY_CAMERA_SNAPSHOT, default=notify_snapshot): selector.BooleanSelector(),
-            vol.Optional(CONF_NOTIFY_TAP_PATH, default=notify_tap_path or ""): selector.TextSelector(
-                selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT, autocomplete="off")
-            ),
-        }
-        # No description_placeholders: the prose lives in strings.json as the
-        # step description, so each locale can actually translate it. A
-        # hardcoded placeholder would render the same English in every language.
-        return self.async_show_form(
-            step_id="notifications",
-            data_schema=vol.Schema(schema_dict),
-        )
-
-    async def async_step_notification_text(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Custom text for each notification this integration composes.
-
-        Blank means "use the shipped, translated sentence", so an untouched
-        printer behaves exactly as before and clearing a field is how you get
-        the default back.
-
-        A template naming a placeholder that does not exist is refused here
-        rather than at notification time. This is the only moment the mistake
-        can be shown to the person who made it: a notification is composed on a
-        WebSocket frame, where a warning in the log is the best that can be
-        done -- and the field would silently keep delivering the built-in text
-        while the user believed their own was configured.
+        A group the user has changed something in opens by itself, so a printer
+        with custom wording shows it rather than hiding it behind a disclosure
+        that looks untouched. So does a group holding an error.
         """
         self._ensure_working()
         assert self._working is not None
         errors: dict[str, str] = {}
+        submitted = _flatten_sections(user_input) if user_input is not None else {}
 
         if user_input is not None:
-            # Collected first and applied only once the whole page is valid. A
-            # refused submit has to leave the stored options exactly as they
-            # were, or the good half of it would be saved by the next thing
-            # that writes them -- "Done", most likely -- while the user was
-            # still looking at an error.
-            cleaned: dict[str, str] = {}
-            for key in NOTIFY_TEMPLATE_OPTIONS.values():
-                text = str(user_input.get(key) or "").strip()
-                if template_unknown_fields(text):
+            # Never persist None. `options.get(key, DEFAULT)` returns the stored
+            # None rather than the default, and the int()/float() casts at setup
+            # then fail for good -- a cleared field would brick the entry.
+            cleaned = {k: v for k, v in submitted.items() if v is not None}
+            if CONF_NOTIFY_TARGETS in submitted:
+                cleaned[CONF_NOTIFY_TARGETS] = [
+                    t.strip()
+                    for t in (cleaned.get(CONF_NOTIFY_TARGETS) or [])
+                    if isinstance(t, str) and t.strip()
+                ]
+            for name, key in NOTIFY_TEMPLATE_OPTIONS.items():
+                # Only what the submit actually carried. Every field of a group
+                # comes back whether or not it was unfolded, but a group the
+                # form did not render at all must keep what is stored -- reading
+                # an absent field as "the user cleared it" would wipe all six
+                # templates the first time anything submitted without them.
+                if key not in submitted:
+                    continue
+                text = str(submitted.get(key) or "").strip()
+                # Against the placeholders *this* notification can fill. A
+                # `{minutes}` in the live card is not a typo anywhere else, and
+                # at run time it would simply have rendered as nothing.
+                if template_unknown_fields(text, TEMPLATE_FIELDS[name]):
                     errors[key] = "unknown_placeholder"
                 else:
                     cleaned[key] = text
             if not errors:
+                # Applied only once the whole page is valid, so a refused submit
+                # leaves the stored options exactly as they were rather than
+                # saving the good half of a page the user is still correcting.
                 self._working.update(cleaned)
                 return await self._saved()
 
-        schema_dict: dict[str, Any] = {}
-        for key in NOTIFY_TEMPLATE_OPTIONS.values():
-            # The rejected text, not the stored one: a re-render that replaced
-            # what the user typed with what was saved would take their typo
-            # away along with any chance of fixing it.
-            current = (
-                str((user_input or {}).get(key) or "")
-                if user_input is not None
-                else str(self._working.get(key) or "")
-            )
-            schema_dict[
-                vol.Optional(key, default=current)
-            ] = selector.TextSelector(
+        def stored(key: str) -> Any:
+            """The value to render: what was just submitted, else what is saved.
+
+            The rejected text and not the stored one: a re-render that replaced
+            what the user typed with what was saved would take their typo away
+            along with any chance of fixing it.
+            """
+            default = _NOTIFY_DEFAULTS[key]
+            if user_input is not None:
+                return submitted.get(key, default)
+            value = self._working.get(key)
+            return default if value is None else value
+
+        # Seeded through the same coercion the coordinator uses, so a user
+        # upgrading from the single-device option sees it pre-selected here and
+        # the first save persists the new shape.
+        current_targets = (
+            submitted.get(CONF_NOTIFY_TARGETS)
+            if user_input is not None
+            else coerce_targets(self._working)
+        ) or []
+
+        events = {
+            vol.Optional(CONF_NOTIFY_LIVE, default=stored(CONF_NOTIFY_LIVE)):
+                selector.BooleanSelector(),
+            vol.Optional(
+                CONF_NOTIFY_COMPLETED, default=stored(CONF_NOTIFY_COMPLETED)
+            ): selector.BooleanSelector(),
+            vol.Optional(CONF_NOTIFY_ERROR, default=stored(CONF_NOTIFY_ERROR)):
+                selector.BooleanSelector(),
+            vol.Optional(
+                CONF_NOTIFY_MINUTES_TO_END,
+                default=stored(CONF_NOTIFY_MINUTES_TO_END),
+            ): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_MINUTES_TO_END_VALUE, default=stored(CONF_MINUTES_TO_END_VALUE)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1, max=60, mode=selector.NumberSelectorMode.BOX,
+                    unit_of_measurement="min",
+                )
+            ),
+        }
+
+        extras = {
+            vol.Optional(
+                CONF_NOTIFY_ACTIONS, default=stored(CONF_NOTIFY_ACTIONS)
+            ): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_NOTIFY_PREVIEW_IMAGE,
+                default=stored(CONF_NOTIFY_PREVIEW_IMAGE),
+            ): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_NOTIFY_CAMERA_SNAPSHOT,
+                default=stored(CONF_NOTIFY_CAMERA_SNAPSHOT),
+            ): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_NOTIFY_TAP_PATH, default=stored(CONF_NOTIFY_TAP_PATH)
+            ): selector.TextSelector(
+                selector.TextSelectorConfig(
+                    type=selector.TextSelectorType.TEXT, autocomplete="off"
+                )
+            ),
+        }
+
+        text = {
+            vol.Optional(key, default=stored(key)): selector.TextSelector(
                 selector.TextSelectorConfig(
                     type=selector.TextSelectorType.TEXT,
                     autocomplete="off",
                     multiline=True,
                 )
             )
+            for key in NOTIFY_TEMPLATE_OPTIONS.values()
+        }
 
-        # The placeholder list is built here and passed in, so the step
-        # description can name every one of them without strings.json having to
-        # be edited whenever one is added.
+        schema = vol.Schema({
+            vol.Optional(CONF_NOTIFY_TARGETS, default=current_targets):
+                selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=self._notify_target_options(current_targets),
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                        multiple=True,
+                        custom_value=True,
+                    )
+                ),
+            # Optional, as core's own sectioned flows have them: a submit that
+            # arrives without one of these should leave those settings alone,
+            # not fail the whole page on a schema error the user cannot read.
+            # `_flatten_sections` writes back only what was actually submitted.
+            vol.Optional(SECTION_EVENTS): section(
+                vol.Schema(events), {"collapsed": False}
+            ),
+            vol.Optional(SECTION_EXTRAS): section(
+                vol.Schema(extras),
+                {"collapsed": not self._section_touched(SECTION_EXTRAS, errors)},
+            ),
+            vol.Optional(SECTION_TEXT): section(
+                vol.Schema(text),
+                {"collapsed": not self._section_touched(SECTION_TEXT, errors)},
+            ),
+        })
+
+        # The placeholder lists are built here and passed in, so each field can
+        # name the ones *it* accepts without strings.json having to be edited
+        # whenever one is added, and without six near-identical lists drifting
+        # apart in every locale.
+        placeholders = {
+            f"fields_{name}": _placeholder_help(name)
+            for name in NOTIFY_TEMPLATE_OPTIONS
+        }
+        placeholders["example"] = _placeholder_example()
         return self.async_show_form(
-            step_id="notification_text",
-            data_schema=vol.Schema(schema_dict),
+            step_id="notifications",
+            data_schema=schema,
             errors=errors,
-            description_placeholders={
-                "fields": _placeholder_help(),
-                "example": _placeholder_example(),
-            },
+            description_placeholders=placeholders,
+        )
+
+    def _section_touched(self, name: str, errors: Mapping[str, str]) -> bool:
+        """Whether a collapsible group holds anything worth opening it for.
+
+        A group the user has changed, or one being pointed at by an error.
+        Everything still at its default stays folded away, which is the whole
+        point of putting it in a section.
+        """
+        assert self._working is not None
+        keys = _NOTIFY_SECTIONS[name]
+        if any(key in errors for key in keys):
+            return True
+        return any(
+            key in self._working and self._working[key] != default
+            for key, default in keys.items()
         )
 
     async def async_step_power(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:

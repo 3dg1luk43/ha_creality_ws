@@ -71,14 +71,12 @@
     "step": {
       "init": {
         "title": "Configuración de la impresora",
-        "description": "Elige un grupo de ajustes para editar. Cada grupo se abre en su propia página, por lo que sus opciones siempre se cargan actualizadas, y al enviar una página se guarda de inmediato. «Hecho» solo cierra este diálogo.",
+        "description": "Elige un grupo de ajustes para editar. Cada grupo se abre en su propia página, y al enviar esa página se guarda y se aplica de inmediato. No hay nada que confirmar después: cierra este diálogo cuando hayas terminado.",
         "menu_options": {
           "camera": "Cámara",
           "notifications": "Notificaciones",
-          "notification_text": "Texto de las notificaciones",
           "power": "Interruptor de encendido",
-          "connection": "Conexión y rendimiento",
-          "done": "Hecho"
+          "connection": "Conexión y rendimiento"
         }
       },
       "camera": {
@@ -94,30 +92,67 @@
       },
       "notifications": {
         "title": "Notificaciones",
-        "description": "Elige uno o varios destinos de notificación. Solo los destinos de la aplicación complementaria de Home Assistant pueden mostrar la tarjeta de impresión en vivo, la vista previa del G-code y los botones de acción; el resto de plataformas de notificación reciben solo texto sin formato. La tarjeta en vivo requiere Home Assistant 2026.7 o posterior, además de iOS 17.2+ o Android 16+; en impresiones muy largas, iOS la cierra al cabo de 8 horas. En Android, al pulsar la notificación se abre la cámara de la impresora; si indicas una ruta del panel (p. ej. /lovelace/printer) decides a dónde lleva la pulsación, y es además la única forma de que iOS abra una vista concreta.",
+        "description": "Elige a dónde van las notificaciones y, después, de qué quieres que te avisen. Al enviar el formulario se guarda esta página y se aplica de inmediato.",
         "data": {
-          "notify_targets": "Destinos de notificación",
-          "notify_live": "Tarjeta de impresión en vivo",
-          "notify_completed": "Notificar al terminar la impresión",
-          "notify_error": "Notificar en caso de error",
-          "notify_minutes_to_end": "Notificar antes de que termine",
-          "minutes_to_end_value": "Minutos de antelación",
-          "notify_actions": "Mostrar los botones Pausar/Reanudar/Detener",
-          "notify_preview_image": "Usar la vista previa del G-code como icono",
-          "notify_camera_snapshot": "Adjuntar una captura de la cámara al terminar la impresión",
-          "notify_tap_path": "Ruta del panel que se abre al pulsar"
-        }
-      },
-      "notification_text": {
-        "title": "Texto de las notificaciones",
-        "description": "Escribe tu propio texto para cualquiera de estas notificaciones, o deja un campo vacío para conservar el texto integrado y ya traducido. Marcadores de posición disponibles: {fields}. Uno cuyo valor no haya comunicado la impresora no muestra nada, así que encierra entre corchetes todo lo que sea opcional: la parte entre corchetes desaparece por completo mientras su valor sea desconocido, como en {example}. El título es siempre el nombre de la impresora: en Android el título de la tarjeta en vivo se fija al crearse la tarjeta y ya no puede cambiarse.",
-        "data": {
-          "notify_template_live": "Texto de la tarjeta de impresión en vivo",
-          "notify_template_completed": "Texto al terminar la impresión",
-          "notify_template_stopped": "Texto al detenerse la impresión",
-          "notify_template_soon": "Texto de impresión a punto de finalizar",
-          "notify_template_error": "Texto de error de la impresora",
-          "notify_template_runout": "Texto de filamento agotado"
+          "notify_targets": "Destinos de notificación"
+        },
+        "data_description": {
+          "notify_targets": "Elige uno o varios. Solo los destinos de la aplicación complementaria de Home Assistant pueden mostrar la tarjeta de impresión en vivo, la vista previa del G-code o los botones; el resto de plataformas de notificación reciben solo el título y el mensaje."
+        },
+        "sections": {
+          "events": {
+            "name": "De qué quiero que me avisen",
+            "description": "La tarjeta de impresión en vivo requiere Home Assistant 2026.7 o posterior, además de iOS 17.2+ o Android 16+; en impresiones muy largas, iOS la cierra al cabo de 8 horas.",
+            "data": {
+              "notify_live": "Tarjeta de impresión en vivo",
+              "notify_completed": "Cuando termina una impresión",
+              "notify_error": "Errores y filamento agotado",
+              "notify_minutes_to_end": "Poco antes de que termine una impresión",
+              "minutes_to_end_value": "Con cuánta antelación"
+            },
+            "data_description": {
+              "notify_live": "Una sola notificación para toda la impresión que se actualiza en su sitio, con una barra de progreso y una cuenta atrás que avanza en el teléfono.",
+              "notify_completed": "Cubre los dos finales: una impresión que ha terminado y otra que se ha detenido -- desde la impresora, la aplicación de Creality o Home Assistant.",
+              "notify_error": "Un error de la impresora o una bobina que se ha agotado.",
+              "notify_minutes_to_end": "Un aviso para ir a ver las últimas capas, por separado para que la tarjeta en vivo no pueda sustituirlo."
+            }
+          },
+          "extras": {
+            "name": "Botones, imágenes y pulsaciones",
+            "description": "Todo esto necesita un destino de la aplicación complementaria y el resto de plataformas de notificación lo ignoran.",
+            "data": {
+              "notify_actions": "Botones Pausar, Reanudar y Detener",
+              "notify_preview_image": "Vista previa del G-code como icono",
+              "notify_camera_snapshot": "Captura de la cámara al terminar la impresión",
+              "notify_tap_path": "Ruta del panel que se abre al pulsar"
+            },
+            "data_description": {
+              "notify_actions": "«Detener» pide autenticación en el dispositivo, así que una pulsación accidental en la pantalla de bloqueo no puede acabar con una impresión larga.",
+              "notify_preview_image": "Se omite cuando la impresora no tiene ninguna vista previa que ofrecer, en lugar de enviar un recuadro gris vacío.",
+              "notify_camera_snapshot": "El aspecto real de la cama. Se omite en impresoras cuya cámara no puede tomar una imagen fija.",
+              "notify_tap_path": "P. ej. /lovelace/printer. Si se deja vacía, en Android la pulsación abre la cámara de la impresora y en iOS abre la aplicación; es la única forma de que en iOS la pulsación lleve a una vista concreta."
+            }
+          },
+          "text": {
+            "name": "Texto personalizado",
+            "description": "Escribe tu propio texto, o deja un campo vacío para conservar el texto integrado y ya traducido. Un marcador de posición cuyo valor no haya comunicado la impresora no muestra nada, así que encierra entre corchetes todo lo que sea opcional: la parte entre corchetes desaparece por completo mientras su valor sea desconocido, como en {example}. El título es siempre el nombre de la impresora: en Android el título de la tarjeta en vivo se fija al crearse la tarjeta y ya no puede cambiarse.",
+            "data": {
+              "notify_template_live": "Tarjeta de impresión en vivo",
+              "notify_template_completed": "Impresión terminada",
+              "notify_template_stopped": "Impresión detenida",
+              "notify_template_soon": "Poco antes del final",
+              "notify_template_error": "Error de la impresora",
+              "notify_template_runout": "Filamento agotado"
+            },
+            "data_description": {
+              "notify_template_live": "Marcadores de posición: {fields_live}",
+              "notify_template_completed": "Marcadores de posición: {fields_completed}",
+              "notify_template_stopped": "Marcadores de posición: {fields_stopped}. Menos que en los demás: cuando se detecta una detención, la impresora ya ha reiniciado el progreso, el cronómetro del trabajo y la capa, así que solo se ofrece lo que sobrevive a ello.",
+              "notify_template_soon": "Marcadores de posición: {fields_finishing_soon}",
+              "notify_template_error": "Marcadores de posición: {fields_error}",
+              "notify_template_runout": "Marcadores de posición: {fields_filament_runout}"
+            }
+          }
         }
       },
       "power": {

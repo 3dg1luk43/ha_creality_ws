@@ -71,14 +71,12 @@
     "step": {
       "init": {
         "title": "Printer Configuration",
-        "description": "Choose a settings group to edit. Each group opens its own page so its options always load fresh, and submitting a page saves it right away. Done only closes this dialog.",
+        "description": "Choose a settings group to edit. Each group opens its own page, and pressing Submit on that page saves it and applies it right away. There is nothing to confirm afterwards: close this dialog whenever you are finished.",
         "menu_options": {
           "camera": "Camera",
           "notifications": "Notifications",
-          "notification_text": "Notification text",
           "power": "Power switch",
-          "connection": "Connection & performance",
-          "done": "Done"
+          "connection": "Connection & performance"
         }
       },
       "camera": {
@@ -94,30 +92,67 @@
       },
       "notifications": {
         "title": "Notifications",
-        "description": "Pick one or more notify targets. Only Home Assistant companion app targets can show the live print card, the G-code preview or the action buttons; other notify platforms receive plain text. The live card needs Home Assistant 2026.7 or newer plus iOS 17.2+ or Android 16+, and iOS ends it after 8 hours on very long prints. Tapping opens the printer camera on Android; set a dashboard path (e.g. /lovelace/printer) to control where a tap goes, which is also the only way iOS can deep-link.",
+        "description": "Choose where notifications go, then what you want to be told about. Pressing Submit saves this page and applies it right away.",
         "data": {
-          "notify_targets": "Notification targets",
-          "notify_live": "Live print card",
-          "notify_completed": "Notify when a print ends",
-          "notify_error": "Notify on Error",
-          "notify_minutes_to_end": "Notify before Completion",
-          "minutes_to_end_value": "Minutes before Completion",
-          "notify_actions": "Show Pause/Resume/Stop buttons",
-          "notify_preview_image": "Use the G-code preview as the icon",
-          "notify_camera_snapshot": "Attach a camera snapshot when a print ends",
-          "notify_tap_path": "Dashboard path to open on tap"
-        }
-      },
-      "notification_text": {
-        "title": "Notification text",
-        "description": "Write your own wording for any of these notifications, or leave a field empty to keep the built-in, translated text. Available placeholders: {fields}. One the printer has not reported renders as nothing, so wrap anything optional in square brackets and the whole bracketed part disappears while its value is unknown, as in {example}. The title is always the printer name: Android fixes a live card's title when the card starts and cannot change it afterwards.",
-        "data": {
-          "notify_template_live": "Live print card text",
-          "notify_template_completed": "Print finished text",
-          "notify_template_stopped": "Print stopped text",
-          "notify_template_soon": "Finishing soon text",
-          "notify_template_error": "Printer error text",
-          "notify_template_runout": "Filament runout text"
+          "notify_targets": "Send notifications to"
+        },
+        "data_description": {
+          "notify_targets": "Pick one or more. Only Home Assistant companion app targets can show the live print card, the G-code preview or the buttons; any other notify platform receives the title and message only."
+        },
+        "sections": {
+          "events": {
+            "name": "What to notify me about",
+            "description": "The live print card needs Home Assistant 2026.7 or newer plus iOS 17.2+ or Android 16+, and iOS ends it after 8 hours on very long prints.",
+            "data": {
+              "notify_live": "Live print card",
+              "notify_completed": "When a print ends",
+              "notify_error": "Errors and filament runout",
+              "notify_minutes_to_end": "Shortly before a print ends",
+              "minutes_to_end_value": "How long before"
+            },
+            "data_description": {
+              "notify_live": "One notification for the whole print that updates in place, with a progress bar and a countdown that ticks on the phone.",
+              "notify_completed": "Covers both endings: a print that finished, and one that was stopped -- from the printer, the Creality app or Home Assistant.",
+              "notify_error": "A printer error, or a spool that has run out.",
+              "notify_minutes_to_end": "A reminder to go and watch the last layers, on its own so the live card cannot replace it."
+            }
+          },
+          "extras": {
+            "name": "Buttons, pictures and tapping",
+            "description": "All of these need a companion app target, and are ignored by every other notify platform.",
+            "data": {
+              "notify_actions": "Pause, Resume and Stop buttons",
+              "notify_preview_image": "G-code preview as the icon",
+              "notify_camera_snapshot": "Camera snapshot when a print ends",
+              "notify_tap_path": "Dashboard path to open on tap"
+            },
+            "data_description": {
+              "notify_actions": "Stop asks for device authentication, so a mis-tap on a lock screen cannot end a long print.",
+              "notify_preview_image": "Skipped when the printer has no preview to serve, rather than sending an empty grey box.",
+              "notify_camera_snapshot": "What the bed actually looks like. Skipped on printers whose camera cannot take a still.",
+              "notify_tap_path": "For example /lovelace/printer. Left empty, an Android tap opens the printer camera and an iOS tap opens the app; this is the only way to make an iOS tap go anywhere specific."
+            }
+          },
+          "text": {
+            "name": "Custom text",
+            "description": "Write your own wording, or leave a field empty to keep the built-in, translated text. A placeholder the printer has not reported renders as nothing, so wrap anything optional in square brackets and the whole bracketed part disappears while its value is unknown, as in {example}. The title is always the printer name: Android fixes a live card's title when the card starts and cannot change it afterwards.",
+            "data": {
+              "notify_template_live": "Live print card",
+              "notify_template_completed": "Print finished",
+              "notify_template_stopped": "Print stopped",
+              "notify_template_soon": "Shortly before the end",
+              "notify_template_error": "Printer error",
+              "notify_template_runout": "Filament runout"
+            },
+            "data_description": {
+              "notify_template_live": "Placeholders: {fields_live}",
+              "notify_template_completed": "Placeholders: {fields_completed}",
+              "notify_template_stopped": "Placeholders: {fields_stopped}. Fewer than the others: the printer has already reset the progress, the job clock and the layer by the time a stop can be seen, so only what survives it is offered.",
+              "notify_template_soon": "Placeholders: {fields_finishing_soon}",
+              "notify_template_error": "Placeholders: {fields_error}",
+              "notify_template_runout": "Placeholders: {fields_filament_runout}"
+            }
+          }
         }
       },
       "power": {

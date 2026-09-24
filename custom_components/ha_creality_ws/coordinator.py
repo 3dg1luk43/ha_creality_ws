@@ -56,6 +56,7 @@ from .notification_rules import (
     notify_service_slug,
     is_new_job_cycle,
     render_user_template,
+    TEMPLATE_FIELDS,
     sanitize_tag,
     stringify_data,
 )
@@ -1581,8 +1582,8 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             return ""
 
-    def _template_values(self, **extra: Any) -> dict[str, str]:
-        """Every placeholder a user template may use, already rendered.
+    def _template_values(self, name: str, /, **extra: Any) -> dict[str, str]:
+        """The placeholders one notification can fill, already rendered.
 
         All of it read from one telemetry frame, so a template cannot mix a
         percentage from this second with an estimate from the last. Durations
@@ -1594,10 +1595,14 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         zero or a dash. That is what an optional `[...]` segment tests, and the
         reason it can: a real 0% is "0", an unknown one is "".
 
-        `extra` carries the values only one notification has -- the minutes on
-        the finishing-soon reminder, the code on an error -- so a template for
-        one notification can reference them and every other template drops them
-        as unknown.
+        Narrowed to `TEMPLATE_FIELDS[name]` on the way out, so the keys of what
+        this returns *are* the placeholders that notification may use -- which
+        is what lets the renderer reject the rest without being told twice, and
+        what the options flow lists under the field.
+
+        `extra` overrides, for the values the frame cannot supply: the minutes
+        on the finishing-soon reminder, the error key, and the file name and
+        progress of a print whose stop has already reset both.
         """
         d = self.data or {}
         strings = self._notify_strings or {}
@@ -1625,9 +1630,10 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "error_key": "",
             "minutes": "",
         }
-        for name, value in extra.items():
-            values[name] = "" if value is None else str(value)
-        return values
+        for key, value in extra.items():
+            values[key] = "" if value is None else str(value)
+        allowed = TEMPLATE_FIELDS.get(name, ())
+        return {key: value for key, value in values.items() if key in allowed}
 
     @staticmethod
     def _whole_degrees(value: Any) -> str:
@@ -1657,7 +1663,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         template = self._notify_templates.get(name)
         if not template:
             return ""
-        text = render_user_template(template, self._template_values(**extra))
+        text = render_user_template(template, self._template_values(name, **extra))
         if not text:
             # Once per template rather than once per push: the live card is
             # pushed up to 600 times a job, and a template that renders to

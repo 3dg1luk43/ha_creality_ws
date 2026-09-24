@@ -255,14 +255,22 @@ def test_no_template_leaves_the_shipped_text_alone():
     )
 
 
-def test_a_template_naming_something_that_does_not_exist_falls_back():
+@pytest.mark.parametrize(
+    "template",
+    [
+        # A value this printer does not stream at all.
+        "used {filament_grams} of filament",
+        # A real placeholder, but not one a completion can fill: the print has
+        # finished, so there is no time remaining to report.
+        "done, {eta} left",
+    ],
+)
+def test_a_template_naming_something_that_does_not_exist_falls_back(template):
     """The options flow refuses these, so reaching here means a hand-edited
     .storage -- and the notification still has to arrive."""
-    coord, hass = _coordinator(
-        **{CONF_NOTIFY_TEMPLATE_COMPLETED: "used {filament_grams} of filament"}
-    )
+    coord, hass = _coordinator(**{CONF_NOTIFY_TEMPLATE_COMPLETED: template})
     banner = _finish(coord, hass)[0]
-    assert "filament_grams" not in banner["message"]
+    assert "{" not in banner["message"]
     assert banner["message"] == _STRINGS["completed_detailed"].format(
         filename="3DBenchy.gcode", duration="1h 00m", filament="4.2 m"
     )
@@ -270,10 +278,13 @@ def test_a_template_naming_something_that_does_not_exist_falls_back():
 
 def test_a_template_that_renders_to_nothing_falls_back():
     """A blank notification is worse than a generic one: the user would see an
-    empty banner and have nothing to act on. `{minutes}` only has a value on the
-    finishing-soon reminder, so on a card its one segment is always empty."""
-    coord, hass = _coordinator(**{CONF_NOTIFY_TEMPLATE_LIVE: "[{minutes} to go]"})
-    card = _cards(_frame(coord, hass, **_printing(42)))[0]
+    empty banner and have nothing to act on. `{eta}` is a real placeholder that
+    this frame simply cannot fill -- the printer reports no estimate in the
+    first minutes of a print -- so the template's one segment drops out."""
+    coord, hass = _coordinator(**{CONF_NOTIFY_TEMPLATE_LIVE: "[{eta} to go]"})
+    no_estimate = _printing(42)
+    del no_estimate["printLeftTime"]
+    card = _cards(_frame(coord, hass, **no_estimate))[0]
     assert card["message"] == NOTIFY_BODY_SEPARATOR.join(
         (
             "3DBenchy.gcode",

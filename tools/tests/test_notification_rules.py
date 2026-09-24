@@ -908,19 +908,63 @@ def test_an_unknown_placeholder_refuses_the_whole_template():
     """It has to fall back rather than render the typo: `{filament_grams}` is a
     value this printer does not stream, and delivering the literal text would
     tell the user their template works."""
-    assert template_unknown_fields("{filament_grams} used") == ["filament_grams"]
+    assert template_unknown_fields(
+        "{filament_grams} used", TEMPLATE_FIELDS["completed"]
+    ) == ["filament_grams"]
     assert render_user_template("{filament_grams} used", VALUES) == ""
 
 
-def test_a_known_placeholder_is_not_reported_as_unknown():
-    every = " ".join(f"{{{name}}}" for name in TEMPLATE_FIELDS)
-    assert template_unknown_fields(every) == []
+@pytest.mark.parametrize("name", sorted(TEMPLATE_FIELDS))
+def test_a_known_placeholder_is_not_reported_as_unknown(name):
+    every = " ".join(f"{{{field}}}" for field in TEMPLATE_FIELDS[name])
+    assert template_unknown_fields(every, TEMPLATE_FIELDS[name]) == []
 
 
 def test_each_unknown_placeholder_is_reported_once():
     """The options-flow error names them, and a template repeating one typo
     should not list it twice."""
-    assert template_unknown_fields("{nope} {nope} {nah}") == ["nope", "nah"]
+    assert template_unknown_fields(
+        "{nope} {nope} {nah}", TEMPLATE_FIELDS["live"]
+    ) == ["nope", "nah"]
+
+
+def test_a_placeholder_is_only_offered_where_it_can_be_filled():
+    """The whole reason the sets differ. `{minutes}` is the point of the
+    finishing-soon reminder and is nothing at all on a live card, where it would
+    have rendered as empty text and read as a bug in the user's template."""
+    assert template_unknown_fields("{minutes}", TEMPLATE_FIELDS["finishing_soon"]) == []
+    assert template_unknown_fields("{minutes}", TEMPLATE_FIELDS["live"]) == ["minutes"]
+
+    assert template_unknown_fields("{error_code}", TEMPLATE_FIELDS["error"]) == []
+    assert template_unknown_fields("{error_code}", TEMPLATE_FIELDS["live"]) == [
+        "error_code"
+    ]
+
+    # A stop is only visible once the printer has reset the job, so the numbers
+    # that reset are not offered for it.
+    for gone in ("eta", "elapsed", "layer", "filament", "state"):
+        assert template_unknown_fields(
+            f"{{{gone}}}", TEMPLATE_FIELDS["stopped"]
+        ) == [gone], gone
+    # What survives: the two the watch remembers, and the temperatures.
+    assert template_unknown_fields(
+        "{filename} {progress} {nozzle} {bed} {device}", TEMPLATE_FIELDS["stopped"]
+    ) == []
+
+
+def test_every_customisable_notification_has_a_field_list():
+    """An option with no list is a field the options flow cannot render help
+    for, and a list with no option is documentation for nothing."""
+    from custom_components.ha_creality_ws.const import NOTIFY_TEMPLATE_OPTIONS
+
+    assert set(TEMPLATE_FIELDS) == set(NOTIFY_TEMPLATE_OPTIONS)
+
+
+@pytest.mark.parametrize("name", sorted(TEMPLATE_FIELDS))
+def test_every_field_list_starts_from_the_printer_and_the_job(name):
+    """Whatever else differs, a notification can always say which printer and
+    which file it is about -- it is the first thing a user writes."""
+    assert {"device", "filename"} <= set(TEMPLATE_FIELDS[name])
 
 
 @pytest.mark.parametrize("template", ["", "   ", None, 42, "[{eta}]"])

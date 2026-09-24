@@ -226,6 +226,37 @@ def test_no_illegal_top_level_translation_keys():
         assert not illegal, f"{path.name}: {illegal}"
 
 
+def test_every_data_description_describes_a_field_that_exists():
+    """hassfest enforces this for a step's own fields and says nothing about the
+    ones inside a section, where a renamed field leaves help text that is never
+    rendered and a field with no help at all."""
+    for path in [COMPONENT / "strings.json", *_locale_files()]:
+        data = _load(path)
+        for group in ("config", "options"):
+            for step_id, step in data.get(group, {}).get("step", {}).items():
+                blocks = [(step_id, step)]
+                blocks += [
+                    (f"{step_id}.{name}", body)
+                    for name, body in step.get("sections", {}).items()
+                ]
+                for where, body in blocks:
+                    orphans = sorted(
+                        set(body.get("data_description", {}))
+                        - set(body.get("data", {}))
+                    )
+                    assert not orphans, f"{path.name}: {where} describes {orphans}"
+
+
+def test_every_step_field_is_labelled():
+    """A section with `data_description` and no `data` renders help under a
+    field with the raw key as its label."""
+    for path in [COMPONENT / "strings.json", *_locale_files()]:
+        for step_id, step in _load(path)["options"]["step"].items():
+            for name, body in step.get("sections", {}).items():
+                assert body.get("data"), f"{path.name}: section {step_id}.{name}"
+                assert body.get("name"), f"{path.name}: section {step_id}.{name}"
+
+
 def test_no_placeholder_is_wrapped_in_single_quotes():
     """hassfest rejects these outright (string_no_single_quoted_placeholders)."""
     quoted = re.compile(r"'\{\w+\}'")

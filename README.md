@@ -61,7 +61,7 @@ To install a specific pre-release version via HACS:
 
 ## Configuration
 
-The **Configure** dialog is a menu of pages -- Camera, Notifications, Notification text, Power switch, Connection & performance. **Each page is saved when you submit it**, and the integration reloads to apply it. **Done** only closes the dialog, so closing it any other way loses nothing either.
+The **Configure** dialog is a menu of pages -- Camera, Notifications, Power switch, Connection & performance. **Pressing Submit on a page saves that page** and reloads the integration to apply it. There is nothing to confirm afterwards and no final "save" step: close the dialog whenever you are finished.
 
 ### 1) Add the integration (UI)
 
@@ -211,7 +211,7 @@ Tip: You can use the built‑in Image card or any card that supports `image` ent
 
 ## Notifications
 
-Configure under **Settings → Devices & Services → Creality → Configure → Notifications**.
+Configure under **Settings → Devices & Services → Creality → Configure → Notifications**. It is one page: the targets at the top, then three groups -- **What to notify me about**, **Buttons, pictures and tapping**, and **Custom text**. The last two start folded away unless you have changed something in them.
 
 ### Targets
 
@@ -265,7 +265,7 @@ Set **Dashboard path to open on tap** to something like `/lovelace/printer`. It 
 
 ### Custom notification text
 
-**Configure → Notification text** lets you write the wording yourself, for any of the six notifications the integration composes: the live card, print finished, print stopped, finishing soon, printer error and filament runout. Leave a field empty -- or clear it again -- to keep the built-in, translated text.
+The **Custom text** group at the bottom of the Notifications page lets you write the wording yourself, for any of the six notifications the integration composes: the live card, print finished, print stopped, finishing soon, printer error and filament runout. Leave a field empty -- or clear it again -- to keep the built-in, translated text.
 
 Placeholders are wrapped in single braces:
 
@@ -280,10 +280,15 @@ Placeholders are wrapped in single braces:
 | `{filament}` | filament used so far, in metres |
 | `{nozzle}`, `{bed}` | current temperatures, in whole degrees |
 | `{state}` | `printing`, `paused`, `stopped`, ... |
-| `{error_code}`, `{error_key}` | the printer's error numbers (the error notification) |
-| `{minutes}` | minutes left (the finishing-soon reminder) |
+| `{error_code}`, `{error_key}` | the printer's error numbers |
+| `{minutes}` | minutes left |
 
-Every one comes from the printer's own telemetry, read from the single frame that triggered the notification. There is no placeholder for a value the printer does not report -- filament *weight*, for one, which would take a density it never sends.
+**Not every notification can fill every one of them**, so each field lists the ones it accepts, and anything else is refused when you submit the page. The last two are the obvious cases -- only the error notification knows an error code, only the finishing-soon reminder knows how many minutes are left -- but the two that matter in practice are:
+
+- **Print finished** has no `{eta}`: the print is over, so there is no time remaining to report.
+- **Print stopped** has only `{device}`, `{filename}`, `{progress}`, `{nozzle}` and `{bed}`. A stop is not something the printer announces, and by the frame it becomes visible the progress, the job clock, the layer and the filament length have all been reset to zero. The file name and the percentage are the ones from the last moment the job was seen running; the rest are not offered rather than reported as zero.
+
+Every value comes from the printer's own telemetry, read from the single frame that triggered the notification. There is no placeholder for a value the printer does not report -- filament *weight*, for one, which would take a density it never sends.
 
 **Values that are not always there.** The printer reports no estimate in the first minute of a job, no layer count on some firmwares, and no filament length on a job that never started. A placeholder it has not reported renders as nothing, which on its own leaves `3DBenchy.gcode  left`. Wrap the optional part in **square brackets** and the whole bracketed section disappears while any placeholder inside it is unknown:
 

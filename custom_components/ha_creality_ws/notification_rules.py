@@ -25,7 +25,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Any
 
 from .const import (
@@ -228,15 +228,12 @@ def _fill(template: str | None, **values: str) -> str:
 # User text templates
 # --------------------------------------------------------------------------- #
 
-# Every placeholder a user template may use. The set is deliberately closed:
-# a name nothing can fill is a typo, and silently rendering it as empty text
-# would hide the typo behind a notification that merely reads oddly.
-#
-# All of them are filled from telemetry the printer actually streams. Nothing
-# here is inferred, converted against an assumed filament density, or carried
-# over from an earlier job -- a number a user reads off a notification has to be
-# a number the printer said.
-TEMPLATE_FIELDS = (
+# What a mid-print notification can say. Everything here is filled from
+# telemetry the printer actually streams: nothing is inferred, converted
+# against an assumed filament density, or carried over from an earlier job,
+# because a number a user reads off a notification has to be a number the
+# printer said.
+_FIELDS_WHILE_PRINTING = (
     "device",
     "filename",
     "progress",
@@ -248,10 +245,32 @@ TEMPLATE_FIELDS = (
     "nozzle",
     "bed",
     "state",
-    "error_code",
-    "error_key",
-    "minutes",
 )
+
+# Per notification, because they are composed at different moments and the
+# printer has different things to say at each. The sets are deliberately closed
+# and deliberately *not* all the same: a placeholder offered for a notification
+# that cannot fill it is worse than one that does not exist, because it renders
+# as nothing and looks like a bug in the template rather than a mistake in the
+# list. The options flow refuses a name that is not in the right set here, and
+# the same sets are what it lists under each field.
+TEMPLATE_FIELDS: dict[str, tuple[str, ...]] = {
+    "live": _FIELDS_WHILE_PRINTING,
+    # Its whole point is the number of minutes left.
+    "finishing_soon": _FIELDS_WHILE_PRINTING + ("minutes",),
+    "error": _FIELDS_WHILE_PRINTING + ("error_code", "error_key"),
+    "filament_runout": _FIELDS_WHILE_PRINTING,
+    # No `eta`: the print has finished, so the remaining time is zero and
+    # saying "0s left" in a completion notice is worse than not offering it.
+    "completed": tuple(f for f in _FIELDS_WHILE_PRINTING if f != "eta"),
+    # A stop is only visible once the printer has already reset the job: the
+    # progress, the job clock, the layer and the filament length are all back
+    # to zero by the frame that reveals it, and the state word is whatever the
+    # printer idles in. Only what survives is offered -- the file name and the
+    # progress from the last frame that showed the job running (see
+    # `JobEndWatch`), and the temperatures, which are still real.
+    "stopped": ("device", "filename", "progress", "nozzle", "bed"),
+}
 
 # `{name}` only, lowercase: the same spelling the shipped strings use, so a user
 # reading an example in the README writes the same thing. Anything else in the
@@ -273,18 +292,24 @@ _TEMPLATE_OPTIONAL = re.compile(r"\[([^\[\]]*)\]")
 _TEMPLATE_GAP = re.compile(r"[ \t]{2,}")
 
 
-def template_unknown_fields(template: Any) -> list[str]:
-    """Placeholder names in ``template`` that nothing can fill.
+def template_unknown_fields(
+    template: Any, allowed: Collection[str]
+) -> list[str]:
+    """Placeholder names in ``template`` that ``allowed`` cannot fill.
 
     The options flow refuses a template this returns anything for, which is the
     only moment a typo can be reported to the person who made it: a notification
     is composed on a WebSocket frame, where the sole recourse is the log.
+
+    ``allowed`` is per notification, so ``{minutes}`` is a real placeholder in
+    the finishing-soon reminder and a mistake in the live card -- which is
+    exactly what it would have been at run time, rendering as nothing.
     """
     if not isinstance(template, str):
         return []
     seen: list[str] = []
     for name in _TEMPLATE_TOKEN.findall(template):
-        if name not in TEMPLATE_FIELDS and name not in seen:
+        if name not in allowed and name not in seen:
             seen.append(name)
     return seen
 
@@ -301,7 +326,10 @@ def render_user_template(template: Any, values: Mapping[str, Any]) -> str:
     """
     if not isinstance(template, str) or not template.strip():
         return ""
-    if template_unknown_fields(template):
+    # Against the values on offer rather than a global list: the caller builds
+    # them from `TEMPLATE_FIELDS` for the notification being composed, so this
+    # rejects exactly what the options flow would have rejected.
+    if template_unknown_fields(template, values.keys()):
         return ""
 
     def _resolve(name: str) -> str:

@@ -10,8 +10,11 @@ objects, so a stubbed schema would make these assertions meaningless.
 
 import asyncio
 import importlib.util
+import json
+import re
 import sys
 import types
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -84,6 +87,23 @@ def _install_stubs():
 
     data_entry_flow = types.ModuleType("homeassistant.data_entry_flow")
     data_entry_flow.FlowResult = dict
+
+    class _Section:
+        """Home Assistant's `section`, close enough to introspect.
+
+        The real one keeps the inner schema on `.schema` and validates through
+        it, which is exactly what these tests read to find the fields a group
+        renders.
+        """
+
+        def __init__(self, schema, options=None):
+            self.schema = schema
+            self.options = options or {}
+
+        def __call__(self, value):
+            return self.schema(value)
+
+    data_entry_flow.section = _Section
     _stub("homeassistant.data_entry_flow", data_entry_flow)
 
     # selector.*Selector are only used to build the schema; identity is enough.
@@ -179,9 +199,40 @@ def _submit(handler, user_input):
 
 
 def _rendered_fields(result):
-    """The option keys the form asked for, as plain strings."""
+    """Every option key the form asked for, sections included.
+
+    Flat on purpose: which group a field is rendered in is a property of the
+    form, and a test that pinned it would fail every time one moved. The tests
+    that care about the grouping ask `_section_fields` instead.
+    """
     schema = result.get("data_schema")
-    return {str(getattr(k, "schema", k)) for k in schema.schema} if schema else set()
+    if not schema:
+        return set()
+    found = set()
+    for marker, value in schema.schema.items():
+        inner = getattr(value, "schema", None)
+        if inner is not None and hasattr(inner, "schema"):
+            found.update(str(getattr(k, "schema", k)) for k in inner.schema)
+        else:
+            found.add(str(getattr(marker, "schema", marker)))
+    return found
+
+
+def _section_fields(result, name):
+    """The option keys one collapsible group renders."""
+    for marker, value in result["data_schema"].schema.items():
+        if str(getattr(marker, "schema", marker)) != name:
+            continue
+        return {str(getattr(k, "schema", k)) for k in value.schema.schema}
+    raise AssertionError(f"no section {name!r} in {_rendered_fields(result)}")
+
+
+def _section(result, name):
+    """The section object itself, for its collapsed state."""
+    for marker, value in result["data_schema"].schema.items():
+        if str(getattr(marker, "schema", marker)) == name:
+            return value
+    raise AssertionError(f"no section {name!r}")
 
 
 @requires_voluptuous
@@ -323,7 +374,24 @@ def test_the_go2rtc_fields_are_offered_for_a_custom_rtsp_source():
 
 
 def _submit_notifications(handler, user_input):
-    return asyncio.run(handler.async_step_notifications(user_input))
+    """Submit the notifications page the way the frontend does: in sections.
+
+    Tests name their fields flat, because which group a field is rendered in is
+    a property of the form and not of the setting. The nesting is put back here
+    from the same map the form builds itself out of, so a submit in a test has
+    the shape a real one has.
+    """
+    from custom_components.ha_creality_ws.config_flow import _NOTIFY_SECTIONS
+
+    payload: dict = {}
+    for key, value in user_input.items():
+        for name, fields in _NOTIFY_SECTIONS.items():
+            if key in fields:
+                payload.setdefault(name, {})[key] = value
+                break
+        else:
+            payload[key] = value
+    return asyncio.run(handler.async_step_notifications(payload))
 
 
 def _render_notifications(handler):
@@ -331,14 +399,22 @@ def _render_notifications(handler):
 
 
 def _defaults(result):
-    """The default each rendered field was offered with."""
+    """The default each rendered field was offered with, sections included."""
     schema = result.get("data_schema")
     out = {}
-    for marker in schema.schema:
-        default = getattr(marker, "default", None)
-        out[str(getattr(marker, "schema", marker))] = (
-            default() if callable(default) else default
-        )
+
+    def _collect(mapping):
+        for marker, value in mapping.items():
+            inner = getattr(value, "schema", None)
+            if inner is not None and hasattr(inner, "schema"):
+                _collect(inner.schema)
+                continue
+            default = getattr(marker, "default", None)
+            out[str(getattr(marker, "schema", marker))] = (
+                default() if callable(default) else default
+            )
+
+    _collect(schema.schema)
     return out
 
 
@@ -546,13 +622,21 @@ def test_an_unchanged_host_is_not_written_back():
 
 
 @requires_voluptuous
-def test_done_closes_the_dialog_with_what_is_already_stored():
-    handler = _handler({CONF_NOTIFY_TARGETS: ["notify.mobile_app_pixel"]})
+def test_the_menu_holds_nothing_that_has_to_be_pressed_to_save():
+    """The point of saving on submit is that closing the dialog cannot lose
+    anything -- which a "Save and apply" item at the bottom of the menu flatly
+    contradicts, by looking like one more optional page."""
+    handler = _handler({})
+    handler.async_step_init = OptionsFlowHandler.async_step_init.__get__(handler)
+    handler.async_show_menu = lambda **kw: {"step": "menu", **kw}
 
-    result = asyncio.run(handler.async_step_done(None))
+    options = asyncio.run(handler.async_step_init(None))["menu_options"]
 
-    assert result["step"] == "created"
-    assert result["data"] == {CONF_NOTIFY_TARGETS: ["notify.mobile_app_pixel"]}
+    assert "notifications" in options
+    assert not {"save", "done", "finish", "apply"}.intersection(options)
+    # And no separate page for the notification text: it is a group on the
+    # notifications page.
+    assert "notification_text" not in options
 
 
 # --------------------------------------------------------------------------- #
@@ -560,8 +644,9 @@ def test_done_closes_the_dialog_with_what_is_already_stored():
 # --------------------------------------------------------------------------- #
 
 
-def _submit_text(handler, user_input):
-    return asyncio.run(handler.async_step_notification_text(user_input))
+# The custom-text fields live on the notifications page too, in their own
+# collapsible group -- there is no separate page for them any more.
+_submit_text = _submit_notifications
 
 
 @requires_voluptuous
@@ -573,7 +658,7 @@ def test_a_template_is_saved_and_offered_back():
 
     assert result["step"] == "menu"
     assert _updates(handler)["options"][CONF_NOTIFY_TEMPLATE_LIVE] == template
-    reopened = _defaults(_submit_text(handler, None))
+    reopened = _defaults(_render_notifications(handler))
     assert reopened[CONF_NOTIFY_TEMPLATE_LIVE] == template
 
 
@@ -637,10 +722,135 @@ def test_an_emptied_template_is_stored_as_empty_rather_than_none():
 
 
 @requires_voluptuous
-def test_the_step_offers_every_template_option():
+def test_the_text_group_offers_every_template_option():
     """A key in NOTIFY_TEMPLATE_OPTIONS with no field is text the coordinator
     reads and nobody can set."""
     from custom_components.ha_creality_ws.const import NOTIFY_TEMPLATE_OPTIONS
 
-    fields = _rendered_fields(_submit_text(_handler({}), None))
-    assert fields == set(NOTIFY_TEMPLATE_OPTIONS.values())
+    rendered = _render_notifications(_handler({}))
+    assert _section_fields(rendered, "text") == set(NOTIFY_TEMPLATE_OPTIONS.values())
+
+
+@requires_voluptuous
+def test_every_notification_setting_is_rendered_exactly_once():
+    """The grouping is the form's business, but a field that fell out of every
+    group -- or landed in two -- is a setting the user can no longer reach, or
+    one that submits twice with different values."""
+    from custom_components.ha_creality_ws.config_flow import _NOTIFY_SECTIONS
+
+    rendered = _render_notifications(_handler({}))
+    grouped = [key for fields in _NOTIFY_SECTIONS.values() for key in fields]
+
+    assert len(grouped) == len(set(grouped)), "a setting is in two groups"
+    assert _rendered_fields(rendered) == set(grouped) | {CONF_NOTIFY_TARGETS}
+    for name, fields in _NOTIFY_SECTIONS.items():
+        assert _section_fields(rendered, name) == set(fields), name
+
+
+@requires_voluptuous
+def test_an_untouched_group_opens_folded_away():
+    """The point of the grouping: a page that is short until you need it."""
+    rendered = _render_notifications(_handler({}))
+
+    # What you came for, always open.
+    assert _section(rendered, "events").options["collapsed"] is False
+    assert _section(rendered, "text").options["collapsed"] is True
+
+
+@requires_voluptuous
+def test_a_group_the_user_has_changed_opens_by_itself():
+    """Custom text hidden behind a disclosure that looks untouched is text the
+    user cannot find again."""
+    rendered = _render_notifications(
+        _handler({CONF_NOTIFY_TEMPLATE_LIVE: "{filename}"})
+    )
+    assert _section(rendered, "text").options["collapsed"] is False
+
+    # And so does one holding an error, whatever its stored values look like.
+    handler = _handler({})
+    refused = _submit_text(handler, {CONF_NOTIFY_TEMPLATE_LIVE: "{nope}"})
+    assert _section(refused, "text").options["collapsed"] is False
+
+
+@requires_voluptuous
+def test_every_placeholder_the_strings_use_is_supplied():
+    """The frontend renders a step's text through ICU MessageFormat, so a
+    `{name}` it was given no value for does not render as itself: it replaces
+    the whole string with "Translation error". Six per-notification placeholder
+    lists are a lot of names to keep in step by hand, and the field help is the
+    one thing on this page nobody would think to re-read after a rename.
+    """
+    strings = json.loads(
+        (
+            Path(__file__).resolve().parents[2]
+            / "custom_components/ha_creality_ws/strings.json"
+        ).read_text(encoding="utf-8")
+    )["options"]["step"]["notifications"]
+
+    used = set()
+
+    def _scan(value):
+        if isinstance(value, dict):
+            for item in value.values():
+                _scan(item)
+        elif isinstance(value, str):
+            used.update(re.findall(r"\{([a-z_]+)\}", value))
+
+    _scan(strings)
+    assert used, "no placeholders found -- this guard would be vacuous"
+
+    supplied = set(_render_notifications(_handler({}))["description_placeholders"])
+    assert used <= supplied, f"nothing supplies {sorted(used - supplied)}"
+
+
+@requires_voluptuous
+def test_a_submit_missing_a_whole_group_leaves_it_alone():
+    """The groups are optional in the schema, so a submit that arrives without
+    one must keep what is stored rather than reset it to the form's defaults --
+    the same rule the camera step learned the hard way about go2rtc."""
+    handler = _handler({
+        CONF_NOTIFY_TEMPLATE_LIVE: "{filename}",
+        CONF_NOTIFY_TARGETS: ["notify.mobile_app_pixel"],
+    })
+
+    asyncio.run(handler.async_step_notifications({
+        "events": {CONF_NOTIFY_LIVE: True},
+    }))
+
+    stored = _updates(handler)["options"]
+    assert stored[CONF_NOTIFY_LIVE] is True
+    assert stored[CONF_NOTIFY_TEMPLATE_LIVE] == "{filename}"
+
+
+@requires_voluptuous
+def test_the_settings_are_stored_flat_whatever_group_they_are_rendered_in():
+    """The grouping is a property of the form. Writing it into the options would
+    move a user's settings the next time a field moved between groups."""
+    handler = _handler({})
+
+    _submit_notifications(handler, {
+        CONF_NOTIFY_LIVE: True,
+        CONF_NOTIFY_TAP_PATH: "/lovelace/printer",
+        CONF_NOTIFY_TEMPLATE_LIVE: "{filename}",
+    })
+
+    stored = _updates(handler)["options"]
+    assert not {"events", "extras", "text"}.intersection(stored)
+    assert stored[CONF_NOTIFY_LIVE] is True
+    assert stored[CONF_NOTIFY_TAP_PATH] == "/lovelace/printer"
+    assert stored[CONF_NOTIFY_TEMPLATE_LIVE] == "{filename}"
+
+
+@requires_voluptuous
+def test_a_placeholder_is_only_accepted_where_it_can_be_filled():
+    """`{minutes}` is the point of the finishing-soon reminder and is nothing at
+    all on a live card, where it would have rendered as empty text."""
+    from custom_components.ha_creality_ws.const import CONF_NOTIFY_TEMPLATE_SOON
+
+    handler = _handler({})
+    refused = _submit_text(handler, {CONF_NOTIFY_TEMPLATE_LIVE: "{minutes} left"})
+    assert refused["errors"] == {CONF_NOTIFY_TEMPLATE_LIVE: "unknown_placeholder"}
+
+    handler = _handler({})
+    accepted = _submit_text(handler, {CONF_NOTIFY_TEMPLATE_SOON: "{minutes} left"})
+    assert accepted["step"] == "menu"
