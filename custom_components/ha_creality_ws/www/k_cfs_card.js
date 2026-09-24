@@ -261,7 +261,7 @@ const CFS_TRANSLATIONS = {
     toast_colour_invalid: "Color must be six hex digits, for example #06c84f",
     toast_type_required: "Material type is required",
     toast_external_not_supported: "This printer does not report a box id for the external spool, so it cannot be edited",
-    warn_box_id_guessed: "The target box was inferred from the card layout; check it matches the printer before saving",
+    warn_box_id_guessed: "The target box or slot was inferred from the card layout; check both match the printer before saving",
     toast_no_device: "Could not identify the printer for this card. Check the entities in the card configuration.",
     toast_multiple_devices: "This card mixes entities from more than one printer, so material editing is disabled.",
     toast_printer_busy: "Cannot edit material while the printer is busy",
