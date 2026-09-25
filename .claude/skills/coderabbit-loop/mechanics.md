@@ -92,10 +92,14 @@ timestamp, so anchor on the retrigger comment's own id:
 # ack has landed after the `full review` comment more than once.
 url=$(gh pr comment "$pr" --body '@coderabbitai full review')
 last_comment_id=${url##*-}
-# A malformed URL would build the invalid jq filter `.id > ` -- and the
-# `|| return 0` in the helper then reports "not refused" for every iteration.
-# 0 is below every real id, so it means "everything".
-[[ $last_comment_id =~ ^[0-9]+$ ]] || last_comment_id=0
+# Fail rather than fall back. A malformed URL would build the invalid jq
+# filter `.id > `, but 0 is not the safe default it looks like: it is below
+# every real id, so it means "every CodeRabbit comment on the PR", including
+# the `rate limited` acks of earlier rounds. The scan would then report a
+# refusal on its first iteration of every round and the poller would exit
+# RATE-LIMITED for a review that had actually started.
+[[ $last_comment_id =~ ^[0-9]+$ ]] || {
+  echo "cannot read the retrigger comment id from: $url" >&2; exit 1; }
 ```
 
 Wait in the background (single notification on exit, ~9 min cap, re-arm if it times out).
@@ -108,6 +112,13 @@ Do not use `Monitor` for this, and do not foreground-sleep.
 # round that has not run, and the harvest returns the previous round's threads.
 # Capture it with `date -u +%FT%TZ` immediately before posting the retrigger.
 trigger="$1"
+# Passed in as well, for the same reason the trigger is: the anchor decides
+# which acks the refusal scan may look at. Left unset -- which is what a
+# backgrounded copy of this snippet gets, since nothing else supplies it --
+# the scan below would fall back to "everything" and re-read old refusals.
+last_comment_id="$2"
+[[ $last_comment_id =~ ^[0-9]+$ ]] || {
+  echo "usage: poller <trigger> <retrigger-comment-id>" >&2; exit 1; }
 summary_id=<the walkthrough issue comment id for this PR>
 sleep 120                        # covers the ack race
 
@@ -132,7 +143,9 @@ check_rate_limit() {
   # Keyed on comment ids, not timestamps. `date -u +%FT%TZ` has one-second
   # precision, so an ack posted in the same second as the trigger compares
   # equal and a strict `>` misses it. Ids are monotonic per repo.
-  [[ $last_comment_id =~ ^[0-9]+$ ]] || last_comment_id=0
+  # 2, not a fallback to 0: "I cannot tell" must not read as "scan everything",
+  # which would match earlier rounds' refusal acks.
+  [[ $last_comment_id =~ ^[0-9]+$ ]] || return 2
   # *Every* new bot comment, not just the lowest. A round that needs
   # `@coderabbitai resume` as well as `full review` gets **two** acks, and the
   # resume one has been observed arriving 13 minutes late -- after the full

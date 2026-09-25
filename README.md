@@ -730,10 +730,11 @@ go2rtc, `8554` for a stand-alone one. If your go2rtc listens elsewhere, set
   Remove + re-add the integration or add the resource manually under **Dashboards → Resources** pointing to `/ha_creality_ws/k_printer_card.js`.
 * **WebRTC camera not working**
   If K2 family cameras show fallback images instead of live video:
-  1. Check the bundled go2rtc: it ships with every supported core. Its API answers on port `11984` **on the Home Assistant host itself**, so run this check there -- from your laptop, `localhost` is your laptop. Confirm the port responds and that your printer's stream is listed under `/api/streams`. (If you point the integration at a stand-alone go2rtc instead, it must be **>= 1.9.11**.)
-  2. Ensure the printer's WebRTC signaling endpoint is accessible from go2rtc.
-  3. Verify the printer supports WebRTC (K2 family only).
-  4. Check Home Assistant logs for WebRTC negotiation errors.
+  1. Check go2rtc is there at all. On OS, Supervised and Container installs the bundled binary ships with every supported core (2026.7+); a Core install has none, so go2rtc is whatever you pointed Home Assistant or the integration at. (A stand-alone go2rtc must be **>= 1.9.11**.)
+  2. To query it, note that **Home Assistant's managed go2rtc serves no HTTP API by default** -- it talks to it over a unix socket and only opens port `11984` when you set `go2rtc: debug_ui: true` in `configuration.yaml`, which also requires a `username` and `password`. So a `curl` of `11984` failing is the expected result, not a fault. With `debug_ui` on, the API answers **on the Home Assistant host itself** -- from your laptop, `localhost` is your laptop -- and your printer's stream should be listed under `/api/streams`. Turn it back off when you are done. A stand-alone go2rtc you run yourself has its API open already.
+  3. Ensure the printer's WebRTC signaling endpoint is accessible from go2rtc.
+  4. Verify the printer supports WebRTC (K2 family only).
+  5. Check Home Assistant logs for WebRTC negotiation errors.
 * **K2 camera shows no image**
   - Check that the printer's WebRTC endpoint is accessible
   - Verify the printer model is correctly detected (check logs for "detected K2 family printer")

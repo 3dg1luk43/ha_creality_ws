@@ -19,9 +19,13 @@ if "go2rtc_client" not in sys.modules:
         Identical to the stub in `test_camera_stream_config.py` on purpose.
         Both suites install this only when `go2rtc_client` is absent, so
         whichever imports first decides which class `camera.py` binds for the
-        whole session -- and while this one was a bare MagicMock, running that
-        suite after this one turned its handled-error tests into TypeErrors.
-        Test order or a single-file selection was enough to flip it.
+        whole session, and that suite asserts the two stub it the same way.
+
+        While this one was a bare MagicMock that invariant was violated, but
+        no failure was ever reproduced from it: the vulnerable order still
+        passed, because the handled-error tests patch `camera.Go2RtcClientError`
+        by string target rather than catching the bound class. A latent
+        inconsistency the sibling suite checks for, not an observed bug.
         """
 
     exceptions_mod.Go2RtcClientError = Go2RtcClientError
