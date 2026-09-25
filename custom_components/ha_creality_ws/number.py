@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+from homeassistant.core import callback  # type: ignore[import]
 from homeassistant.components.number import NumberEntity, NumberMode, NumberDeviceClass
 
 from homeassistant.const import (  # type: ignore[import]
@@ -90,6 +91,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
         if platform_live:
             async_add_entities(new_ents)
 
+    # The dispatcher runs a plain sync target in an executor thread, and this
+    # calls `hass.loop.call_soon`, which is not thread-safe. Cheap enough to
+    # belong on the loop.
+    @callback
     def _on_new_entities() -> None:
         """Late discovery: the printer has just reported a gating field."""
         new_ents = _chamber_entities()

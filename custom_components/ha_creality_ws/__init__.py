@@ -13,7 +13,7 @@ from typing import Any
 
 
 from homeassistant.config_entries import ConfigEntry, OperationNotAllowed # type: ignore[import]
-from homeassistant.core import HomeAssistant, ServiceCall # type: ignore[import]
+from homeassistant.core import HomeAssistant, ServiceCall, callback # type: ignore[import]
 from homeassistant.const import __version__ as HA_VERSION  # type: ignore[import]
 from homeassistant.util import dt as dt_util  # type: ignore[import]
 from homeassistant.exceptions import ConfigEntryNotReady  # type: ignore[import]
@@ -437,6 +437,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     # Periodic state checker
+    # Home Assistant runs a plain sync job in an executor thread. This one
+    # reaches `hass.async_create_task` and `hass.loop.time()` through
+    # `notifier_tick`, which are loop-only APIs. It does no blocking work, so
+    # the loop is where it belongs.
+    @callback
     def _interval_check(_now) -> None:
         coord.check_stale()
         # Every live-card transition is otherwise driven by an incoming frame,

@@ -180,6 +180,13 @@ def _run_sensor_setup(coord, entry_data):
     )
     entry = _EntryStub(entry_data)
     hass.data["ha_creality_ws"][entry.entry_id] = coord
+    # The cache the gate actually reads. `sensor.py` takes it from
+    # `coord.config_entry.data`, not from the entry Home Assistant hands the
+    # platform, so leaving it on the stub alone meant `_cached_or_live` saw an
+    # empty cache and fell through to the live values -- the test then passed
+    # whether or not the per-field fallback existed.
+    if getattr(coord, "config_entry", None) is not None:
+        coord.config_entry.data = dict(entry_data)
 
     import custom_components.ha_creality_ws.sensor as sensor_mod
 

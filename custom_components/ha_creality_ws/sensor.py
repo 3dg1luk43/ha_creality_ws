@@ -13,6 +13,7 @@ from .utils import (
     safe_float as _safe_float,
 )
 
+from homeassistant.core import callback  # type: ignore[import]
 from homeassistant.components.sensor import (  # type: ignore[import]
     SensorEntity,
     SensorDeviceClass,
@@ -942,6 +943,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
         return out
 
     # Dynamic CFS entity handler
+    # The dispatcher runs a plain sync target in an executor thread, and this
+    # calls `hass.loop.call_soon`, which is not thread-safe. Cheap enough to
+    # belong on the loop.
+    @callback
     def _on_new_entities() -> None:
         """Handle signal for new entities (e.g. late CFS discovery)."""
         _LOGGER.debug("Dynamic entity signal received, checking for new CFS entities...")

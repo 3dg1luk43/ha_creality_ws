@@ -185,9 +185,14 @@ while [ $SECONDS -lt $end ]; do
   # `--paginate` runs the --jq filter per *page*, so this emits one count per
   # page: a bare `!= "0"` test on the raw value compares against "0\n0" and goes
   # true on two empty pages. Sum them.
-  realrev=$(gh api "repos/$owner/$repo/pulls/$pr/reviews" --paginate --jq \
+  # Captured before the sum: a failed request makes `awk` print 0 all the
+  # same, so piping straight into it turns an API error into "no review yet"
+  # and the poller waits out its window on a review that has already landed.
+  reviews=$(gh api "repos/$owner/$repo/pulls/$pr/reviews" --paginate --jq \
     "[.[] | select(.user.login as \$l | $_CR_LOGINS | index(\$l)) | select(.submitted_at > \"$trigger\") | select(.body != \"\")] | length" \
-    | awk '{s+=$1} END{print s+0}')
+    ) || { sleep 30; continue; }
+  # One count per page, because `--paginate --jq` runs the filter per page.
+  realrev=$(awk '{s+=$1} END{print s+0}' <<<"$reviews")
   if [ "$busy" = "0" ] && [ "$realrev" != "0" ]; then
     echo "REVIEW COMPLETE realrev=$realrev"; exit 0
   fi

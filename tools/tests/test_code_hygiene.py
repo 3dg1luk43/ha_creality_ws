@@ -110,3 +110,32 @@ def test_no_em_dashes_anywhere():
                 )
 
     assert not offenders, "em dashes found:\n" + "\n".join(offenders)
+
+
+# --------------------------------------------------------------------------- #
+# Home Assistant job callables
+# --------------------------------------------------------------------------- #
+
+
+def test_sync_handlers_given_to_home_assistant_are_callbacks():
+    """A plain sync function handed to `async_track_time_interval` or
+    `async_dispatcher_connect` is run as a Home Assistant job, which means an
+    executor thread. All three of these reach loop-only APIs from there --
+    `hass.loop.call_soon` is not even thread-safe -- and none of them blocks,
+    so `@callback` is both necessary and safe. Asserted on the source because
+    the decorator is trivial to drop while moving code around.
+    """
+    import re as _re
+
+    expected = {
+        "custom_components/ha_creality_ws/__init__.py": "_interval_check",
+        "custom_components/ha_creality_ws/sensor.py": "_on_new_entities",
+        "custom_components/ha_creality_ws/number.py": "_on_new_entities",
+    }
+    for rel, name in expected.items():
+        body = (ROOT / rel).read_text(encoding="utf-8")
+        pattern = _re.compile(
+            r"@callback\s*\n\s*def " + _re.escape(name) + r"\b"
+        )
+        assert pattern.search(body), f"{rel}: {name} must be decorated with @callback"
+

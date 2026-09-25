@@ -98,7 +98,7 @@ If auto-detection doesn't choose your preferred stream, you can force it under t
   - `mjpeg` - Force direct MJPEG stream
   - `webrtc` - Force WebRTC streaming
 
-Native WebRTC works out of the box: the bundled go2rtc in every supported core (2026.7+) is new enough for Creality's streams. The go2rtc host/port fields in the options exist for pointing the integration at a stand-alone go2rtc instead, and for the RTSP port its stream pipeline uses.
+Native WebRTC works out of the box on the installation types that ship go2rtc -- Home Assistant OS, Supervised and Container -- where the bundled binary in every supported core (2026.7+) is new enough for Creality's streams. **On a Home Assistant Core install there is no bundled binary**, so Home Assistant only manages go2rtc if you give it one (`go2rtc: url:` in `configuration.yaml`); until then use the go2rtc host/port fields in the options to point the integration at your own. Those fields also exist for pointing at a stand-alone go2rtc on any install, and for the RTSP port its stream pipeline uses.
 
 > **If you point these at a go2rtc on another machine,** be aware that the RTSP hop Home Assistant uses to pull the stream is plain `rtsp://` -- go2rtc has no RTSPS output, so that traffic is unencrypted on your network. Left at the default it is loopback only (`127.0.0.1`) and never leaves the host. Only send it across a network you trust, or put it through a TLS-terminating proxy or tunnel.
 
@@ -111,7 +111,7 @@ The integration automatically installs the following Python packages:
 **Camera Dependencies:**
 - **K1 family & Ender 3 V3 family cameras**: No additional dependencies required (MJPEG streaming)
 - **K2 family cameras (WebRTC):**
-  - Native WebRTC is available on every supported core, since the 2026.7 minimum is already past the 2025.11 release that bundled a Creality-compatible go2rtc.
+  - Native WebRTC is available on every supported core that ships go2rtc (OS, Supervised, Container), since the 2026.7 minimum is already past the 2025.11 release that bundled a Creality-compatible go2rtc. A Core install has no bundled binary and needs one configured, as above.
   - Pointing the integration at a stand-alone **go2rtc >= 1.9.11** is still possible via the Options dialog (host/port), but it is no longer required.
 
 ---
