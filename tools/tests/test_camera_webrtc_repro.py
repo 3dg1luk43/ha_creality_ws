@@ -19,7 +19,8 @@ if "go2rtc_client" not in sys.modules:
         Identical to the stub in `test_camera_stream_config.py` on purpose.
         Both suites install this only when `go2rtc_client` is absent, so
         whichever imports first decides which class `camera.py` binds for the
-        whole session, and that suite asserts the two stub it the same way.
+        whole session. `test_camera_stream_config.py` relies on both suites
+        stubbing it the same way, and asserts as much.
 
         While this one was a bare MagicMock that invariant was violated, but
         no failure was ever reproduced from it: the vulnerable order still

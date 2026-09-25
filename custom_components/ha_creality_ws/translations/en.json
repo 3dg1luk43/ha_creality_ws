@@ -112,7 +112,7 @@
             },
             "data_description": {
               "notify_live": "One notification for the whole print that updates in place, with a progress bar and a countdown that ticks on the phone.",
-              "notify_completed": "Covers both endings: a print that finished, and one that was stopped -- from the printer, the Creality app or Home Assistant.",
+              "notify_completed": "Covers both endings: a print that finished, and one that was stopped, whether from the printer, the Creality app or Home Assistant.",
               "notify_error": "A printer error, or a spool that has run out.",
               "notify_minutes_to_end": "A reminder to go and watch the last layers, on its own so the live card cannot replace it."
             }

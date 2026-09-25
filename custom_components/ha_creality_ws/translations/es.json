@@ -112,7 +112,7 @@
             },
             "data_description": {
               "notify_live": "Una sola notificación para toda la impresión que se actualiza en su sitio, con una barra de progreso y una cuenta atrás que avanza en el teléfono.",
-              "notify_completed": "Cubre los dos finales: una impresión que ha terminado y otra que se ha detenido -- desde la impresora, la aplicación de Creality o Home Assistant.",
+              "notify_completed": "Cubre los dos finales: una impresión que ha terminado y otra que se ha detenido, ya sea desde la impresora, la aplicación de Creality o Home Assistant.",
               "notify_error": "Un error de la impresora o una bobina que se ha agotado.",
               "notify_minutes_to_end": "Un aviso para ir a ver las últimas capas, por separado para que la tarjeta en vivo no pueda sustituirlo."
             }
