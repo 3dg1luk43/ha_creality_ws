@@ -319,7 +319,7 @@
         },
         "color": {
           "name": "Color",
-          "description": "Color en seis dígitos hexadecimales, por ejemplo #06c84f. Las bobinas multicolor no se pueden escribir; en ese caso omite este campo en lugar de enviarlo vacío."
+          "description": "Color en seis dígitos hexadecimales, por ejemplo #06c84f. Si la bobina es multicolor, omite este campo en lugar de enviarlo vacío; los demás campos sí se escriben."
         },
         "min_temp": {
           "name": "Temperatura mínima",

@@ -319,7 +319,7 @@
         },
         "color": {
           "name": "Color",
-          "description": "Color as six hex digits, for example #06c84f. Multi-color spools cannot be written, so leave this out for one rather than sending an empty value."
+          "description": "Color as six hex digits, for example #06c84f. For a multi-color spool, leave this field out rather than sending an empty value; the other fields still write."
         },
         "min_temp": {
           "name": "Minimum Temperature",
