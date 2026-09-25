@@ -291,7 +291,7 @@
     },
     "set_cfs_material": {
       "name": "Set CFS Material",
-      "description": "Write filament settings to one CFS slot. Only the fields you supply are changed; anything left empty keeps the value the printer already has.",
+      "description": "Write filament settings to one CFS slot. Only the fields you supply are changed; leave a field out to keep the value the printer already has. Material type is required and cannot be blank, and a color, if you give one, must be six hex digits.",
       "fields": {
         "device_id": {
           "name": "Device",
@@ -319,7 +319,7 @@
         },
         "color": {
           "name": "Color",
-          "description": "Color as six hex digits, for example #06c84f. Multi-color spools cannot be written and must be left empty."
+          "description": "Color as six hex digits, for example #06c84f. Multi-color spools cannot be written, so leave this out for one rather than sending an empty value."
         },
         "min_temp": {
           "name": "Minimum Temperature",

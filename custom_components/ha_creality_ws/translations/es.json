@@ -291,7 +291,7 @@
     },
     "set_cfs_material": {
       "name": "Establecer material CFS",
-      "description": "Escribe los ajustes de filamento en una ranura del CFS. Solo se cambian los campos que indiques; lo que dejes vacío conserva el valor que ya tiene la impresora.",
+      "description": "Escribe los ajustes de filamento en una ranura del CFS. Solo se cambian los campos que indiques; omite un campo para conservar el valor que ya tiene la impresora. El tipo de material es obligatorio y no puede ir vacío, y el color, si lo indicas, debe tener seis dígitos hexadecimales.",
       "fields": {
         "device_id": {
           "name": "Dispositivo",
@@ -319,7 +319,7 @@
         },
         "color": {
           "name": "Color",
-          "description": "Color en seis dígitos hexadecimales, por ejemplo #06c84f. Las bobinas multicolor no se pueden escribir y deben dejarse vacías."
+          "description": "Color en seis dígitos hexadecimales, por ejemplo #06c84f. Las bobinas multicolor no se pueden escribir; en ese caso omite este campo en lugar de enviarlo vacío."
         },
         "min_temp": {
           "name": "Temperatura mínima",
