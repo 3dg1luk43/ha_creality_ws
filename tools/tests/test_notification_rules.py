@@ -170,6 +170,10 @@ def test_display_filename(raw, expected):
         (float("inf"), ""),
         (float("-inf"), ""),
         (float("nan"), ""),
+        # Not a non-finite float but an int too large to become one:
+        # `float(10**400)` raises OverflowError in the conversion itself, so
+        # the finiteness check never sees a value.
+        (10 ** 400, ""),
     ],
 )
 def test_format_duration(secs, expected):
@@ -574,6 +578,7 @@ def test_compute_when_is_wall_clock():
         # ValueError and infinity OverflowError straight out of the call. NaN
         # also slips past `remaining <= 0`, every comparison with it being false.
         "inf", "nan", float("inf"), float("-inf"), float("nan"),
+        10 ** 400,
     ],
 )
 def test_compute_when_declines_useless_values(left):

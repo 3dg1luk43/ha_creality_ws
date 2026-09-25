@@ -182,7 +182,10 @@ def format_duration(secs: Any, templates: Mapping[str, str]) -> str:
     """
     try:
         parsed = float(secs)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError is the conversion itself failing, not the value being
+        # infinite: `float(10**400)` raises "int too large to convert to
+        # float", so the finiteness check below never gets a value to test.
         return ""
     # `float("inf")` succeeds and `int(inf)` then raises OverflowError, which
     # the clause above does not catch. This runs on the WebSocket frame path,
@@ -870,7 +873,9 @@ def compute_when(now_epoch: float, seconds_left: Any) -> int | None:
     """
     try:
         remaining = float(seconds_left)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # As in `format_duration`: an oversized int fails in the conversion,
+        # before there is anything for `math.isfinite` to reject.
         return None
     # The conversion below sits outside any try, so a non-finite value raises
     # straight out: NaN as ValueError, infinity as OverflowError. NaN also

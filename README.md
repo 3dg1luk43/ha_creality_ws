@@ -695,7 +695,7 @@ go2rtc, `8554` for a stand-alone one. If your go2rtc listens elsewhere, set
   Remove + re-add the integration or add the resource manually under **Dashboards → Resources** pointing to `/ha_creality_ws/k_printer_card.js`.
 * **WebRTC camera not working**
   If K2 family cameras show fallback images instead of live video:
-  1. Check the bundled go2rtc: it ships with every supported core, so verify `http://localhost:11984` is reachable and that streams are present under `/api/streams`. (If you point the integration at an external go2rtc instead, it must be **>= 1.9.11**.)
+  1. Check the bundled go2rtc: it ships with every supported core. Its API answers on port `11984` **on the Home Assistant host itself**, so run this check there -- from your laptop, `localhost` is your laptop. Confirm the port responds and that your printer's stream is listed under `/api/streams`. (If you point the integration at a stand-alone go2rtc instead, it must be **>= 1.9.11**.)
   2. Ensure the printer's WebRTC signaling endpoint is accessible from go2rtc.
   3. Verify the printer supports WebRTC (K2 family only).
   4. Check Home Assistant logs for WebRTC negotiation errors.
