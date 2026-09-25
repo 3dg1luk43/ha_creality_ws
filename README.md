@@ -21,7 +21,8 @@ This custom [Home Assistant](https://www.home-assistant.io/) integration provide
 * **Controls:** pause, resume, stop, light toggle, fan speeds (model / case / side), temperature targets.
 * **Camera:** auto-detects stream type by model (MJPEG or WebRTC).
 * **Lovelace card**: dependency-free, uses HA fonts, progress ring, contextual chips, telemetry pills.
-* **Style Editor**: Built-in theme customization with color picker for all card elements.
+* **Style Editor**: Built-in theme customization for every card element, with a device picker
+  that wires up all the entities in one go.
 * **Live print notifications** to any number of phones: a countdown timer and progress bar on the iOS Lock Screen and the Android status bar, the G-code preview as the icon, a camera snapshot when a print ends, and optional Pause/Resume/Stop buttons. Every message can be [written in your own words](#custom-notification-text). See [Notifications](#notifications).
 
 ---
@@ -147,7 +148,10 @@ Color picker
 ### Resource registration
 
 * **Storage mode (default)**
-  The integration registers the resource automatically with cache-busting:
+  The integration registers the resource automatically, with a `?v=` token
+  derived from the card file's own contents and the release version. It changes
+  when a card changes and stays put otherwise, so an update always reaches the
+  browser and an ordinary restart does not throw away a cached copy:
 
   ```
   /ha_creality_ws/k_printer_card.js   (type: module)
@@ -181,20 +185,20 @@ lovelace:
 
 Restart HA after changing this.
 
-### **Hard refresh is required after first install/update**
+### After an update
 
-Lovelace caches frontend resources aggressively. After installing/updating the card or integration:
+Restart Home Assistant. That is what re-registers the resource with its new
+`?v=` token, and the browser fetches the new card on the next dashboard load.
+
+If you still see the old card, it is cached under a URL that has not changed:
 
 * Desktop: **Ctrl+F5** (Windows/Linux), **⌘+Shift+R** (macOS)
-* Mobile app: **App Settings → Reload resources** or force close + reopen.
+* Mobile app: **App Settings → Reload resources**, or force close and reopen.
 
-If you still see stale UI, append a cache-buster query once:
-
-```
-/ha_creality_ws/k_printer_card.js?v=1
-```
-
-Then remove the `?v=` the next time.
+Your card configuration is carried over automatically. Colors saved by earlier
+versions of the Style Editor are normalized on load, and anything the color
+picker cannot represent -- a `var(--your-color)` or a named color written by
+hand in YAML -- is left exactly as you wrote it.
 
 ---
 
@@ -337,6 +341,16 @@ This is the supported way to get notification text in a language other than your
 ## Card Usage
 
 The card's element tag is **`custom:k-printer-card`**.
+
+The quickest way to add one is the visual editor: pick your printer under
+**Printer device** on the **Entities** tab and every field below it fills in
+from that device. Only fields you left empty are filled, so entities you chose
+yourself are kept; **Fill all fields from device** replaces the lot. The power
+switch is the one thing never filled in, since it is your own smart plug rather
+than something the integration provides.
+
+Renaming an entity later does not break the picker: it matches on the role Home
+Assistant records for each entity, not on the entity id.
 
 Add via UI (Manual card) or YAML:
 
@@ -590,48 +604,69 @@ The card includes a built-in **Style Editor** that allows you to customize the a
 
 ### Features
 
-* **Interactive Color Picker**: Click on any element to open a color picker
+* **Home Assistant color pickers**: The same control the rest of the UI uses
+* **Opacity**: Every background has its own opacity slider
 * **Live Preview**: See changes applied immediately to the card
 * **Theme Persistence**: Customizations are saved and persist across integration updates
-* **Auto Mode**: Status and telemetry elements can inherit Home Assistant theme colors
+* **Automatic colors**: An Automatic switch per field, on by default, that lets the card work the color out for itself
 * **Reset to Defaults**: One-click reset to restore original styling
 
 ### Customizable Elements
 
-#### Button Colors
-- **Pause Button**: Background and icon colors
-- **Resume Button**: Background and icon colors  
-- **Stop Button**: Background and icon colors
-- **Light Button**: Background and icon colors (separate for on/off states)
-  - Light On Background & Icon
-  - Light Off Background & Icon
+#### Action Button Colors
+- **Pause Button**: Background (with opacity) and icon color
+- **Resume Button**: Background (with opacity) and icon color
+- **Stop Button**: Background (with opacity) and icon color
+
+#### Toggle Button Colors
+
+These buttons have an on and an off state, and each gets its own pair:
+
+- **Light Button**: Background and icon, on and off
+- **Power Button**: Background and icon, on and off
+- **Custom Button**: Background and icon, on and off
 
 #### Status Elements
-- **Status Icon**: Color (auto mode inherits theme colors)
-- **Progress Ring**: Color (auto mode inherits theme colors)
-- **Status Background**: Background color (auto mode uses card background)
+- **Status Icon**: Color, automatic by default
+- **Progress Ring**: Color, automatic by default
+- **Status Background**: Background color and opacity, automatic by default
 
 #### Telemetry Elements
-- **Telemetry Icons**: Color (auto mode inherits secondary text color)
-- **Telemetry Text**: Color (auto mode inherits primary text color)
+- **Telemetry Icons**: Color, automatic by default
+- **Telemetry Text**: Color, automatic by default
 
 ### Usage
 
 1. **Open Card Editor**: Click the card's menu (⋮) → **Edit**
 2. **Switch to Theme Tab**: Click the **Theme** tab in the editor
-3. **Customize Colors**: 
-   - Click on any element to open its color picker
-   - Use the color preview square to open the native color picker
-   - Type hex codes directly (e.g., `#ff0000`)
-   - Type `auto` to inherit Home Assistant theme colors
-4. **Save Changes**: Click **Save** on the color picker, then **Save** on the card
-5. **Reset**: Use the **Reset to Defaults** button to restore original styling
+3. **Customize Colors**:
+   - Click a color swatch to open Home Assistant's color picker
+   - Drag the opacity slider next to a background to make it translucent
+   - For the fields that have one, turn **Automatic** off to reveal a color
+     picker, and back on to hand the choice back to the card
+4. **Reset**: Use the **Reset to Defaults** button to restore original styling
 
-### Color Formats
+Changes apply as you make them; there is no separate save step inside the theme
+tab.
 
-- **Hex Colors**: Use standard hex format (e.g., `#ff0000`, `#00ff00`)
-- **Auto Mode**: Type `auto` to inherit Home Assistant theme colors
-- **Theme Integration**: Auto mode automatically adapts to light/dark themes
+### Automatic Colors
+
+Five fields are automatic unless you set them, and "automatic" means two
+different things depending on the field:
+
+| Field | What automatic does |
+| --- | --- |
+| Status Icon | Follows the print state: orange while paused, red on error, green when idle or finished |
+| Progress Ring | Follows the print state, matching the status icon |
+| Status Background | Blends into the card background |
+| Telemetry Icons | Uses the Home Assistant theme's secondary text color |
+| Telemetry Text | Uses the Home Assistant theme's primary text color |
+
+The first two follow your printer, so they change while a job runs. The last
+three follow your Home Assistant theme, so they adapt to light and dark mode on
+their own. Each carries an **Automatic** switch that says which it is; turning
+it off reveals a color picker, and turning it back on discards your color and
+returns the field to the card.
 
 ### Persistence
 

@@ -1,5 +1,6 @@
+import hashlib
+import json
 import logging
-import time
 from pathlib import Path
 from homeassistant.components.http import StaticPathConfig  # type: ignore[import]
 from homeassistant.core import HomeAssistant
@@ -17,8 +18,41 @@ CARDS = [PRINTER_CARD_NAME, CFS_CARD_NAME]
 ASSETS = ["cfs_box.webp"]
 INTEGRATION_URL_BASE = f"/{LOCAL_SUBDIR}/"
 I18N_URL_BASE = f"{INTEGRATION_URL_BASE}i18n"
-# Use timestamp to bust cache on every load
-_VERSION = str(int(time.time()))
+def card_version(card_name: str) -> str:
+    """Cache-buster for one card, derived from what is actually being served.
+
+    This used to be ``str(int(time.time()))``, evaluated once at import. That
+    changed on every Home Assistant start, which meant two things: the Lovelace
+    resource entry was rewritten on every restart whether or not the card had
+    changed, and every browser threw away a good copy of the card each time.
+
+    Hashing the file's own bytes instead makes the URL change exactly when the
+    card changes -- which is the property an update needs. The manifest version
+    is folded in because HACS restores files from a release archive and can
+    preserve their timestamps, so nothing else in the path is guaranteed to
+    move on an upgrade.
+
+    Reads the file, so callers must keep this off the event loop.
+    """
+    base = Path(__file__).parent
+    digest = hashlib.sha256()
+    try:
+        digest.update(
+            json.loads((base / "manifest.json").read_text(encoding="utf-8"))["version"].encode()
+        )
+    except Exception:  # pylint: disable=broad-except
+        # A missing or malformed manifest is not a reason to stop serving the
+        # card; the file hash below is the part that actually has to be right.
+        _LOGGER.debug("Could not read manifest version for the %s cache buster", card_name)
+    try:
+        digest.update((base / "www" / card_name).read_bytes())
+    except OSError as exc:
+        # No file to hash means the card is about to 404 anyway. Return a token
+        # that is stable rather than random so the resource entry does not
+        # churn while somebody fixes the install.
+        _LOGGER.warning("Could not hash %s for its cache buster: %s", card_name, exc)
+        return "missing"
+    return digest.hexdigest()[:10]
 
 
 def _register_static_path(hass: HomeAssistant, url_path: str, path: str) -> None:
@@ -174,9 +208,13 @@ class CrealityCardRegistration:
         We do NOT auto-create or modify Lovelace resources to avoid clobbering user
         dashboards. Instead we log the integration-hosted URL for manual registration.
         """
+        versions: dict[str, str] = {}
         for card_name in CARDS:
             integration_url = f"{INTEGRATION_URL_BASE}{card_name}"
             serve_path = str(Path(__file__).parent / "www" / card_name)
+            # Hashing reads the card off disk, so keep it out of the event loop.
+            version = await self.hass.async_add_executor_job(card_version, card_name)
+            versions[card_name] = version
 
             _register_static_path(self.hass, integration_url, serve_path)
 
@@ -195,7 +233,7 @@ class CrealityCardRegistration:
             # Try a delicate auto-registration of the lovelace resource; this will only
             # update/create the single resource URL and includes a version query param.
             try:
-                await _init_resource(self.hass, integration_url, _VERSION)
+                await _init_resource(self.hass, integration_url, version)
                 _LOGGER.debug("Auto-registered lovelace resource for %s", integration_url)
             except Exception:
                 _LOGGER.debug("Auto-registration of lovelace resource failed for %s", integration_url)
@@ -204,7 +242,7 @@ class CrealityCardRegistration:
             # migrate them to the integration-hosted URL to avoid leaving stale references.
             try:
                 migrated = await _migrate_local_resources(
-                    self.hass, f"/local/{LOCAL_SUBDIR}/{card_name}", integration_url, _VERSION
+                    self.hass, f"/local/{LOCAL_SUBDIR}/{card_name}", integration_url, version
                 )
                 if migrated:
                     _LOGGER.info("Migrated %d Lovelace /local/ resources to integration-hosted URL", migrated)
@@ -229,7 +267,7 @@ class CrealityCardRegistration:
         # Fix any base-only resource entries (e.g. "/ha_creality_ws/?v=1") by expanding
         # them into the concrete card file URL(s).
         try:
-            await _expand_base_resource(self.hass, INTEGRATION_URL_BASE, CARDS)
+            await _expand_base_resource(self.hass, INTEGRATION_URL_BASE, versions)
         except Exception:
             _LOGGER.debug("Failed to expand base resource entries for %s", LOCAL_SUBDIR)
 
@@ -238,8 +276,13 @@ class CrealityCardRegistration:
             INTEGRATION_URL_BASE,
         )
 
-async def _expand_base_resource(hass: HomeAssistant, base: str, card_names: list[str]) -> int:
+async def _expand_base_resource(
+    hass: HomeAssistant, base: str, card_versions: dict[str, str]
+) -> int:
     """Expand any resources that point to `base` (with no filename) into per-card URLs.
+
+    Takes the cache busters rather than computing them: hashing reads the cards
+    off disk, and this runs on the event loop.
 
     Returns number of newly created/updated resource entries.
     """
@@ -262,7 +305,7 @@ async def _expand_base_resource(hass: HomeAssistant, base: str, card_names: list
     created = 0
 
     # Build full target urls
-    targets = [f"{base.rstrip('/')}/{name}?v={_VERSION}" for name in card_names]
+    targets = [f"{base.rstrip('/')}/{name}?v={ver}" for name, ver in card_versions.items()]
 
     # Find items that point to the base (with or without ?v=)
     for item in list(resources.async_items()):

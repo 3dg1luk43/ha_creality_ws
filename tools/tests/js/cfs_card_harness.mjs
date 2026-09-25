@@ -104,12 +104,29 @@ function _parseHtml(html) {
   return roots;
 }
 
+/**
+ * Just enough of CSSStyleDeclaration.
+ *
+ * Plain assignment (`el.style.display = "none"`) has always worked because the
+ * shim used a bare object, but the printer card sets its theme through
+ * setProperty(), which a bare object does not have.
+ */
+class FakeStyle {
+  setProperty(name, value) { this[name] = String(value); }
+  getPropertyValue(name) { return this[name] ?? ""; }
+  removeProperty(name) {
+    const previous = this[name] ?? "";
+    delete this[name];
+    return previous;
+  }
+}
+
 class FakeElement {
   constructor(tag = "div") {
     this.tagName = String(tag).toUpperCase();
     this.children = [];
     this.dataset = {};
-    this.style = {};
+    this.style = new FakeStyle();
     this._html = "";
   }
   set innerHTML(value) {
@@ -218,6 +235,13 @@ class FakeElement {
         self.className = [...have].join(" ");
       },
       contains: (name) => String(self.className || "").split(/\s+/).includes(name),
+      toggle: (name, force) => {
+        const have = new Set(String(self.className || "").split(/\s+/).filter(Boolean));
+        const on = force === undefined ? !have.has(name) : Boolean(force);
+        if (on) have.add(name); else have.delete(name);
+        self.className = [...have].join(" ");
+        return on;
+      },
     };
   }
   attachShadow() { return this; }
@@ -239,11 +263,19 @@ class FakeElement {
   dispatchEvent() { return true; }
 }
 
+export { FakeElement };
+
 /**
- * Load the card into a fresh sandbox.
- * @returns {{KCFSCard: Function, defined: Map<string, Function>}}
+ * Run one card file in a fresh sandbox and collect what it registers.
+ *
+ * Shared with the printer card's harness. Both cards are plain custom elements
+ * over the same slice of the DOM, so the shim belongs in one place; only the
+ * per-card helpers (`slotEntities` and friends) differ.
+ * @param {string} cardPath Absolute path to the card source.
+ * @param {!Object=} overrides Extra globals, merged over the defaults.
+ * @returns {{defined: !Map<string, Function>, sandbox: !Object}}
  */
-export function loadCard() {
+export function loadCardModule(cardPath, overrides = {}) {
   const defined = new Map();
 
   class HTMLElement extends FakeElement {}
@@ -251,8 +283,21 @@ export function loadCard() {
   const sandbox = {
     HTMLElement,
     CustomEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
-    customElements: { define: (tag, cls) => defined.set(tag, cls) },
+    // `get` as well as `define`: both cards register defensively, so a stub
+    // without it makes every module fail to load.
+    customElements: {
+      define: (tag, cls) => defined.set(tag, cls),
+      get: (tag) => defined.get(tag),
+    },
     document: { createElement: (tag) => new FakeElement(tag) },
+    // Host globals the printer card reaches for. Left as inert stubs so a test
+    // that does not care about layout still loads the module; the tests that do
+    // care override them through `overrides`.
+    btoa: (s) => Buffer.from(String(s), "binary").toString("base64"),
+    confirm: () => true,
+    requestAnimationFrame: (fn) => setTimeout(() => fn(0), 0),
+    cancelAnimationFrame: (id) => clearTimeout(id),
+    getComputedStyle: () => ({ display: "", visibility: "", columnGap: "0px", paddingLeft: "0px", paddingRight: "0px" }),
     // i18n is fetched at runtime; never resolve it so tests exercise the bundled
     // English fallback rather than depending on the JSON files.
     fetch: () => new Promise(() => {}),
@@ -289,12 +334,21 @@ export function loadCard() {
     parseInt,
     parseFloat,
   };
+  Object.assign(sandbox, overrides);
   sandbox.window = sandbox;
   sandbox.globalThis = sandbox;
 
   const context = vm.createContext(sandbox);
-  vm.runInContext(readFileSync(CARD_PATH, "utf8"), context, { filename: CARD_PATH });
+  vm.runInContext(readFileSync(cardPath, "utf8"), context, { filename: cardPath });
+  return { defined, sandbox };
+}
 
+/**
+ * Load the CFS card into a fresh sandbox.
+ * @returns {{KCFSCard: Function, defined: Map<string, Function>}}
+ */
+export function loadCard() {
+  const { defined, sandbox } = loadCardModule(CARD_PATH);
   const KCFSCard = defined.get("k-cfs-card");
   if (!KCFSCard) throw new Error("k-cfs-card was not registered");
   return { KCFSCard, defined, sandbox };

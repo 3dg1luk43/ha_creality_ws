@@ -40,11 +40,18 @@ def test_printer_card_size_tracks_measured_telemetry_lines():
 
 
 def test_printer_card_telemetry_pills_do_not_line_break():
-    """Ensure each telemetry pill remains a stable single-line item."""
+    """Ensure each telemetry pill remains a stable single-line item.
+
+    The flex shorthand's middle value is the one that matters here: a pill must
+    never shrink, because its text is `nowrap` and would overflow the pill
+    rather than reflow inside it. Growing is wanted -- the pills share out the
+    row's spare width so they reach the same right edge as the action chips
+    above, instead of sitting in a huddle in the middle of the card.
+    """
     source = PRINTER_CARD.read_text(encoding="utf-8")
     pill = _css_block(source, ".pill")
     assert "white-space:nowrap" in pill
-    assert "flex:0 0 auto" in pill
+    assert "flex:1 0 auto" in pill
 
 
 def test_card_print_states_match_the_integration():

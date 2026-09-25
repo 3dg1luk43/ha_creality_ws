@@ -2484,7 +2484,29 @@ class KCFSCard extends HTMLElement {
   }
 }
 
-customElements.define(CARD_TAG, KCFSCard);
+/**
+ * Register a custom element at most once.
+ *
+ * A dashboard can end up importing this module twice -- two Lovelace resource
+ * entries, or a page that was open across a Home Assistant restart picking up
+ * the new `?v=` alongside the copy it already had. A bare define() throws on
+ * the second pass, which aborts the rest of that module: the tag then keeps
+ * whichever class won the race while the functions around it come from the
+ * other copy, and the mismatch shows up as methods that exist in the source
+ * but not on the instance.
+ * @param {string} tag
+ * @param {!Function} cls
+ */
+function defineOnce(tag, cls) {
+  if (customElements.get(tag)) return;
+  try {
+    customElements.define(tag, cls);
+  } catch (err) {
+    console.error(`ha_creality_ws: could not define <${tag}>`, err);
+  }
+}
+
+defineOnce(CARD_TAG, KCFSCard);
 
 class KCFSCardEditor extends HTMLElement {
   // i18n helpers -------------------------------------------------------
@@ -2608,9 +2630,10 @@ class KCFSCardEditor extends HTMLElement {
 
       return s.name;
     };
-    if (this._form.computeHelper) {
-      this._form.computeHelper = () => "";
-    }
+    // Assigned unconditionally: ha-form leaves computeHelper undefined until
+    // someone sets it, so guarding on it meant this never ran. Harmless here
+    // only because ha-form's own default is "no helper" either way.
+    this._form.computeHelper = () => "";
 
     this._form.addEventListener("value-changed", (ev) => {
       this._cfg = { ...this._cfg, ...ev.detail.value };
@@ -2658,7 +2681,7 @@ class KCFSCardEditor extends HTMLElement {
   }
 }
 
-customElements.define(EDITOR_TAG, KCFSCardEditor);
+defineOnce(EDITOR_TAG, KCFSCardEditor);
 
 window.customCards = window.customCards || [];
 window.customCards.push({
