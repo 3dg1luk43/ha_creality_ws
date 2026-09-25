@@ -160,6 +160,16 @@ def test_display_filename(raw, expected):
         (-1, ""),
         (None, ""),
         ("nope", ""),
+        # Non-finite telemetry. `float()` accepts all four spellings and
+        # `int(inf)` then raises OverflowError, which the handler did not
+        # catch -- on the frame path, so one bad `printLeftTime` stopped the
+        # whole notification update for that frame.
+        ("inf", ""),
+        ("-inf", ""),
+        ("nan", ""),
+        (float("inf"), ""),
+        (float("-inf"), ""),
+        (float("nan"), ""),
     ],
 )
 def test_format_duration(secs, expected):
@@ -556,7 +566,16 @@ def test_compute_when_is_wall_clock():
     assert when > 1_700_000_000
 
 
-@pytest.mark.parametrize("left", [0, -5, None, "x"])
+@pytest.mark.parametrize(
+    "left",
+    [
+        0, -5, None, "x",
+        # `int(now + remaining)` sits outside the try, so NaN raised
+        # ValueError and infinity OverflowError straight out of the call. NaN
+        # also slips past `remaining <= 0`, every comparison with it being false.
+        "inf", "nan", float("inf"), float("-inf"), float("nan"),
+    ],
+)
 def test_compute_when_declines_useless_values(left):
     assert compute_when(1_700_000_000.0, left) is None
 

@@ -96,7 +96,7 @@ Use `ModelDetection` which reads both `model` and `modelVersion` codes.
 
 - On setup, if power isn’t OFF, wait for first connect and briefly for `model`, `modelVersion`, `hostname` using `KCoordinator.wait_for_fields`.
 - Cache device info and feature flags in `ConfigEntry.data`. Re-detect camera type only when missing.
-- Heuristics: if live telemetry exposes `boxTemp/targetBoxTemp/maxBoxTemp` or `lightSw`, promote those capabilities in cache and enable entities immediately.
+- Heuristics: if live telemetry exposes `boxTemp/targetBoxTemp/maxBoxTemp` or `lightSw`, promote those capabilities in cache and enable entities immediately. **Except chamber *control*:** that comes only from the cached `ModelDetection.has_chamber_control` or a live `targetBoxTemp`, never from `maxBoxTemp`, which sensor-only K1-family chambers also report -- promoting on it creates a `boxTempControl` entity for a printer that cannot use one. `maxBoxTemp` promotes the chamber *sensor* only. See the note above `LATE_DISCOVERY_FIELDS` in `const.py`.
 - Cache of accessed HTTP URLs: record printer-local HTTP endpoints we hit (e.g., preview image) for diagnostics; never call cloud.
 
 ## Coding conventions

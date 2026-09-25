@@ -26,6 +26,12 @@ SERVER = ROOT / "tools" / "creality_printer_test_server.py"
 VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
 
 
+# The simulator's own module-level third-party imports, and only those. Kept in
+# step with the identical set in `test_fan.py`; anything else missing is a
+# broken simulator, not an environment that cannot run it.
+_SIMULATOR_OPTIONAL_DEPS = frozenset({"aiortc", "av", "websockets", "aiohttp", "numpy"})
+
+
 def _source() -> str:
     return SERVER.read_text(encoding="utf-8")
 
@@ -339,6 +345,13 @@ def test_modify_material_rejects_an_unknown_box_or_slot():
     try:
         spec.loader.exec_module(module)
     except ModuleNotFoundError as exc:  # pragma: no cover - optional extras
+        # Only a genuinely optional dependency is a skip. Skipping on *any*
+        # ModuleNotFoundError turns a simulator that has lost `h264_timing`, or
+        # gained a typo in an import, into a quiet pass -- which is what
+        # `test_fan.py` already fixed for its own copy of this handler, and how
+        # `numpy` went unnoticed there for six days.
+        if (exc.name or "").split(".")[0] not in _SIMULATOR_OPTIONAL_DEPS:
+            raise
         pytest.skip(f"simulator dependency missing: {exc.name}")
     finally:
         sys.modules.pop("_sim_reject", None)

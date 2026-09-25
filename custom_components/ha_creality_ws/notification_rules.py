@@ -22,6 +22,7 @@ Two house rules worth knowing before editing:
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -180,9 +181,17 @@ def format_duration(secs: Any, templates: Mapping[str, str]) -> str:
     cannot break a format spec (``{minutes:02d}``) by reordering placeholders.
     """
     try:
-        total = int(float(secs))
+        parsed = float(secs)
     except (TypeError, ValueError):
         return ""
+    # `float("inf")` succeeds and `int(inf)` then raises OverflowError, which
+    # the clause above does not catch. This runs on the WebSocket frame path,
+    # so one non-finite `printLeftTime` would take the whole notification
+    # update down for that frame -- the same reason `derive_print_state` is
+    # hardened against "nan" and "inf".
+    if not math.isfinite(parsed):
+        return ""
+    total = int(parsed)
     if total < 0:
         return ""
     hours, rem = divmod(total, 3600)
@@ -475,7 +484,7 @@ def _milestone_of(progress: Any) -> int:
     """Which milestone bucket a progress value falls in, or -1 when unknown."""
     try:
         value = int(progress)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return -1
     if value < 0:
         return -1
@@ -863,7 +872,10 @@ def compute_when(now_epoch: float, seconds_left: Any) -> int | None:
         remaining = float(seconds_left)
     except (TypeError, ValueError):
         return None
-    if remaining <= 0:
+    # The conversion below sits outside any try, so a non-finite value raises
+    # straight out: NaN as ValueError, infinity as OverflowError. NaN also
+    # slips past `<= 0`, every comparison against it being false.
+    if not math.isfinite(remaining) or remaining <= 0:
         return None
     return int(now_epoch + remaining)
 
@@ -871,7 +883,7 @@ def compute_when(now_epoch: float, seconds_left: Any) -> int | None:
 def _clamp_progress(progress: Any) -> int | None:
     try:
         value = int(progress)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return max(0, min(100, value))
 

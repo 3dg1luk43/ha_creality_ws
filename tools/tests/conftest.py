@@ -410,9 +410,9 @@ setattr(components_mod, "sensor", components_sensor_mod)
 const_mod_ha = types.ModuleType("homeassistant.const")
 const_mod_ha.PERCENTAGE = "%"
 const_mod_ha.EntityCategory = EntityCategory
-# `__init__.py` reads this to enforce MINIMUM_HA_VERSION at setup. Kept well past
-# the minimum so the version gate is satisfied by default; the suites that test
-# the gate itself patch it.
+# Not what the version gate reads -- see MAJOR/MINOR below, which is what
+# `_core_version()` imports and what a gate test has to patch. Kept here because
+# other code reports it, and kept in step with the two fields underneath.
 const_mod_ha.__version__ = "2099.1.0"
 # `_core_version()` reads MAJOR/MINOR, not `__version__`. Without them its
 # import raised, it returned None, and `core_version_supported(None, ...)`

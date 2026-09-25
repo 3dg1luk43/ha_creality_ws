@@ -1,6 +1,8 @@
 from pathlib import Path
 import re
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 
 init_path = ROOT / "custom_components" / "ha_creality_ws" / "__init__.py"
@@ -68,10 +70,17 @@ def test_no_em_dashes_anywhere():
     """
     import subprocess
 
-    tracked = subprocess.run(
-        ["git", "-C", str(ROOT), "ls-files", "-z"],
-        capture_output=True, check=True,
-    ).stdout.split(b"\0")
+    try:
+        tracked = subprocess.run(
+            ["git", "-C", str(ROOT), "ls-files", "-z"],
+            capture_output=True, check=True,
+        ).stdout.split(b"\0")
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        # The file list comes from git, so there is nothing to scan without it.
+        # Reached for real: the clean-tree checks in this suite extract
+        # `git archive HEAD` into a directory with no `.git`, and there this
+        # failed as though the tree were full of em dashes.
+        pytest.skip(f"not a git work tree, nothing to scan: {exc}")
 
     offenders = []
     for rel in tracked:
