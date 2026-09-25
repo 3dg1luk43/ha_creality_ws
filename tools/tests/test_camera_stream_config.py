@@ -228,6 +228,65 @@ def test_stream_source_returns_rtsp_url_for_ha_managed_go2rtc():
     assert asyncio.run(run()) == "rtsp://127.0.0.1:18554/creality_k2_1_2_3_4"
 
 
+def test_the_stored_go2rtc_defaults_are_not_treated_as_a_custom_server():
+    """The camera step always writes a go2rtc host and port -- `localhost` and
+    11984 are its defaults for WebRTC mode -- so "a URL is configured" cannot
+    mean "a stand-alone server". Treating it as one recorded HA's own go2rtc
+    as stand-alone, and the RTSP endpoint then derived 8554 rather than the
+    18554 HA's binary listens on, handing HLS a dead port. A failed custom
+    attempt was worse: it set `_go2rtc_fell_back_from_custom`, which makes the
+    endpoint ignore a genuine RTSP-port override.
+    """
+    for url, port in (
+        ("localhost", 11984),
+        ("127.0.0.1", 11984),
+        ("http://localhost:11984", None),
+        ("localhost", None),
+    ):
+        cam = _camera(go2rtc_url=url, go2rtc_port=port)
+        assert cam._configured_go2rtc_is_has_own(), f"{url!r}:{port!r}"
+
+
+def test_initialization_records_the_stored_defaults_as_ha_managed():
+    """The predicate is only useful if `_initialize_go2rtc_client` consults it.
+
+    Asserted on the flag the RTSP endpoint actually reads, because a test that
+    only calls the predicate passes with the gate deleted -- which is what the
+    first version of this test did.
+    """
+    import asyncio
+
+    cam = _camera(go2rtc_url="localhost", go2rtc_port=11984)
+    client = MagicMock()
+    client.validate_server_version = AsyncMock(return_value="1.9.11")
+
+    with patch(
+        "custom_components.ha_creality_ws.camera.Go2RtcRestClient",
+        return_value=client,
+    ):
+        assert asyncio.run(cam._initialize_go2rtc_client()) is True
+
+    assert cam._go2rtc_is_ha_managed is True, (
+        "HA's own go2rtc, arriving as the camera step's default, was recorded "
+        "as a stand-alone server"
+    )
+    assert cam._go2rtc_fell_back_from_custom is False
+
+
+def test_a_real_stand_alone_go2rtc_still_takes_the_custom_branch():
+    """Only the default *pair* is HA's. A loopback host on another port is a
+    stand-alone instance sharing the machine, which is the case
+    `_go2rtc_is_ha_managed` exists to tell apart."""
+    for url, port in (
+        ("localhost", 1984),
+        ("127.0.0.1", 8555),
+        ("10.0.0.5", 11984),
+        ("http://10.0.0.5:11984", None),
+    ):
+        cam = _camera(go2rtc_url=url, go2rtc_port=port)
+        assert not cam._configured_go2rtc_is_has_own(), f"{url!r}:{port!r}"
+
+
 def test_stream_source_uses_default_rtsp_port_for_custom_loopback_go2rtc():
     """A stand-alone go2rtc on localhost:11984 is not HA's, so RTSP is 8554.
 

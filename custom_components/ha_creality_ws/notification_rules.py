@@ -214,9 +214,13 @@ def format_filament_length(mm: Any, template: str | None) -> str:
     """Filament used, rendered by the caller's template. Empty when unknown."""
     try:
         value = float(mm)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # Same exposure as `format_duration`, and the same frame path:
+        # `_template_values` feeds this `usedMaterialLength` on every push.
         return ""
-    if value <= 0:
+    # NaN fails `<= 0` like every other comparison, and infinity passes it, so
+    # without this the notification read "nan m" or "inf m".
+    if not math.isfinite(value) or value <= 0:
         return ""
     return _fill(template, metres=f"{value / 1000.0:.1f}")
 

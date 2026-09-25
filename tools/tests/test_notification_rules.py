@@ -189,7 +189,15 @@ def test_format_duration_survives_a_broken_translation():
 
 @pytest.mark.parametrize(
     "mm,expected",
-    [(4800, "4.8 m"), (12400, "12.4 m"), (0, ""), (-5, ""), (None, ""), ("x", "")],
+    [
+        (4800, "4.8 m"), (12400, "12.4 m"), (0, ""), (-5, ""), (None, ""), ("x", ""),
+        # Same frame-path exposure as `format_duration`: NaN fails `<= 0` like
+        # every comparison and rendered "nan m", infinity passed it and
+        # rendered "inf m", and an oversized int raised OverflowError out of
+        # the conversion before any check could run.
+        ("nan", ""), ("inf", ""), (float("nan"), ""), (float("inf"), ""),
+        (float("-inf"), ""), (10 ** 400, ""),
+    ],
 )
 def test_format_filament_length(mm, expected):
     assert format_filament_length(mm, STRINGS["filament_length"]) == expected

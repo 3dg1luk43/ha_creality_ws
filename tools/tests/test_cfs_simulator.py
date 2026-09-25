@@ -72,7 +72,22 @@ def test_modify_material_merges_rather_than_replaces():
     assert "if key in payload:" in source
 
 
+def test_the_h264_clip_is_encoded_before_the_answer_is_sent():
+    """`available()` only proves the ffmpeg binary exists; the encode needs
+    libx264, which some builds omit. Encoding on the first `recv()` meant the
+    failure landed in aiortc's sender task after the SDP answer had gone, so
+    the session connected with no video and the documented synthetic fallback
+    never ran."""
+    source = _source()
+    assert "async def _make_video_track" in source
+    assert "await self._make_video_track(" in source
+    assert "await track.prepare()" in source
+    assert "falling back to \n" not in source
+
+
 def test_modify_material_rejects_a_non_object_payload():
+
+
     """`params.get("modifyMaterial") or {}` passes a list or a string straight
     through, and `.get` on one raises AttributeError -- which the handler does
     not catch, so it escaped `rx_loop`, closed the socket, and left `tx_loop`

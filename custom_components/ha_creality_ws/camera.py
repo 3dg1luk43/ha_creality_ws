@@ -39,6 +39,10 @@ from homeassistant.components.camera import Camera, CameraEntityFeature
 # read one string would be an undeclared cross-component import for no gain.
 GO2RTC_DOMAIN = "go2rtc"
 
+# Hosts that mean "this machine". HA addresses its own go2rtc as one of
+# these, and a bare host with no scheme parses to None.
+_GO2RTC_LOOPBACK_HOSTS = (None, "localhost", "127.0.0.1", "::1")
+
 from .const import (
     DOMAIN,
     MJPEG_URL_TEMPLATE,
@@ -434,9 +438,15 @@ class CrealityWebRTCCamera(_BaseCamera):
         """
         return self._uses_go2rtc_webrtc_bridge()
 
-    def _go2rtc_host_and_api_port(self) -> tuple[str | None, int | None]:
-        """Split the resolved go2rtc server URL, tolerating a bare host:port."""
-        url = self._go2rtc_server_url
+    def _go2rtc_host_and_api_port(
+        self, url: str | None = None
+    ) -> tuple[str | None, int | None]:
+        """Split a go2rtc server URL, tolerating a bare host:port.
+
+        Defaults to the resolved server URL. Pass one to inspect a *configured*
+        value before initialization has decided what it points at.
+        """
+        url = url if url is not None else self._go2rtc_server_url
         if not url:
             return (None, None)
         if "://" not in url:
@@ -477,15 +487,13 @@ class CrealityWebRTCCamera(_BaseCamera):
                 # HA's managed go2rtc binds RTSP to IPv4 127.0.0.1 only, while
                 # its API is addressed as "localhost" -- which can resolve to
                 # ::1 and an unbound port. Keep the explicit port, pin the host.
-                if self._go2rtc_is_ha_managed and host in (
-                    None, "localhost", "127.0.0.1", "::1"
-                ):
+                if self._go2rtc_is_ha_managed and host in _GO2RTC_LOOPBACK_HOSTS:
                     return ("127.0.0.1", port)
                 return (host or "127.0.0.1", port)
 
         if (
             self._go2rtc_is_ha_managed
-            and host in (None, "localhost", "127.0.0.1", "::1")
+            and host in _GO2RTC_LOOPBACK_HOSTS
             and api_port in (None, DEFAULT_GO2RTC_PORT)
         ):
             return ("127.0.0.1", HA_MANAGED_GO2RTC_RTSP_PORT)
@@ -554,6 +562,32 @@ class CrealityWebRTCCamera(_BaseCamera):
                 "Ensure default_config is enabled or go2rtc is configured."
             )
     
+    def _configured_go2rtc_is_has_own(self) -> bool:
+        """Whether the configured go2rtc is just Home Assistant's, by default.
+
+        The camera step always writes a go2rtc host and port -- `localhost` and
+        11984 are what it stores for WebRTC mode -- so "a URL is configured"
+        does not mean "a stand-alone server". Taking the custom branch for HA's
+        own go2rtc records it as stand-alone, and `_go2rtc_rtsp_endpoint` then
+        derives RTSP 8554 instead of the 18554 HA's binary listens on, so HLS
+        and `camera.record` are handed a port with nothing behind it. A failed
+        custom attempt is worse still: it sets `_go2rtc_fell_back_from_custom`,
+        which makes the endpoint ignore a real RTSP-port override.
+
+        Only the default *pair* counts. A loopback host on another port is a
+        stand-alone instance sharing the machine, which is exactly what the
+        `_go2rtc_is_ha_managed` flag exists to tell apart.
+        """
+        host, port = self._go2rtc_host_and_api_port(self._custom_go2rtc_url)
+        if host is not None and host.lower() not in _GO2RTC_LOOPBACK_HOSTS:
+            return False
+        if port is None:
+            port = self._custom_go2rtc_port
+        try:
+            return int(port or DEFAULT_GO2RTC_PORT) == DEFAULT_GO2RTC_PORT
+        except (TypeError, ValueError):
+            return False
+
     async def _initialize_go2rtc_client(self) -> bool:
         """Initialize go2rtc client from HA's go2rtc component.
         
@@ -570,8 +604,9 @@ class CrealityWebRTCCamera(_BaseCamera):
             )
             return False
         
-        # Custom go2rtc configuration
-        if self._custom_go2rtc_url:
+        # Custom go2rtc configuration. Not entered for HA's own go2rtc
+        # arriving as the camera step's stored default; see the predicate.
+        if self._custom_go2rtc_url and not self._configured_go2rtc_is_has_own():
             try:
                 # Use default session
                 session = async_get_clientsession(self.hass)

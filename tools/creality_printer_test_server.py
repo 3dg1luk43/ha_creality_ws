@@ -249,6 +249,18 @@ class H264PassthroughTrack(MediaStreamTrack):
     def available(ffmpeg_bin: str = "ffmpeg") -> bool:
         return shutil.which(ffmpeg_bin) is not None
 
+    async def prepare(self) -> None:
+        """Encode the clip now, so a failure is visible before the answer.
+
+        `available()` only proves the ffmpeg *binary* exists. The encode needs
+        libx264, which builds like Fedora's `ffmpeg-free` omit -- and without
+        this the first failure happened inside `recv()`, in aiortc's sender
+        task, long after the SDP answer had gone out. The session connected and
+        carried no video, and the synthetic fallback the README promises never
+        ran because the track had already been chosen.
+        """
+        await self._ensure_clip()
+
     async def _ensure_clip(self) -> None:
         if self._packets:
             return
@@ -1337,7 +1349,7 @@ class HttpServer:
         offer_has_audio = "m=audio" in offer_sdp
 
         if offer_has_video:
-            video_track = self._make_video_track(offer_sdp)
+            video_track = await self._make_video_track(offer_sdp)
             pc.addTrack(video_track)
         if offer_has_audio and self.audio:
             pc.addTrack(SyntheticAudioTrack())
@@ -1377,7 +1389,7 @@ class HttpServer:
         out = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
         return web.Response(status=200, text=out, headers={"Content-Type": "text/plain"})
 
-    def _make_video_track(self, offer_sdp: str) -> MediaStreamTrack:
+    async def _make_video_track(self, offer_sdp: str) -> MediaStreamTrack:
         """Pick the video track that suits the negotiated codec.
 
         `auto` sends pre-encoded H.264 whenever the peer offers it (what real
@@ -1390,13 +1402,27 @@ class HttpServer:
 
         if source in ("auto", "h264") and peer_wants_h264 and want_h264:
             if H264PassthroughTrack.available(self.ffmpeg_bin):
-                return H264PassthroughTrack(
+                track = H264PassthroughTrack(
                     self.width, self.height, self.fps, ffmpeg_bin=self.ffmpeg_bin
                 )
-            LOGGER.warning(
-                "ffmpeg not found; falling back to aiortc's H.264 encoder, whose "
-                "keyframe interval is too long for Home Assistant's HLS pipeline"
-            )
+                try:
+                    # Before the answer goes out, not on the first recv(): see
+                    # `prepare`. An ffmpeg without libx264 fails here, where
+                    # there is still somewhere to fall back to.
+                    await track.prepare()
+                except Exception as exc:  # pragma: no cover - build-specific
+                    LOGGER.warning(
+                        "H.264 clip could not be encoded (%s); falling back to "
+                        "synthetic video. An ffmpeg without libx264 does this.",
+                        exc,
+                    )
+                else:
+                    return track
+            else:
+                LOGGER.warning(
+                    "ffmpeg not found; falling back to aiortc's H.264 encoder, whose "
+                    "keyframe interval is too long for Home Assistant's HLS pipeline"
+                )
         elif source == "h264":
             # An explicit --video-source h264 that silently produced synthetic
             # frames looked like the passthrough was broken. Say which condition
