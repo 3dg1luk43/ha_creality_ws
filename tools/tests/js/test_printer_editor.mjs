@@ -63,25 +63,17 @@ test("loading the module twice does not leave a half-registered tag", () => {
   // functions around it come from the other, and methods that plainly exist in
   // the source turn up missing on the instance.
   const first = loadPrinterCard();
-  const registry = first.sandbox.customElements;
-  const seen = new Map(registry.__defined ?? []);
 
-  let threw = null;
-  try {
-    // Re-run the module against a registry that already holds both tags.
-    const source = first.sandbox;
-    source.customElements = {
-      define: () => { throw new Error("this name has already been used"); },
-      get: (tag) => (tag === "k-printer-card" ? first.KPrinterCard : first.KPrinterCardEditor),
-    };
-    // defineOnce must short-circuit on get() and never reach define().
-    source.defineOnce("k-printer-card", first.KPrinterCard);
-    source.defineOnce("k-printer-card-editor", first.KPrinterCardEditor);
-  } catch (err) {
-    threw = err;
-  }
-  assert.equal(threw, null, "a second registration pass threw");
-  assert.ok(seen || true);
+  // A genuine second pass: the same source, the same context, the same
+  // registry -- which already holds both tags. Calling defineOnce by hand
+  // against a stub registry instead would only re-check the early return and
+  // would never re-run the module, which is the part that can abort.
+  assert.doesNotThrow(() => first.reload(), "a second module pass threw");
+
+  // And the tags still point at the classes the first pass registered, rather
+  // than a half-swapped mix of the two copies.
+  assert.equal(first.defined.get("k-printer-card"), first.KPrinterCard);
+  assert.equal(first.defined.get("k-printer-card-editor"), first.KPrinterCardEditor);
 });
 
 // --------------------------------------------------------------------------- //

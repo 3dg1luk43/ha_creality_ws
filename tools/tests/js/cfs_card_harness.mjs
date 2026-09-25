@@ -280,15 +280,51 @@ export function loadCardModule(cardPath, overrides = {}) {
 
   class HTMLElement extends FakeElement {}
 
-  const sandbox = {
-    HTMLElement,
-    CustomEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
+  // Shared across passes, because the browser shares them across module
+  // instances: one registry and one storage area per document, however many
+  // times the card is loaded into it. Everything else in the sandbox is built
+  // per pass, so each pass gets its own module scope.
+  const customElements = {
     // `get` as well as `define`: both cards register defensively, so a stub
     // without it makes every module fail to load.
-    customElements: {
-      define: (tag, cls) => defined.set(tag, cls),
-      get: (tag) => defined.get(tag),
+    //
+    // Throws on a duplicate tag, because CustomElementRegistry does. That is
+    // the whole reason the cards register through `defineOnce`: a bare
+    // define() on a second module pass throws and aborts the rest of that
+    // pass. A stub that quietly overwrote instead made the second pass look
+    // harmless, so a test could not tell the guard from its absence.
+    define: (tag, cls) => {
+      if (defined.has(tag)) {
+        throw new Error(`the name "${tag}" has already been used with this registry`);
+      }
+      defined.set(tag, cls);
     },
+    get: (tag) => defined.get(tag),
+  };
+
+  // Access-counting, so "storage is not touched until X" is assertable rather
+  // than inferred from a field still being undefined.
+  const localStorage = (() => {
+    const store = new Map();
+    const reads = [];
+    const writes = [];
+    return {
+      getItem: (k) => { reads.push(k); return store.has(k) ? store.get(k) : null; },
+      setItem: (k, v) => { writes.push(k); store.set(k, String(v)); },
+      removeItem: (k) => store.delete(k),
+      clear: () => store.clear(),
+      /** Keys read since load, for tests that care about *when* storage is hit. */
+      _reads: reads,
+      _writes: writes,
+      /** Seed a value without counting it as a read or a write. */
+      _seed: (k, v) => store.set(k, String(v)),
+    };
+  })();
+
+  const makeSandbox = () => ({
+    HTMLElement,
+    CustomEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
+    customElements,
     document: { createElement: (tag) => new FakeElement(tag) },
     // Host globals the printer card reaches for. Left as inert stubs so a test
     // that does not care about layout still loads the module; the tests that do
@@ -302,24 +338,7 @@ export function loadCardModule(cardPath, overrides = {}) {
     // English fallback rather than depending on the JSON files.
     fetch: () => new Promise(() => {}),
     console,
-    // Access-counting, so "storage is not touched until X" is assertable rather
-    // than inferred from a field still being undefined.
-    localStorage: (() => {
-      const store = new Map();
-      const reads = [];
-      const writes = [];
-      return {
-        getItem: (k) => { reads.push(k); return store.has(k) ? store.get(k) : null; },
-        setItem: (k, v) => { writes.push(k); store.set(k, String(v)); },
-        removeItem: (k) => store.delete(k),
-        clear: () => store.clear(),
-        /** Keys read since load, for tests that care about *when* storage is hit. */
-        _reads: reads,
-        _writes: writes,
-        /** Seed a value without counting it as a read or a write. */
-        _seed: (k, v) => store.set(k, String(v)),
-      };
-    })(),
+    localStorage,
     setTimeout,
     clearTimeout,
     JSON,
@@ -333,14 +352,30 @@ export function loadCardModule(cardPath, overrides = {}) {
     isNaN,
     parseInt,
     parseFloat,
-  };
-  Object.assign(sandbox, overrides);
-  sandbox.window = sandbox;
-  sandbox.globalThis = sandbox;
+  });
 
-  const context = vm.createContext(sandbox);
-  vm.runInContext(readFileSync(cardPath, "utf8"), context, { filename: cardPath });
-  return { defined, sandbox };
+  const source = readFileSync(cardPath, "utf8");
+
+  /**
+   * Run the card source once, in a scope of its own.
+   *
+   * The cards are registered as `res_type: "module"`, so a second load gets a
+   * fresh module scope and shares only what the document owns -- the custom
+   * element registry above all. Re-running against the *same* vm context
+   * instead fails on `Identifier 'CARD_TAG' has already been declared`, which
+   * is an artefact of the shared scope and not something a browser does.
+   */
+  const run = () => {
+    const sandbox = makeSandbox();
+    Object.assign(sandbox, overrides);
+    sandbox.window = sandbox;
+    sandbox.globalThis = sandbox;
+    vm.runInContext(source, vm.createContext(sandbox), { filename: cardPath });
+    return sandbox;
+  };
+
+  const sandbox = run();
+  return { defined, sandbox, reload: run };
 }
 
 /**

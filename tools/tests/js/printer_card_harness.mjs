@@ -25,12 +25,12 @@ export { FakeElement };
  * @param {!Object=} overrides Extra globals (geometry stubs, mostly).
  */
 export function loadPrinterCard(overrides = {}) {
-  const { defined, sandbox } = loadCardModule(PRINTER_CARD_PATH, overrides);
+  const { defined, sandbox, reload } = loadCardModule(PRINTER_CARD_PATH, overrides);
   const KPrinterCard = defined.get("k-printer-card");
   const KPrinterCardEditor = defined.get("k-printer-card-editor");
   if (!KPrinterCard) throw new Error("k-printer-card was not registered");
   if (!KPrinterCardEditor) throw new Error("k-printer-card-editor was not registered");
-  return { KPrinterCard, KPrinterCardEditor, defined, sandbox };
+  return { KPrinterCard, KPrinterCardEditor, defined, sandbox, reload };
 }
 
 /**

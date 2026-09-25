@@ -8,6 +8,7 @@ when the card changes, and not otherwise.
 
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -53,36 +54,47 @@ def test_each_card_gets_its_own_version(frontend):
     assert printer != cfs
 
 
-def test_the_version_changes_when_the_card_does(frontend, tmp_path, monkeypatch):
+@pytest.fixture
+def installed(frontend, tmp_path, monkeypatch):
+    """A byte-for-byte copy of the installed package, safe to mutate.
+
+    ``card_version`` locates everything from ``Path(__file__).parent``, read
+    from the module at call time, so pointing that at a copy redirects it
+    whole. The earlier form edited the real ``www/k_printer_card.js`` and
+    ``manifest.json`` and restored them in ``finally``: correct on a clean
+    run, but it leaves the working tree modified if the run is killed between
+    the two, and two of these tests cannot run concurrently.
+    """
+    (tmp_path / "www").mkdir()
+    shutil.copy2(COMPONENT / "manifest.json", tmp_path / "manifest.json")
+    for name in (frontend.PRINTER_CARD_NAME, frontend.CFS_CARD_NAME):
+        shutil.copy2(COMPONENT / "www" / name, tmp_path / "www" / name)
+    monkeypatch.setattr(frontend, "__file__", str(tmp_path / "frontend.py"))
+    # The copy has to hash identically, or it is not standing in for anything.
+    assert frontend.card_version(frontend.PRINTER_CARD_NAME) != "missing"
+    return tmp_path
+
+
+def test_the_version_changes_when_the_card_does(frontend, installed):
     """The property the whole update path rests on."""
-    original = (COMPONENT / "www" / frontend.PRINTER_CARD_NAME).read_bytes()
+    card = installed / "www" / frontend.PRINTER_CARD_NAME
     before = frontend.card_version(frontend.PRINTER_CARD_NAME)
-    target = COMPONENT / "www" / frontend.PRINTER_CARD_NAME
-    try:
-        target.write_bytes(original + b"\n// one more byte\n")
-        assert frontend.card_version(frontend.PRINTER_CARD_NAME) != before
-    finally:
-        target.write_bytes(original)
-    assert frontend.card_version(frontend.PRINTER_CARD_NAME) == before
+    card.write_bytes(card.read_bytes() + b"\n// one more byte\n")
+    assert frontend.card_version(frontend.PRINTER_CARD_NAME) != before
 
 
-def test_the_version_changes_when_the_release_does(frontend, monkeypatch):
+def test_the_version_changes_when_the_release_does(frontend, installed):
     """HACS restores files from an archive and can preserve their timestamps.
 
     A release that only touches Python would otherwise leave every browser on
     the card it already had, which is exactly the upgrade case that matters.
     """
-    manifest = COMPONENT / "manifest.json"
-    original = manifest.read_text(encoding="utf-8")
+    manifest = installed / "manifest.json"
     before = frontend.card_version(frontend.PRINTER_CARD_NAME)
-    try:
-        bumped = json.loads(original)
-        bumped["version"] = "9.9.9-test"
-        manifest.write_text(json.dumps(bumped, indent=2), encoding="utf-8")
-        assert frontend.card_version(frontend.PRINTER_CARD_NAME) != before
-    finally:
-        manifest.write_text(original, encoding="utf-8")
-    assert frontend.card_version(frontend.PRINTER_CARD_NAME) == before
+    bumped = json.loads(manifest.read_text(encoding="utf-8"))
+    bumped["version"] = "9.9.9-test"
+    manifest.write_text(json.dumps(bumped, indent=2), encoding="utf-8")
+    assert frontend.card_version(frontend.PRINTER_CARD_NAME) != before
 
 
 def test_a_missing_card_does_not_produce_a_churning_token(frontend):
