@@ -102,7 +102,12 @@ Wait in the background (single notification on exit, ~9 min cap, re-arm if it ti
 Do not use `Monitor` for this, and do not foreground-sleep.
 
 ```bash
-trigger="2026-01-01T00:00:00Z"   # captured before posting the retrigger
+# Passed in, never a literal. The completion check accepts any CodeRabbit
+# review submitted after this instant, so a fixed date in the past lets an
+# *earlier* review satisfy it -- the poller then reports REVIEW COMPLETE for a
+# round that has not run, and the harvest returns the previous round's threads.
+# Capture it with `date -u +%FT%TZ` immediately before posting the retrigger.
+trigger="$1"
 summary_id=<the walkthrough issue comment id for this PR>
 sleep 120                        # covers the ack race
 
