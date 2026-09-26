@@ -6,10 +6,12 @@ on its Lovelace resource URL. That token therefore has exactly one job: change
 when the card changes, and not otherwise.
 """
 
+import asyncio
 import importlib.util
 import json
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -110,3 +112,57 @@ def test_hashing_stays_off_the_event_loop(frontend):
     )
     # ...and the one other caller takes the tokens rather than computing them.
     assert "card_versions: dict[str, str]" in source
+
+
+def test_a_static_path_is_registered_once_per_process(frontend):
+    """`async_register_static_paths` does not deduplicate, and this runs from
+    `async_setup_entry`.
+
+    So a second printer, or any options change that reloads the entry, used to
+    re-register the same paths and raise every time. Both the duplicate and a
+    genuine failure logged the same warning, which made the warning unreadable.
+    """
+    calls = []
+
+    class _Http:
+        async def async_register_static_paths(self, configs):
+            calls.append([c.url_path for c in configs])
+
+    tasks = []
+    hass = SimpleNamespace(
+        data={},
+        http=_Http(),
+        async_create_task=lambda coro: tasks.append(coro),
+    )
+
+    frontend._register_static_path(hass, "/ha_creality_ws/", "/tmp/whatever")
+    frontend._register_static_path(hass, "/ha_creality_ws/", "/tmp/whatever")
+
+    assert len(tasks) == 1, "the second registration should not even be scheduled"
+    asyncio.run(tasks[0])
+    assert calls == [["/ha_creality_ws/"]]
+
+
+def test_a_failed_registration_stays_retryable(frontend):
+    """Marking before the task runs is what makes the skip work, so the marker
+    has to come back off when the registration actually fails."""
+
+    class _Http:
+        async def async_register_static_paths(self, configs):
+            raise RuntimeError("route already exists")
+
+    tasks = []
+    hass = SimpleNamespace(
+        data={},
+        http=_Http(),
+        async_create_task=lambda coro: tasks.append(coro),
+    )
+
+    frontend._register_static_path(hass, "/ha_creality_ws/", "/tmp/whatever")
+    asyncio.run(tasks[0])
+
+    frontend._register_static_path(hass, "/ha_creality_ws/", "/tmp/whatever")
+    assert len(tasks) == 2, "a failed registration must be retried on the next reload"
+    # Never scheduled on a real loop here, so close it rather than leave an
+    # un-awaited coroutine for the garbage collector to warn about.
+    tasks[1].close()

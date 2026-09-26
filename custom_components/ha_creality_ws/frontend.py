@@ -17,6 +17,8 @@ CARDS = [PRINTER_CARD_NAME, CFS_CARD_NAME]
 # as a side effect of adding an image.
 ASSETS = ["cfs_box.webp"]
 INTEGRATION_URL_BASE = f"/{LOCAL_SUBDIR}/"
+# Static routes are per-process, not per-config-entry. See _register_static_path.
+_STATIC_PATHS_KEY = f"{LOCAL_SUBDIR}_static_paths"
 I18N_URL_BASE = f"{INTEGRATION_URL_BASE}i18n"
 def card_version(card_name: str) -> str:
     """Cache-buster for one card, derived from what is actually being served.
@@ -62,10 +64,24 @@ def _register_static_path(hass: HomeAssistant, url_path: str, path: str) -> None
     copied into /config/www, so an update cannot leave a stale copy behind.
 
     Registration is done in a task with its own error handling: aiohttp raises
-    when the same method and path are already registered, which happens on a
-    config-entry reload, and an unretrieved task exception would otherwise
-    surface as a noisy traceback in the log.
+    when the same method and path are already registered, and an unretrieved
+    task exception would otherwise surface as a noisy traceback in the log.
+
+    Tracked per Home Assistant process, because `async_register_static_paths`
+    does not deduplicate and this runs from `async_setup_entry`: a second
+    printer, or any options change that reloads the entry, would otherwise
+    re-register the same four paths and raise every time. That used to be
+    accepted as the price of not being silent about a real failure, since both
+    cases logged the same warning. Skipping the duplicate instead means the
+    warning below now only ever means the real thing.
+
+    The marker is dropped again if registration fails, so a genuine failure
+    stays retryable on the next reload.
     """
+    registered: set[str] = hass.data.setdefault(_STATIC_PATHS_KEY, set())
+    if url_path in registered:
+        return
+    registered.add(url_path)
 
     async def _register() -> None:
         try:
@@ -74,9 +90,8 @@ def _register_static_path(hass: HomeAssistant, url_path: str, path: str) -> None
             )
         except Exception as exc:  # pylint: disable=broad-except
             # Warning, not debug: if this fails the Lovelace cards 404 on every
-            # dashboard, and at debug level nothing would say why. A duplicate
-            # route on reload is the benign case and reads the same, which is
-            # the price of not being silent about the real one.
+            # dashboard, and at debug level nothing would say why.
+            registered.discard(url_path)
             _LOGGER.warning(
                 "Could not serve %s from %s: %s", url_path, path, exc
             )
