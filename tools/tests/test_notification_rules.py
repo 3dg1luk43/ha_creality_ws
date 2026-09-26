@@ -390,7 +390,8 @@ def test_end_of_print_jitter_cannot_produce_a_second_push():
             state.record_push(
                 reason=reason, snap=snap, now_mono=now, now_epoch=1_700_000_000.0, when=None
             )
-    # The START, then the single 95->100 bucket crossing. Never a second one.
+    # The START, then the single 99->100 milestone crossing. The latch is
+    # monotonic, so the later 100 after the 99s never produces a second one.
     assert pushes == [(PushReason.START, 99), (PushReason.MILESTONE, 100)]
 
 
