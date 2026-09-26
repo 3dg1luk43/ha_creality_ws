@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [0.9.8] - 2026-09-08
+## [0.9.8] - 2026-09-26
 > [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)
 
 > **This release raises the minimum Home Assistant version to 2026.7.0.** HACS
@@ -79,6 +79,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The diagnostic service was re-registered on every printer setup**, and the Home Assistant version in a diagnostic dump always read `unknown`. Both were `hasattr` checks against objects that never had the attribute -- one against a dict, one against `hass.config` -- so neither guard ever fired. The dump now reports the real version, with a UTC timestamp instead of a naive local one.
 - **The legacy light switch and the legacy fan percentage controls could never be created.** The migration that removes those entities from the registry runs *before* platform setup, and both platforms only created an entity if the registry already had one -- so `switch.py` produced nothing at all. The dead platform and controls are gone; the migration that cleans up the old entities stays.
 - **The camera advertised a feature flag that does not exist.** `CameraEntityFeature` has only `ON_OFF` and `STREAM`; the code also OR'd in a non-existent `ON_DEMAND` and then logged `ON_OFF`'s bit under that name, so the log line always said `ON_DEMAND=False`. It now declares `STREAM`, which is what native WebRTC actually needs.
+- **Every field in the printer card's Style Editor was labelled with its raw config key.** The editor installed its label function behind `if (this._entitiesForm.computeLabel)`, and `ha-form` leaves `computeLabel` undefined until something assigns it, so the guard was never true and the translated labels it had ready were never used. Assigned unconditionally now, along with the helper text.
+- **Saving a colour in the Style Editor changed colours you had not touched.** The picker round-tripped through a hex conversion that discarded the alpha on the way in and hardcoded `0.9` on the way out, so pressing Save rewrote every colour to 90% opacity: the stop button's `.95` and the light-off grey's `.35` both silently became `.90`. The same conversion read fixed offsets out of the string, so a three-digit `#abc` came back as an invalid colour rather than being expanded. Both directions understand shorthand hex and preserve the alpha now.
 - **The printer card had branches for `resuming` and `pausing`**, neither of which the integration can ever report -- so the paused colour and two icon choices keyed on states that never arrive. The card now mirrors the real state list, and a test cross-checks it against the integration the way the CFS card already did.
 - **A failure to serve the dashboard cards was logged at debug level**, meaning the cards would 404 with nothing in the log to say why. It is a warning now.
 
