@@ -1,0 +1,380 @@
+# CodeRabbit mechanics
+
+How the bot actually behaves, and the exact commands.
+
+## Behaviour quirks that cost time when forgotten
+
+- **The bot login differs by endpoint.** `gh pr view --json comments` reports the
+  author as `coderabbitai`. The raw REST `/issues/N/comments` reports
+  `coderabbitai[bot]`. GraphQL threads may report either, plus `coderabbit[bot]`.
+  Filter on all three or findings silently vanish -- but filter on **exactly**
+  those three. A substring match (`test("coderabbit")`) is what the completion
+  and rate-limit checks used to use, and on a public PR anyone may comment, so
+  an account like `coderabbit-notifier` could end a round early, fake a
+  rate-limit wait, or feed the harvest. One anchored allowlist, used everywhere:
+
+  ```bash
+  # Exact membership, not a regex: `test("...\\[bot\\]...")` is three levels of
+  # escaping (shell, jq string, regex) and jq rejects a bare `\[`, which is how
+  # the first attempt at this silently matched nothing. Only the three logins
+  # observed in practice; a fourth variant stalls the poller visibly rather
+  # than letting an impostor satisfy it, which is the better failure.
+  _CR_LOGINS='["coderabbitai","coderabbitai[bot]","coderabbit[bot]"]'
+  ```
+- **Inline findings and the summary live in different places.** Inline findings are
+  pull *review comments*. The summary/walkthrough is an *issue* comment. Fetching
+  only one gives a partial picture.
+- **ASSERTIVE mode posts a subset per pass.** Every retrigger surfaces a fresh
+  batch. Do not read a small round as "nearly clean".
+- **Replies are ignored unless they `@coderabbitai`.** Untagged replies do not
+  resolve the thread, do not re-evaluate, and do not reach the next pass.
+- **Only a push retriggers automatically.** Comments and replies do not.
+  `@coderabbitai review` or `@coderabbitai full review` triggers manually.
+- **Its `resolved` flags are not evidence.** It has marked findings resolved and
+  credited commits that never touched the code.
+- **It withdraws findings under evidence-backed pushback.** On this repo it
+  conceded a fabricated "configured lint checks" premise. Pushing back works.
+- **It falsely cites lint config.** This repo has **no ruff, flake8 or pylint
+  configuration at all** - no `ruff.toml`, no `[tool.ruff]` in `pyproject.toml`
+  (which holds only `[tool.pytest.ini_options]`), and no linter in
+  `.github/workflows/`. A stray `.ruff_cache/` directory from someone's ad-hoc run
+  is not configuration. So any `Ruff (x.y.z)` tool note attached to a finding comes
+  from CodeRabbit's own run, not from a repo rule, and "needed to pass the
+  configured lint checks" is false on its face here. Verify before accepting.
+- **Rate limit:** roughly 4 full reviews per hour.
+- **Latency:** 10-20 min on a large diff.
+
+## Resolve coordinates
+
+```bash
+owner=$(gh repo view --json owner --jq '.owner.login')
+repo=$(gh repo view --json name --jq '.name')
+pr=$(gh pr list --head "$(git branch --show-current)" --state open --json number --jq '.[0].number')
+```
+
+Note the remote reports a rename (`ha-creality-ws` -> `ha_creality_ws`) on every
+push. It is a redirect notice, not an error, and `gh repo view` resolves the
+current name correctly.
+
+## Completion detection
+
+**Do not key this off comment `updated_at`.** CodeRabbit posts an "Action performed:
+Full review triggered" *ack* comment before it stamps the in-progress marker onto the
+summary comment. A poller that starts immediately sees no marker and a fresh
+`updated_at`, and declares the round complete within a minute of the trigger, with
+zero findings. That reads as a clean round and it is not one.
+
+The only reliable completion signal is a **submitted review**. Two conditions, both
+required, plus a lead-in sleep that covers the ack race:
+
+1. The in-progress marker is absent from the **summary comment specifically** (not from
+   "any bot comment" - the ack is a bot comment and never carries the marker).
+2. `/pulls/$pr/reviews` holds at least one CodeRabbit review with `submitted_at` after
+   the trigger timestamp.
+3. That review is a **review pass**, not a reply. Replying to threads also submits a
+   review - `state: COMMENTED` with an **empty body** - so condition 2 alone goes true
+   within a minute of a round where you posted replies, reporting a clean round that
+   never ran. Require a non-empty body, or that the marker was seen at least once.
+
+Check for the rate-limit refusal **before** trusting any of it. The ack can read
+`Action performed / Full review triggered` and carry `Review rate limited ... your next
+included review will be available in N minutes` in the same comment: triggered, but not
+actually run. Grep the ack for `rate limited` and wait N minutes rather than polling.
+
+Capture the trigger timestamp (`date -u +%FT%TZ`) **before** posting the retrigger, and
+note the summary comment id once per PR. The ack is identified by id rather than
+timestamp, so anchor on the retrigger comment's own id:
+
+```bash
+# Anchor on the id of the retrigger comment *you just posted*, which `gh pr
+# comment` prints as the URL fragment. "The newest comment before I started"
+# leaves a lagging `resume` ack inside the scan window, and on this PR that
+# ack has landed after the `full review` comment more than once.
+url=$(gh pr comment "$pr" --body '@coderabbitai full review')
+last_comment_id=${url##*-}
+# Fail rather than fall back. A malformed URL would build the invalid jq
+# filter `.id > `, but 0 is not the safe default it looks like: it is below
+# every real id, so it means "every CodeRabbit comment on the PR", including
+# the `rate limited` acks of earlier rounds. The scan would then report a
+# refusal on its first iteration of every round and the poller would exit
+# RATE-LIMITED for a review that had actually started.
+[[ $last_comment_id =~ ^[0-9]+$ ]] || {
+  echo "cannot read the retrigger comment id from: $url" >&2; exit 1; }
+```
+
+Wait in the background (single notification on exit, ~9 min cap, re-arm if it times out).
+Do not use `Monitor` for this, and do not foreground-sleep.
+
+```bash
+# Passed in, never a literal. The completion check accepts any CodeRabbit
+# review submitted after this instant, so a fixed date in the past lets an
+# *earlier* review satisfy it -- the poller then reports REVIEW COMPLETE for a
+# round that has not run, and the harvest returns the previous round's threads.
+# Capture it with `date -u +%FT%TZ` immediately before posting the retrigger.
+trigger="$1"
+# Passed in as well, for the same reason the trigger is: the anchor decides
+# which acks the refusal scan may look at. Left unset -- which is what a
+# backgrounded copy of this snippet gets, since nothing else supplies it --
+# the scan below would fall back to "everything" and re-read old refusals.
+last_comment_id="$2"
+[[ $last_comment_id =~ ^[0-9]+$ ]] || {
+  echo "usage: poller <trigger> <retrigger-comment-id>" >&2; exit 1; }
+summary_id=<the walkthrough issue comment id for this PR>
+sleep 120                        # covers the ack race
+
+# The ack can say "Full review triggered" and carry the rate-limit refusal in the
+# same comment. Nothing will ever be submitted, so polling just burns the window.
+#
+# Checked *inside* the loop, not once before it. Two reasons, both observed:
+# GitHub's comment list lags its own `created_at`, so an ack stamped 30s before
+# the check can still be invisible to it; and `$(... || echo "")` turns a failed
+# fetch into "no rate limit", which is the wrong default. Re-reading it each
+# iteration catches a late ack and costs one request per 30s.
+# There is more than one refusal wording. Both carry the wait, neither is
+# reliably "rate limited":
+#   * "Action not completed" / "Review rate limited."
+#   * "Action failed" / "Review failed." -- says only "your included review limit
+#     is currently reached", so a grep for "rate limited" sails straight past it.
+_CR_LOGINS='["coderabbitai","coderabbitai[bot]","coderabbit[bot]"]'
+_CR_REFUSAL_RE='rate limited|review limit is currently reached|next included review will be available'
+
+check_rate_limit() {
+  local ids id body wait_min
+  # Keyed on comment ids, not timestamps. `date -u +%FT%TZ` has one-second
+  # precision, so an ack posted in the same second as the trigger compares
+  # equal and a strict `>` misses it. Ids are monotonic per repo.
+  # 2, not a fallback to 0: "I cannot tell" must not read as "scan everything",
+  # which would match earlier rounds' refusal acks.
+  [[ $last_comment_id =~ ^[0-9]+$ ]] || return 2
+  # *Every* new bot comment, not just the lowest. A round that needs
+  # `@coderabbitai resume` as well as `full review` gets **two** acks, and the
+  # resume one has been observed arriving 13 minutes late -- after the full
+  # review was posted. "Only the lowest new id may decide" then picked the
+  # resume ack, which carries no refusal, and the rate limit on the review
+  # itself went unseen; the poller ran its whole window against a review that
+  # was never going to start.
+  #
+  # Scanning all of them is safe for two reasons. The scan is anchored to the
+  # id of the retrigger comment you just posted (below), so a previous round's
+  # refusal is out of range. And the other refusal wording -- "Already
+  # reviewed the last commit" -- is deliberately *not* in `_CR_REFUSAL_RE`: it
+  # means the resume was a no-op, not that the review was declined.
+  #
+  # Ids first, then one fetch each, because `--paginate --jq` runs the filter
+  # per page, so a jq-side `.[0]` emits one body per page.
+  # The sort is a separate statement on purpose. `$(gh api ... | sort -n)`
+  # reports *sort's* status, and `sort` succeeds on the empty input a failed
+  # request leaves behind, so `|| return 2` never fired and an API error read
+  # as "nothing refused" -- the exact defect this `return 2` path exists to
+  # prevent. `set -o pipefail` would also do it; keeping them separate means
+  # the snippet is correct however it is pasted.
+  ids=$(gh api "repos/$owner/$repo/issues/$pr/comments" --paginate --jq \
+    "[.[] | select(.user.login as \$l | $_CR_LOGINS | index(\$l)) | select(.id > $last_comment_id)] | .[].id") \
+    || return 2   # API error, not a negative result
+  ids=$(sort -n <<<"$ids")
+  for id in $ids; do
+    [[ $id =~ ^[0-9]+$ ]] || continue
+    body=$(gh api "repos/$owner/$repo/issues/comments/$id" --jq '.body') || return 2
+    grep -qiE "$_CR_REFUSAL_RE" <<<"$body" || continue
+    wait_min=$(grep -oiE "available in [0-9]+ minute" <<<"$body" | grep -oE "[0-9]+" | head -1)
+    echo "RATE-LIMITED: no review started; retry in ${wait_min:-20} min"
+    return 1
+  done
+  return 0
+}
+
+end=$((SECONDS+480))
+while [ $SECONDS -lt $end ]; do
+  # 1 is a confirmed refusal; 2 is "the API did not answer". A failed fetch is
+  # not evidence that nothing was refused -- `|| return 0` made a transient
+  # error indistinguishable from a clean scan, so a refusal arriving during a
+  # blip stayed invisible and the poller waited out its whole window. Retry
+  # instead, and only a body actually read may end the round.
+  check_rate_limit; _rc=$?
+  [ "$_rc" = 1 ] && exit 2
+  [ "$_rc" = 2 ] && { sleep 30; continue; }
+  # A failed fetch must not read as "marker absent": `grep -c` on FETCHFAIL
+  # returns 0, so a transient API error plus an already-submitted review would
+  # report completion without ever confirming the marker had cleared.
+  sumbody=$(gh api "repos/$owner/$repo/issues/comments/$summary_id" --jq '.body') || { sleep 30; continue; }
+  # Both marker forms, per the note above: matching only one lets `busy` reach 0
+  # while the other is still on the summary, and the poller calls it complete.
+  busy=$(grep -cE "review in progress by coderabbit.ai|Come back again in a few minutes" <<<"$sumbody" || true)
+  # Non-empty body only: an empty-bodied COMMENTED review is CodeRabbit replying
+  # to threads, which would otherwise read as a completed pass.
+  # `--paginate` runs the --jq filter per *page*, so this emits one count per
+  # page: a bare `!= "0"` test on the raw value compares against "0\n0" and goes
+  # true on two empty pages. Sum them.
+  # Captured before the sum: a failed request makes `awk` print 0 all the
+  # same, so piping straight into it turns an API error into "no review yet"
+  # and the poller waits out its window on a review that has already landed.
+  reviews=$(gh api "repos/$owner/$repo/pulls/$pr/reviews" --paginate --jq \
+    "[.[] | select(.user.login as \$l | $_CR_LOGINS | index(\$l)) | select(.submitted_at > \"$trigger\") | select(.body != \"\")] | length" \
+    ) || { sleep 30; continue; }
+  # One count per page, because `--paginate --jq` runs the filter per page.
+  realrev=$(awk '{s+=$1} END{print s+0}' <<<"$reviews")
+  if [ "$busy" = "0" ] && [ "$realrev" != "0" ]; then
+    echo "REVIEW COMPLETE realrev=$realrev"; exit 0
+  fi
+  sleep 30
+done
+echo "TIMEOUT busy=$busy realrev=$realrev"; exit 1
+```
+
+ISO-8601 UTC timestamps compare correctly as strings, so `>` is safe here.
+
+## Timezones: UTC for the API, local for people
+
+This machine is **Europe/Prague** (+01:00 winter, +02:00 summer) and the
+maintainer's commits carry that offset. GitHub's API returns and accepts UTC
+`Z` timestamps. Keep the two apart:
+
+- **Every timestamp compared against the API stays UTC.** `trigger`,
+  `submitted_at`, `created_at`, the poller's whole comparison chain: capture
+  with `date -u +%FT%TZ` and never with local time. A local `+02:00` stamp
+  compared as a string against a `Z` stamp is wrong by two hours in the
+  direction that makes the poller accept an *earlier* review, which reads as a
+  clean round that never ran.
+- **Every timestamp shown to the maintainer is local**, because that is the
+  clock they are reading. Reporting "the review landed at 05:33Z" makes them do
+  the conversion on every line. Say `07:33` local, or `07:33 local / 05:33Z`
+  where the UTC value is what a log or an API response will show them.
+- **Calendar dates are local.** The release-notes date, and anything else a
+  human reads as "what day is it", come from `date +%F`, not `date -u +%F`.
+  Between 22:00 and midnight local in summer those two disagree, so a
+  UTC-derived date stamps a release with yesterday.
+
+```bash
+date -u +%FT%TZ     # for the API and the poller
+date +%F            # for a release-notes date
+date +%H:%M         # for a time shown in a report
+```
+
+The stock plugin greps for `Come back again in a few minutes`. The marker observed
+in practice is `review in progress by coderabbit.ai`. Match either.
+
+## Harvest unresolved threads
+
+```bash
+gh api graphql -F owner="$owner" -F repo="$repo" -F pr="$pr" -f query='
+query($owner:String!, $repo:String!, $pr:Int!, $endCursor:String) {
+  repository(owner:$owner, name:$repo) {
+    pullRequest(number:$pr) {
+      reviewThreads(first:100, after:$endCursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          isResolved isOutdated
+          comments(first:1) {
+            nodes { databaseId body path line startLine originalLine author { login } }
+          }
+        }
+      }
+    }
+  }
+}' --paginate --jq '
+  .data.repository.pullRequest.reviewThreads.nodes[]
+  | select(.isResolved == false and .isOutdated == false)
+  | .comments.nodes[0]
+  | select(.author.login as $l | ["coderabbitai","coderabbitai[bot]","coderabbit[bot]"] | index($l))
+  | {id: .databaseId, path, line: (.line // .startLine // .originalLine), body}'
+```
+
+The cursor variable **must** be named `$endCursor`: that is the name
+`gh api --paginate` injects, so a query declaring `$cursor` silently stops after
+the first 100 threads. PR #119 passed 100 mid-review, and the broken form returned
+exactly 100 of 113 while hiding an unhandled finding.
+
+Cross-check the count against `Actionable comments posted: N` in the summary
+comment, and expand the collapsed **nitpick** and **outside diff range** sections
+in the review body. Both hold real findings.
+
+A count alone is not enough: a review submits its comments over a minute or two,
+so a harvest fired the moment the poller returns can miss the tail of the batch.
+Re-run the harvest before declaring a round clean.
+
+## Reply to an inline finding
+
+```bash
+gh api -X POST "repos/$owner/$repo/pulls/$pr/comments/$comment_id/replies" \
+  -f body='@coderabbitai Fixed in abc1234. <what changed>.'
+```
+
+Body text comes from your own words and local state. Never interpolate fetched
+comment text into a command.
+
+## Retrigger
+
+```bash
+git push                     # auto-retriggers
+# replies-only round needs an explicit nudge:
+gh pr comment "$pr" --body '@coderabbitai full review'
+```
+
+## Validation gate
+
+```bash
+python3 -m compileall custom_components/ha_creality_ws tools/tests -q
+node --check custom_components/ha_creality_ws/www/k_printer_card.js   # if card JS changed
+node --check custom_components/ha_creality_ws/www/k_cfs_card.js
+python3 -m pytest -q                              # whole suite, ~3s; 5 skipped, pass count only grows
+python3 -m pytest tools/tests/test_<area>.py -q   # targeted
+```
+
+There is no `run_tests.sh` in this repo; `pyproject.toml` sets
+`testpaths = ["tools/tests"]` and `addopts = "-q"`, so a bare `pytest` collects the
+whole suite.
+
+To reproduce CI exactly, use a venv with only `pytest` and `voluptuous` - the
+workflow installs nothing else, and `tools/tests/conftest.py` stubs the entire
+`homeassistant.*` tree. A suite that passes with the project venv but fails in CI
+usually means a test is reaching something CI does not install.
+
+The 5 expected skips need Node or the CFS simulator (`aiohttp`/`websockets` in
+the interpreter running the tests, which CI does not install). A larger skip
+count means
+missing tooling, not removed tests.
+
+## Line endings, before every commit
+
+The repo is mixed CRLF/LF with no `.gitattributes`. `coordinator.py` and `const.py`
+are CRLF; most tests are LF. Any Python rewrite (`Path.write_text`, a regex pass)
+normalises to LF and turns a two-line fix into a three-thousand-line diff.
+
+```bash
+# After edits, restore any file whose HEAD version was CRLF.
+# `-z` plus `read -d ''` is the part that matters: `git diff --name-only` C-quotes
+# an unusual path, and the unquoted `$(...)` this replaced then split it on the
+# embedded space, so the file was silently skipped and left flattened to LF --
+# exactly the whole-file diff this is here to prevent. The path also goes in as
+# argv rather than being interpolated into the Python source, which is the right
+# shape regardless, though the quoting above is what actually stopped the old
+# form from reaching Python with a crafted name.
+while IFS= read -r -d '' f; do
+  case "$f" in *.py|*.json|*.js|*.mjs|*.md) ;; *) continue ;; esac
+  git show "HEAD:$f" 2>/dev/null | grep -qU $'\r' || continue
+  python3 -c 'import pathlib, sys
+p = pathlib.Path(sys.argv[1]); d = p.read_bytes()
+n = d.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+p.write_bytes(n) if n != d else None' "$f"
+done < <(git diff -z --name-only HEAD)
+git diff --stat   # confirm the diff is the size you intended
+```
+
+## Driving the printer simulator
+
+Findings about telemetry handling can be tested for real rather than argued about.
+`tools/creality_printer_test_server.py` serves WebSocket telemetry plus a
+test-only HTTP control surface on port 8000:
+
+```bash
+curl -s localhost:8000/test/state                      # current telemetry
+curl -s -X POST localhost:8000/test/set  -H 'Content-Type: application/json' \
+     -d '{"printProgress":42,"state":1,"printLeftTime":600}'   # force fields
+curl -s -X POST localhost:8000/test/set  -H 'Content-Type: application/json' \
+     -d '{"printProgress":null}'                       # null removes an override
+curl -s -X POST localhost:8000/test/reset
+```
+
+Forced fields are applied last in `snapshot()`, so they mask the simulation -
+including anything a printer command would have changed. Clear the overrides when
+finished or the next person debugging a pause will find it does nothing.

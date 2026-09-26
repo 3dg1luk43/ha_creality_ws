@@ -2,6 +2,7 @@
 backups/*
 custom_components/ha_creality_ws/__pycache__/*
 ha_creality_ws.code-workspace
+tools/__pycache__
 tools/tests/__pycache__
 tools/test_files
 .agent
