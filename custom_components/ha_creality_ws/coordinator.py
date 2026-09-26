@@ -57,7 +57,7 @@ from .notification_rules import (
     is_new_job_cycle,
     render_user_template,
     TEMPLATE_FIELDS,
-    sanitize_tag,
+    notify_tag_base,
     stringify_data,
 )
 from .const import (
@@ -1929,7 +1929,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Assistant restart, because that is what lets an existing card be
         replaced rather than duplicated.
         """
-        return sanitize_tag(f"{DOMAIN}_{self.entry_id or self.client._host}")
+        return notify_tag_base(self.entry_id, self.client._host)
 
     async def _notify_event(self, message: str, *, kind: str) -> None:
         """Build and dispatch one of the one-shot lifecycle notifications.

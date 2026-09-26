@@ -186,3 +186,45 @@ def test_the_core_version_gate_can_read_a_version():
 
     assert running == (2026, 6), "and a wound-back core must be seen as old"
 
+
+
+def test_removal_dismisses_the_tags_the_coordinator_actually_posts():
+    """The two ends of an entry's life have to agree on the prefix.
+
+    `KCoordinator._notify_tag_base` is what live cards are posted under, and
+    `async_remove_entry` builds the payloads that dismiss them. The formula
+    used to be written out at both sites. Nothing failed while they matched,
+    and if they ever stopped matching the symptom would be live cards stranded
+    on a phone after the integration was removed, with nothing in the log.
+
+    So this asserts against the coordinator's own method rather than against a
+    hardcoded string: a change to either path that does not change the other
+    fails here.
+    """
+    from custom_components.ha_creality_ws.coordinator import KCoordinator
+
+    entry_id = "abc123"
+    hass = _remove(
+        fake_config_entry(
+            entry_id, options={"notify_targets": ["notify.mobile_app_s24"]}
+        )
+    )
+    posted_base = KCoordinator._notify_tag_base(
+        SimpleNamespace(entry_id=entry_id, client=SimpleNamespace(_host="1.2.3.4"))
+    )
+    dismissed = {c[2]["data"]["tag"] for c in hass.calls}
+    assert dismissed == {f"{posted_base}_{s}" for s in ("live", "soon", "alert")}
+
+
+def test_the_tag_base_falls_back_to_the_host_before_an_entry_id_exists():
+    """The coordinator can be built before the entry id is set; removal cannot.
+
+    Dots are illegal in a tag, so the host has to be sanitised rather than
+    interpolated raw.
+    """
+    from custom_components.ha_creality_ws.coordinator import KCoordinator
+
+    base = KCoordinator._notify_tag_base(
+        SimpleNamespace(entry_id=None, client=SimpleNamespace(_host="192.168.1.5"))
+    )
+    assert base == "ha_creality_ws_192_168_1_5"

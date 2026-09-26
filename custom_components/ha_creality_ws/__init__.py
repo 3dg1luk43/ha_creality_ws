@@ -42,7 +42,7 @@ from .notification_rules import (
     build_clear_payload,
     coerce_targets,
     is_mobile_target,
-    sanitize_tag,
+    notify_tag_base,
 )
 from homeassistant.components.persistent_notification import (  # type: ignore[import]
     async_create as pn_async_create,
@@ -1024,7 +1024,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     if not targets:
         return
 
-    tag_base = sanitize_tag(f"{DOMAIN}_{entry.entry_id}")
+    tag_base = notify_tag_base(entry.entry_id)
     payloads = [
         build_clear_payload(f"{tag_base}_{suffix}")
         for suffix in ("live", "soon", "alert")

@@ -32,6 +32,7 @@ from typing import Any
 from .const import (
     CLEAR_NOTIFICATION_MARKER,
     CONF_NOTIFY_DEVICE,
+    DOMAIN,
     CONF_NOTIFY_TARGETS,
     NOTIFY_COLOR_DONE,
     NOTIFY_COLOR_ERROR,
@@ -390,6 +391,27 @@ def sanitize_tag(raw: Any) -> str:
     """Coerce anything into a legal notification tag."""
     cleaned = _TAG_ILLEGAL.sub("_", str(raw or "")).strip("_")
     return (cleaned or "ha_creality_ws")[:_TAG_MAX_LEN]
+
+
+def notify_tag_base(entry_id: Any, fallback: Any = None) -> str:
+    """Stable tag prefix for one printer.
+
+    Derived from the config entry id and never from the host: the host is an
+    IP address and dots are illegal in a tag. It also has to survive a Home
+    Assistant restart, because that is what lets an existing card be replaced
+    rather than duplicated.
+
+    Shared rather than spelled out at each call site because the two that need
+    it sit at opposite ends of an entry's life: the coordinator posts cards
+    under this prefix, and `async_remove_entry` builds the clear payloads that
+    dismiss them. They agree today, and if they ever stopped agreeing the
+    symptom would be live cards stranded on a phone after the integration was
+    removed, with nothing in the log to say why.
+
+    `fallback` covers the coordinator's case of an entry id that is not set
+    yet; removal always has a real one.
+    """
+    return sanitize_tag(f"{DOMAIN}_{entry_id or fallback}")
 
 
 def stringify_data(data: Mapping[str, Any] | None) -> dict[str, Any]:
