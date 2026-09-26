@@ -596,6 +596,52 @@ class PrinterState:
         external spool holder (type==1). This is what `cfsConnect` reports."""
         return any(box.get("type") == 0 for box in self._cfs_boxes)
 
+    def get_gcode_file_info(self) -> dict[str, Any]:
+        """Answer `reqGcodeFile` the way a K1C does.
+
+        Verified against a K1C on firmware 1.3.5.22: the reply is metadata for
+        *every* file on the printer, not just the running one, and there is no
+        single-file form of the query. The decoys below are what make that
+        worth simulating -- the integration has to pick its job out of the
+        listing, and `path` is the field that identifies it.
+
+        `consumables` is filament length in mm, the same unit as
+        `usedMaterialLength`. `filamentWeight` is grams, as a string, and is
+        empty on files the printer did not slice itself -- the last entry is
+        that case, which is why it carries a length but no weight.
+        """
+        def _entry(name: str, mm: int, grams: str, seconds: int) -> dict[str, Any]:
+            return {
+                "custom_types": 1,
+                "type": 8,
+                "name": name,
+                "path": f"/usr/data/printer_data/gcodes/{name}",
+                "file_size": mm * 1800,
+                "create_time": 1790401399,
+                "timeCost": seconds,
+                "consumables": mm,
+                "material": "PLA",
+                "nozzleTemp": 22000,
+                "bedTemp": 6000,
+                "software": "OrcaSlicer" if grams else "Creality",
+                "thumbnail": f"/usr/data//creality/local_gcode/humbnail/{name}.png",
+                "preview": f"/usr/data//creality/local_gcode/original/{name}.png",
+                "materialColors": "#26A69A" if grams else "",
+                "materialIds": "09001" if grams else "",
+                "filamentWeight": grams,
+                # Trailing whitespace is what the printer really sends, on a
+                # machine with no CFS attached at all.
+                "match": "T1A=  " if grams else "",
+            }
+
+        return {
+            "retGcodeFileInfo2": [
+                _entry("older_job.gcode", 7422, "22.32", 8300),
+                _entry(self._print_file, 1536, "4.62", 1552),
+                _entry("3DBenchy.gcode", 3723, "", 983),
+            ]
+        }
+
     def get_cfs_info(self) -> dict[str, Any]:
         """Generate a realistic CFS status payload."""
         # Update dynamic fields in CFS boxes
@@ -1044,6 +1090,8 @@ async def ws_handle_conn(ws: Any, state: PrinterState):
                 params = msg.get("params", {})
                 if "boxsInfo" in params:
                     await ws_safe_send(ws, state.get_cfs_info())
+                elif "reqGcodeFile" in params:
+                    await ws_safe_send(ws, state.get_gcode_file_info())
                 else:
                     await ws_safe_send(ws, state.snapshot())
             elif isinstance(msg, dict) and msg.get("method") == "set":

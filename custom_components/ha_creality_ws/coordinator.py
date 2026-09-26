@@ -76,6 +76,10 @@ from .const import (
     NOTIFY_ONLY_OPTION_KEYS,
     NOTIFY_TEMPLATE_OPTIONS,
     LATE_DISCOVERY_FIELDS,
+    GCODE_FILE_RESPONSE,
+    GCODE_INFO_KEY,
+    GCODE_INFO_MAX_ATTEMPTS,
+    GCODE_INFO_RETRY_SECS,
     BUS_EVENT_PRINT_ERROR,
     BUS_EVENT_PRINT_FINISHED,
     BUS_EVENT_PRINT_STARTED,
@@ -232,6 +236,16 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         
         # Caches
         self._is_k2_base: bool | None = None
+
+        # Sliced-G-code metadata. `_gcode_info_file` is the file name the cached
+        # entry was resolved for, and it is set even when the listing held no
+        # match, so a file the printer has no metadata for is asked about once
+        # rather than on every frame. `_gcode_info_attempts` only bounds the
+        # case where the request draws no reply at all.
+        self._gcode_info_file: str | None = None
+        self._gcode_info_requested_for: str | None = None
+        self._gcode_info_request_ts: float = 0.0
+        self._gcode_info_attempts: int = 0
 
         if self.config_entry:
             self._load_options()
@@ -579,6 +593,101 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.debug("CFS Raw Data: %s", json.dumps(payload.get("boxsInfo"), default=str))
             async_dispatcher_send(self.hass, f"{DOMAIN}_new_entities_{self.entry_id}")
 
+    @staticmethod
+    def _match_gcode_entry(
+        entries: list[Any], filename: str
+    ) -> dict[str, Any] | None:
+        """Find the listing entry describing `filename`.
+
+        `printFileName` is a full path on every printer seen so far, and entries
+        carry both `path` and a bare `name`, so the path is the exact match. The
+        name is kept as a fallback for firmware that reports the running job by
+        base name alone, where the path comparison could never hit.
+        """
+        base = filename.rsplit("/", 1)[-1]
+        fallback: dict[str, Any] | None = None
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("path") == filename:
+                return entry
+            if fallback is None and entry.get("name") == base:
+                fallback = entry
+        return fallback
+
+    def _invalidate_gcode_info(self) -> None:
+        """Drop metadata that belongs to a job which is no longer the current one.
+
+        Written straight into self.data rather than through merge_telemetry, and
+        only when the key is already present: the entities are gated on this
+        key's first appearance, and both deleting it and seeding it with None
+        would spend that one-shot on a job whose metadata never arrived.
+        """
+        if self.data.get(GCODE_INFO_KEY) is not None:
+            self.data[GCODE_INFO_KEY] = None
+
+    def _absorb_gcode_file_listing(self, payload: dict[str, Any]) -> None:
+        """Reduce a G-code metadata listing to the entry for the running job.
+
+        The listing describes every file on the printer and is removed from the
+        payload here, before merge_telemetry would put all of it into
+        coordinator data -- which templates, the dashboard card and the
+        notification payloads all read.
+        """
+        if GCODE_FILE_RESPONSE not in payload:
+            return
+
+        entries = payload.pop(GCODE_FILE_RESPONSE)
+        filename = payload.get("printFileName") or self.data.get("printFileName")
+        if not filename:
+            return
+        if not isinstance(entries, list):
+            _LOGGER.debug(
+                "Ignoring %s: expected a list, got %s",
+                GCODE_FILE_RESPONSE,
+                type(entries).__name__,
+            )
+            return
+
+        entry = self._match_gcode_entry(entries, filename)
+        # Recorded either way. A file the printer lists no metadata for is a
+        # settled answer, not a reason to keep asking.
+        self._gcode_info_file = filename
+        self._gcode_info_attempts = 0
+
+        if entry is None:
+            self._invalidate_gcode_info()
+            _LOGGER.debug(
+                "No sliced metadata for %s among %d listed files", filename, len(entries)
+            )
+            return
+
+        self.merge_telemetry({GCODE_INFO_KEY: entry})
+
+    async def _maybe_request_gcode_info(self) -> None:
+        """Ask for the metadata listing when the running file has changed."""
+        filename = self.data.get("printFileName")
+        if not filename or filename == self._gcode_info_file:
+            return
+
+        if filename != self._gcode_info_requested_for:
+            self._gcode_info_requested_for = filename
+            self._gcode_info_attempts = 0
+            self._invalidate_gcode_info()
+        elif self._gcode_info_attempts >= GCODE_INFO_MAX_ATTEMPTS:
+            # Firmware that does not implement the request answers nothing at
+            # all, so silence is the only signal there is to give up on.
+            return
+        elif (self.hass.loop.time() - self._gcode_info_request_ts) < GCODE_INFO_RETRY_SECS:
+            return
+
+        self._gcode_info_attempts += 1
+        self._gcode_info_request_ts = self.hass.loop.time()
+        try:
+            await self.client.request_gcode_file_info()
+        except Exception as exc:  # pylint: disable=broad-except
+            _LOGGER.debug("Sliced-metadata request failed for %s: %s", filename, exc)
+
     async def _handle_message(self, payload: dict[str, Any]) -> None:
         """Handle incoming WebSocket telemetry data."""
         # Suppress broken targetBoxTemp:0 from K2 Base port 9999.
@@ -596,6 +705,8 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if (payload.get("targetBoxTemp") == 0) and self._is_k2_base:
             payload.pop("targetBoxTemp")
 
+        self._absorb_gcode_file_listing(payload)
+
         self.merge_telemetry(payload)
 
         self._recompute_paused_from_telemetry()
@@ -611,6 +722,11 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # --- Notifications ---
         await self._check_notifications(payload)
+
+        # --- Sliced G-code metadata ---
+        # Must stay above the throttle below, which returns early while printing
+        # and would otherwise swallow the one frame that changed the file name.
+        await self._maybe_request_gcode_info()
 
         # --- Moonraker Fallback (K2 Base) ---
         if self._is_k2_base:

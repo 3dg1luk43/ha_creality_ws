@@ -26,6 +26,9 @@ Features
 - Model-based capabilities: box temp sensor/control, light, camera type
 - Deterministic mode and a test-control endpoint for reproducible/scripted testing
 - CFS: `cfsConnect` in the telemetry stream, `boxsInfo` on request, and **material writes** via `modifyMaterial`
+- Sliced-G-code metadata: `reqGcodeFile` returns a `retGcodeFileInfo2` listing of
+  several files, so matching the running job out of it is exercised, along with a
+  file that carries a length but no weight
 
 CFS material writes
 

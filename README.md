@@ -429,6 +429,47 @@ automation:
 
 ---
 
+## Filament Estimates
+
+Alongside `used_material_length`, which the printer streams as it prints, the
+integration asks the printer what the slicer estimated for the file it is
+running and exposes that as three sensors:
+
+| Entity | Unit | Meaning |
+| --- | --- | --- |
+| `sensor.<host>_expected_material_length` | cm | Filament the slicer expects the whole job to use |
+| `sensor.<host>_expected_material_weight` | g | Weight the slicer expects the whole job to use |
+| `sensor.<host>_filament_consumption` | % | Used divided by expected |
+
+The percentage is deliberately not the same thing as print progress -- filament
+use is not linear in time or in layers -- and it is not capped at 100%, because
+a job running past its estimate is worth seeing rather than hiding.
+
+The expected length and weight come from the slicer, via the printer; nothing
+here is derived from an assumed filament diameter or density.
+
+**Attributes** on the expected-length sensor: `material`, `color`, `slicer`,
+`estimated_time_s` and `gcode_file`, each passed through exactly as the printer
+words it.
+
+Some caveats, all of them the printer's behaviour rather than choices made here:
+
+- The metadata is fetched when the running file changes, never polled. The
+  printer has no way to be asked about a single file -- the reply describes
+  every G-code file it holds, which is ~150 KiB for a couple of hundred files.
+- Firmware that does not answer the request leaves these three sensors
+  uncreated rather than permanently unknown.
+- **Expected weight is blank for files the printer did not slice itself.**
+  Creality Print output and the sample models shipped on the printer arrive
+  with a length but no weight, so the weight sensor is unknown for those while
+  the length sensor still works.
+- **Multi-material jobs are not broken down per filament.** A CFS job packs
+  several values into these fields, and this has not been verified against CFS
+  hardware, so the weight sensor reports unknown rather than guessing which
+  number is the total. See [issue #122](https://github.com/3dg1luk43/ha_creality_ws/issues/122).
+
+---
+
 ## CFS (Creality Filament System)
 
 If your printer reports CFS data, the integration creates sensors for each CFS box and slot. It also exposes a dedicated set of sensors for the **external filament** (single slot).

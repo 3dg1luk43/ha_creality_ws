@@ -23,12 +23,13 @@ from homeassistant.const import (  # type: ignore[import]
     PERCENTAGE as U_PERCENT,
     EntityCategory,
     UnitOfLength,
+    UnitOfMass,
     UnitOfTemperature,
     UnitOfTime,
 )
 from homeassistant.helpers.dispatcher import async_dispatcher_connect # type: ignore[import]
 from .entity import KEntity
-from .const import DOMAIN
+from .const import DOMAIN, GCODE_INFO_KEY
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,12 +40,39 @@ U_C = UnitOfTemperature.CELSIUS
 U_MM = UnitOfLength.MILLIMETERS
 U_CM = UnitOfLength.CENTIMETERS
 U_S = UnitOfTime.SECONDS
+U_G = UnitOfMass.GRAMS
 
 
 # ----------------- helpers -----------------
 
 def _attr_dict(*pairs: tuple[str, Any]) -> dict[str, Any]:
     return {k: v for (k, v) in pairs if v is not None}
+
+
+def _gcode_info(coordinator) -> Mapping[str, Any] | None:
+    """The slicer's metadata for the running job, if the printer supplied any.
+
+    The coordinator reduces the printer's whole-listing reply to this one entry
+    and clears it when the running file changes, so anything here describes the
+    current job or is absent.
+    """
+    info = (coordinator.data or {}).get(GCODE_INFO_KEY)
+    return info if isinstance(info, Mapping) else None
+
+
+def _expected_length_mm(coordinator) -> float | None:
+    """Slicer-estimated filament length for the running job, in mm.
+
+    `consumables` shares its unit with the `usedMaterialLength` the printer
+    streams, which is what makes the two directly comparable. A zero is treated
+    as no answer rather than a real estimate -- no job consumes nothing, and it
+    is the denominator of the consumption percentage.
+    """
+    info = _gcode_info(coordinator)
+    if info is None:
+        return None
+    mm = _safe_float(info.get("consumables"))
+    return mm if mm and mm > 0 else None
 
 # position parsing moved to utils.parse_position
 
@@ -372,6 +400,90 @@ class UsedMaterialLengthSensor(KEntity, SensorEntity):
             return round(mm / 10.0, 2)
         except (TypeError, ValueError):
             return None
+
+class ExpectedMaterialLengthSensor(KEntity, SensorEntity):
+    _attr_translation_key = "expected_material_length"
+    _attr_icon = "mdi:ruler"
+    _attr_native_unit_of_measurement = U_CM
+    _attr_device_class = SensorDeviceClass.DISTANCE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator, unique_id="expected_material_length")
+
+    @property
+    def native_value(self) -> float | None:
+        # Not zeroed when the printer is off or unreachable, unlike the live
+        # measurements: this describes a file, and a stale estimate stays true
+        # in a way a stale temperature does not.
+        mm = _expected_length_mm(self.coordinator)
+        # In cm to match UsedMaterialLengthSensor, so the two can be compared
+        # or subtracted without converting one of them first.
+        return None if mm is None else round(mm / 10.0, 2)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        info = _gcode_info(self.coordinator) or {}
+        # Passed through as the printer words them. On a multi-material job
+        # these fields carry several values in one string, and this integration
+        # has no hardware to confirm how they are delimited -- so they are
+        # published raw rather than split into something possibly wrong.
+        return _attr_dict(
+            ("material", info.get("material") or None),
+            ("color", info.get("materialColors") or None),
+            ("slicer", info.get("software") or None),
+            ("estimated_time_s", _safe_float(info.get("timeCost"))),
+            ("gcode_file", info.get("name") or None),
+        )
+
+
+class ExpectedMaterialWeightSensor(KEntity, SensorEntity):
+    _attr_translation_key = "expected_material_weight"
+    _attr_icon = "mdi:weight-gram"
+    _attr_native_unit_of_measurement = U_G
+    _attr_device_class = SensorDeviceClass.WEIGHT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator, unique_id="expected_material_weight")
+
+    @property
+    def native_value(self) -> float | None:
+        info = _gcode_info(self.coordinator)
+        if info is None:
+            return None
+        # Empty on files the printer did not slice itself -- Creality Print
+        # output and the stock sample models both arrive with a blank weight
+        # and a usable length. Multi-material jobs put several weights in this
+        # one string, which `_safe_float` also declines. Either way the sensor
+        # goes unknown, which beats publishing one filament's weight as the
+        # whole job's.
+        grams = _safe_float(info.get("filamentWeight"))
+        return None if grams is None or grams <= 0 else round(grams, 2)
+
+
+class FilamentConsumptionSensor(KEntity, SensorEntity):
+    _attr_translation_key = "filament_consumption"
+    _attr_icon = "mdi:printer-3d-nozzle"
+    _attr_native_unit_of_measurement = U_PERCENT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator, unique_id="filament_consumption")
+
+    @property
+    def native_value(self) -> float | None:
+        expected_mm = _expected_length_mm(self.coordinator)
+        if expected_mm is None:
+            return None
+        used_mm = _safe_float((self.coordinator.data or {}).get("usedMaterialLength"))
+        if used_mm is None:
+            return None
+        # Left uncapped on purpose. A job that runs past its estimate has
+        # genuinely used more filament than the slicer predicted, and clamping
+        # to 100% would hide exactly the case worth seeing.
+        return round(used_mm / expected_mm * 100.0, 1)
+
 
 class PrintJobTimeSensor(KEntity, SensorEntity):
     _attr_translation_key = "print_job_time"
@@ -942,6 +1054,30 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 )
         return out
 
+    added_gcode_uids: set[str] = set()
+
+    def add_gcode_info_entities() -> list[SensorEntity]:
+        """Sensors for the slicer's estimates, once the printer has supplied any.
+
+        Gated rather than unconditional because firmware without the metadata
+        request simply never answers it, and three permanently-unknown entities
+        are a worse answer than none. The key only appears once a real entry has
+        been matched to a job, so its presence is the printer's yes.
+        """
+        if GCODE_INFO_KEY not in (coord.data or {}):
+            return []
+
+        out: list[SensorEntity] = []
+        for uid, cls in (
+            ("expected_material_length", ExpectedMaterialLengthSensor),
+            ("expected_material_weight", ExpectedMaterialWeightSensor),
+            ("filament_consumption", FilamentConsumptionSensor),
+        ):
+            if uid not in added_gcode_uids:
+                added_gcode_uids.add(uid)
+                out.append(cls(coord))
+        return out
+
     # Dynamic CFS entity handler
     # The dispatcher runs a plain sync target in an executor thread, and this
     # calls `hass.loop.call_soon`, which is not thread-safe. Cheap enough to
@@ -950,7 +1086,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     def _on_new_entities() -> None:
         """Handle signal for new entities (e.g. late CFS discovery)."""
         _LOGGER.debug("Dynamic entity signal received, checking for new CFS entities...")
-        new_ents = add_cfs_entities() + add_chamber_entities()
+        new_ents = (
+            add_cfs_entities() + add_chamber_entities() + add_gcode_info_entities()
+        )
         if new_ents:
             _LOGGER.debug("Adding %d dynamic entities", len(new_ents))
             # Must not be called inline from the dispatcher: async_add_entities
@@ -1054,6 +1192,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         ents.append(KMaxTempSensor(coord, uid="max_bed_temp", key="max_bed_temp", translation_key="max_bed_temp"))
     # Chamber max is gated with the chamber temperature sensor, in one place.
     ents.extend(add_chamber_entities())
+    ents.extend(add_gcode_info_entities())
 
     # Register static entities immediately
     try:

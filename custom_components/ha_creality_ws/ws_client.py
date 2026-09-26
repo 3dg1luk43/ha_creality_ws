@@ -14,6 +14,7 @@ import websockets
 from websockets.exceptions import ConnectionClosedOK, ConnectionClosed
 
 from .const import (
+    GCODE_FILE_REQUEST,
     RETRY_MIN_BACKOFF,
     RETRY_MAX_BACKOFF,
     RETRY_BACKOFF_MULTIPLIER,
@@ -488,6 +489,14 @@ class KClient:
     async def request_boxs_info(self) -> None:
         """Ask the printer to send boxsInfo now."""
         await self._send_json({"method": "get", "params": {"boxsInfo": 1}})
+
+    async def request_gcode_file_info(self) -> None:
+        """Ask the printer for its sliced-G-code metadata listing.
+
+        Deliberately not in `_periodic_gets`: the reply carries every file on
+        the printer, so the coordinator asks only when the running file changes.
+        """
+        await self._send_json({"method": "get", "params": {GCODE_FILE_REQUEST: 1}})
     async def send_set_retry(self, *, wait_reconnect: float = 6.0, **params: Any) -> None:
         """
         Robust sender for user actions: try once; if the link recycled,

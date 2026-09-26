@@ -214,6 +214,9 @@
         }
       },
       "used_material_length": { "name": "Used Material Length" },
+      "expected_material_length": { "name": "Expected Material Length" },
+      "expected_material_weight": { "name": "Expected Material Weight" },
+      "filament_consumption": { "name": "Filament Consumption" },
       "print_job_time": { "name": "Print Job Time" },
       "print_left_time": { "name": "Print Time Left" },
       "real_time_flow": { "name": "Real-Time Flow" },

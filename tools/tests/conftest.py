@@ -393,6 +393,7 @@ class SensorDeviceClass(_StrEnumStub):
     HUMIDITY = "humidity"
     DURATION = "duration"
     DISTANCE = "distance"
+    WEIGHT = "weight"
 
 
 class SensorStateClass(_StrEnumStub):
@@ -441,9 +442,15 @@ class UnitOfTime(_StrEnumStub):
     HOURS = "h"
 
 
+class UnitOfMass(_StrEnumStub):
+    GRAMS = "g"
+    KILOGRAMS = "kg"
+
+
 const_mod_ha.UnitOfTemperature = UnitOfTemperature
 const_mod_ha.UnitOfLength = UnitOfLength
 const_mod_ha.UnitOfTime = UnitOfTime
+const_mod_ha.UnitOfMass = UnitOfMass
 sys.modules["homeassistant.const"] = const_mod_ha
 setattr(ha_mod, "const", const_mod_ha)
 
@@ -478,6 +485,9 @@ class KClient:  # type: ignore
     async def send_set_retry(self, **params):  # noqa: ANN001
         # Update last rx to appear fresh
         self._last = time.monotonic()
+        return None
+
+    async def request_gcode_file_info(self):
         return None
 
     def last_rx_monotonic(self) -> float:

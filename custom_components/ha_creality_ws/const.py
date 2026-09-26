@@ -70,6 +70,25 @@ GO2RTC_SOURCE_SCHEMES = ("rtsp", "rtmp", "srt")
 HA_MANAGED_GO2RTC_RTSP_PORT = 18554
 DEFAULT_GO2RTC_RTSP_PORT = 8554
 
+# --- Sliced G-code metadata ------------------------------------------------- #
+# The printer knows what the slicer estimated for the job it is running, but it
+# never streams it. Asking for it returns `retGcodeFileInfo2`: metadata for
+# *every* G-code file on the printer in one array, ~150 KiB for a couple of
+# hundred files on a K1C. There is no single-file form of the query -- a
+# filename, a full path, an object and other integer arguments all go
+# unanswered -- so the whole listing is the only thing on offer, and it is far
+# too big to poll or to keep in coordinator data. The coordinator matches the
+# running job against it on arrival and stores that one entry here.
+GCODE_FILE_REQUEST = "reqGcodeFile"
+GCODE_FILE_RESPONSE = "retGcodeFileInfo2"
+GCODE_INFO_KEY = "gcodeFileInfo"
+
+# Re-asking is driven by the file name changing, not by a timer, because the
+# metadata is static per file. These two only bound the failure case: a printer
+# whose firmware does not answer `reqGcodeFile` at all must not be asked forever.
+GCODE_INFO_RETRY_SECS = 30.0
+GCODE_INFO_MAX_ATTEMPTS = 3
+
 # Telemetry fields that gate entity creation and can only arrive once the printer
 # is actually reachable. Platform setup does not wait for the printer (an offline
 # printer must not block the config entry), so an entity depending on one of
@@ -92,6 +111,7 @@ LATE_DISCOVERY_FIELDS: tuple[str, ...] = (
     "boxTemp",
     "maxBoxTemp",
     "targetBoxTemp",
+    GCODE_INFO_KEY,
 )
 
 # Notifications
