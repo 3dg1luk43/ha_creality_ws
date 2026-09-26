@@ -572,7 +572,13 @@ class PrinterState:
         if not m:
             return False
         channel = int(m.group("p") or 0)
-        s_val = float(m.group("s") or 0)
+        # A bare `M106` is full speed, not off: Klipper's cmd_M106 reads
+        # `gcmd.get_float("S", 255.)`, and Creality's own K1 macro sets
+        # `tmp = 255` when S is absent. `or 0` inverted that, so poking the
+        # simulator with `M106` switched the fan off and latched the channel
+        # to manual. The integration always sends an explicit S, which is why
+        # nothing caught it.
+        s_val = float(m.group("s")) if m.group("s") is not None else 255.0
         self.set_fan_pct(channel, s_val / 255.0 * 100.0)
         return True
 

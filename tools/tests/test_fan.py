@@ -159,6 +159,37 @@ def _test_server_source() -> str:
     ).read_text()
 
 
+def _load_simulator(name: str):
+    """Import the simulator under a throwaway module name.
+
+    Shared by the tests that need the real objects rather than its source. The
+    skip is narrowed to the optional third-party imports above: anything else
+    missing is a broken simulator, not an environment that cannot run it.
+    """
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "tools" / "creality_printer_test_server.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    # Registered before execution: a @dataclass in the module resolves its own
+    # __module__ through sys.modules, and fails with an opaque AttributeError
+    # otherwise.
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except ModuleNotFoundError as exc:  # pragma: no cover - aiortc/av absent in CI
+        # Only a genuinely absent optional dependency is a skip. Catching every
+        # exception meant a SyntaxError or a NameError in the simulator itself
+        # reported as "not importable here" and the test passed as skipped.
+        if (exc.name or "").split(".")[0] not in _SIMULATOR_OPTIONAL_DEPS:
+            raise
+        pytest.skip(f"simulator dependency missing: {exc.name}")
+    finally:
+        sys.modules.pop(name, None)
+    return module
+
+
 def test_the_simulators_m106_pattern_ignores_unrelated_m_codes():
     """`_M106_RE` compiled from source, so this runs without the simulator's deps.
 
@@ -189,6 +220,30 @@ def test_the_simulators_m106_pattern_ignores_unrelated_m_codes():
         )
 
 
+def test_a_bare_m106_is_full_speed_in_the_simulator():
+    """Klipper's `cmd_M106` reads `gcmd.get_float("S", 255.)`, so `M106` with no
+    S means full speed. The simulator used `or 0` and switched the fan off
+    instead, latching the channel to manual on the way. The integration always
+    sends an explicit S, so only someone driving the simulator by hand would
+    have hit it, and they would have seen the opposite of the real printer.
+    """
+    module = _load_simulator("_sim_for_m106")
+
+    state = module.PrinterState(
+        "k2plus",
+        simulate_print=False,
+        sim=module.SimOptions(),
+        targets={},
+        deterministic=True,
+    )
+    assert state.handle_gcode("M106") is True
+    assert state.snapshot()["modelFanPct"] == 100
+
+    # An explicit S is still honoured, including S0.
+    state.handle_gcode("M106 P0 S0")
+    assert state.snapshot()["modelFanPct"] == 0
+
+
 def test_test_server_reports_the_same_fan_fields_the_integration_reads():
     """The simulator used to emit caseFan/modelFan/sideFan, which never matched."""
     source = _test_server_source()
@@ -210,28 +265,7 @@ def test_test_server_prefers_h264_for_video():
     assert "H264PassthroughTrack" in source
     assert "keyint=" in source, "libx264's 250-frame default is too long for HLS"
 
-    import importlib.util
-    from pathlib import Path
-
-    path = Path(__file__).resolve().parents[2] / "tools" / "creality_printer_test_server.py"
-    name = "_sim_for_args"
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    # Registered before execution: a @dataclass in the module resolves its own
-    # __module__ through sys.modules, and fails with an opaque AttributeError
-    # otherwise.
-    sys.modules[name] = module
-    try:
-        spec.loader.exec_module(module)
-    except ModuleNotFoundError as exc:  # pragma: no cover - aiortc/av absent in CI
-        # Only a genuinely absent optional dependency is a skip. Catching every
-        # exception meant a SyntaxError or a NameError in the simulator itself
-        # reported as "not importable here" and the test passed as skipped.
-        if (exc.name or "").split(".")[0] not in _SIMULATOR_OPTIONAL_DEPS:
-            raise
-        pytest.skip(f"simulator dependency missing: {exc.name}")
-    finally:
-        sys.modules.pop(name, None)
+    module = _load_simulator("_sim_for_args")
 
     # The module imported, so a missing parser is a regression in the simulator,
     # not an environment it cannot run in. Skipping here quietly dropped the
