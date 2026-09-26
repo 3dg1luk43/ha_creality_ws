@@ -137,8 +137,15 @@ test("a placeholder is never mistaken for a unit", () => {
 
 test("a value that merely ends in its unit's letters is not truncated", () => {
   const { sandbox } = loadPrinterCard();
+  // The name was right and the assertion was not: a plain `endsWith`
+  // turned "idle" into "idl" + "e".
   assert.deepEqual({ ...sandbox.splitUnit("idle", { attributes: { unit_of_measurement: "e" } }) },
-    { value: "idl", unit: "e" });
+    { value: "idle", unit: "" });
+  // Still split where the unit really is one.
+  assert.deepEqual({ ...sandbox.splitUnit("42%", { attributes: { unit_of_measurement: "%" } }) },
+    { value: "42", unit: "%" });
+  assert.deepEqual({ ...sandbox.splitUnit("1 234,5 W", { attributes: { unit_of_measurement: "W" } }) },
+    { value: "1 234,5", unit: "W" });
 });
 
 // --------------------------------------------------------------------------- //

@@ -113,7 +113,7 @@ The integration automatically installs the following Python packages:
 - **K1 family & Ender 3 V3 family cameras**: No additional dependencies required (MJPEG streaming)
 - **K2 family cameras (WebRTC):**
   - Native WebRTC is available on every supported core that ships go2rtc (OS, Supervised, Container), since the 2026.7 minimum is already past the 2025.11 release that bundled a Creality-compatible go2rtc. A Core install has no bundled binary and needs one configured, as above.
-  - Pointing the integration at a stand-alone **go2rtc >= 1.9.11** is still possible via the Options dialog (host/port), but it is no longer required.
+  - Pointing the integration at a stand-alone **go2rtc >= 1.9.11** is still possible via the Options dialog (host/port). On the installation types that ship the binary it is no longer required; on a Core install it remains the way to get WebRTC, either through the Options dialog or by giving Home Assistant a `go2rtc: url:` to manage.
 
 ---
 

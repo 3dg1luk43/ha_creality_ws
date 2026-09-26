@@ -499,13 +499,26 @@ class KCFSCard extends HTMLElement {
       // a hass assigned before setConfig), and an unhandled rejection left
       // _deviceIdPending true forever, so both gates here refused to retry and
       // the card could never resolve while still rendering its buttons enabled.
+      // Generation-guarded out here too, not only inside _resolveDeviceId.
+      // `hass` can be assigned before setConfig, so the first call rejects on
+      // the missing config; setConfig then runs synchronously, bumps the
+      // generation and clears _deviceId, and the queued rejection would
+      // otherwise land afterwards and pin the *new* config to
+      // "toast_no_device" with its edit buttons locked. Clearing the pending
+      // flag is gated for the mirror-image reason: a stale run clearing it
+      // would let a second resolution start alongside the current one.
+      // Safe to skip, because setConfig has already reset it.
+      const generation = this._deviceIdGeneration || 0;
+      const isCurrent = () => (this._deviceIdGeneration || 0) === generation;
       this._resolveDeviceId()
         .catch((err) => {
+          console.warn("k-cfs-card: device resolution failed", err);
+          if (!isCurrent()) return;
           this._deviceIdError = "toast_no_device";
           this._deviceId = null;
-          console.warn("k-cfs-card: device resolution failed", err);
         })
         .finally(() => {
+          if (!isCurrent()) return;
           this._deviceIdPending = false;
           this._updateIfChanged();
         });

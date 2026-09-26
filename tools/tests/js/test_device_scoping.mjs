@@ -368,6 +368,36 @@ test("the legacy fallback rejects a card spanning two printers", async () => {
 });
 
 let failed = 0;
+test("a rejection from the previous config does not lock the new one", async () => {
+  // Home Assistant can assign `hass` before `setConfig`, which is why the
+  // resolution is allowed to reject at all. That rejection is queued, and
+  // `setConfig` then runs synchronously: without a generation check on the
+  // handler, the stale rejection lands afterwards and writes
+  // `_deviceIdError = "toast_no_device"` against a config that is fine, so the
+  // card renders its edit buttons locked and only the one-shot registry retry
+  // can rescue it.
+  const registry = twoPrinterRegistry();
+  const { KCFSCard } = loadCard();
+  const card = new KCFSCard();
+
+  // hass before setConfig: `_resolveDeviceId` rejects on the missing config.
+  card.hass = makeHass(statesForBoth(), { entities: registry });
+  // A good config arrives before that rejection is delivered, bumping the
+  // generation and clearing the error and the pending flag.
+  card.setConfig({ box0_slot0_filament: A_SLOT });
+  assert.equal(card._deviceIdError, null, "setConfig should have cleared the error");
+
+  // Now let the stale rejection run. Deliberately no further resolution here:
+  // re-resolving would overwrite whatever it wrote and hide the bug, which is
+  // what the first version of this test did.
+  await new Promise((r) => setTimeout(r, 0));
+
+  assert.equal(card._deviceIdError, null,
+    "a stale rejection marked the new config as having no device");
+  assert.notEqual(card._deviceId, null,
+    "a stale rejection nulled the device id for the new config");
+});
+
 for (const [name, fn] of tests) {
   try { await fn(); console.log(`ok   ${name}`); }
   catch (err) { failed += 1; console.log(`FAIL ${name}\n     ${err.message}`); }

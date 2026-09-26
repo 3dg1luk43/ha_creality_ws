@@ -200,7 +200,15 @@ function splitUnit(text, stateObj) {
   const s = String(text ?? "");
   const unit = String(stateObj?.attributes?.unit_of_measurement ?? "").trim();
   if (unit && s.length > unit.length && s.endsWith(unit)) {
-    return { value: s.slice(0, s.length - unit.length).trimEnd(), unit };
+    const head = s.slice(0, s.length - unit.length);
+    // The unit has to be preceded by a digit or a space. A bare suffix
+    // match truncates a word that merely ends in the unit's letters:
+    // "idle" on a sensor whose unit is "e" rendered as "idl". Tested on
+    // the character rather than by parsing the remainder, because a
+    // locale that groups digits ("1 234,5") is not a number to Number().
+    if (/[\d\s]$/.test(head)) {
+      return { value: head.trimEnd(), unit };
+    }
   }
   return { value: s, unit: "" };
 }
