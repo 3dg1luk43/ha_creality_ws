@@ -216,6 +216,33 @@ echo "TIMEOUT busy=$busy realrev=$realrev"; exit 1
 
 ISO-8601 UTC timestamps compare correctly as strings, so `>` is safe here.
 
+## Timezones: UTC for the API, local for people
+
+This machine is **Europe/Prague** (+01:00 winter, +02:00 summer) and the
+maintainer's commits carry that offset. GitHub's API returns and accepts UTC
+`Z` timestamps. Keep the two apart:
+
+- **Every timestamp compared against the API stays UTC.** `trigger`,
+  `submitted_at`, `created_at`, the poller's whole comparison chain: capture
+  with `date -u +%FT%TZ` and never with local time. A local `+02:00` stamp
+  compared as a string against a `Z` stamp is wrong by two hours in the
+  direction that makes the poller accept an *earlier* review, which reads as a
+  clean round that never ran.
+- **Every timestamp shown to the maintainer is local**, because that is the
+  clock they are reading. Reporting "the review landed at 05:33Z" makes them do
+  the conversion on every line. Say `07:33` local, or `07:33 local / 05:33Z`
+  where the UTC value is what a log or an API response will show them.
+- **Calendar dates are local.** The release-notes date, and anything else a
+  human reads as "what day is it", come from `date +%F`, not `date -u +%F`.
+  Between 22:00 and midnight local in summer those two disagree, so a
+  UTC-derived date stamps a release with yesterday.
+
+```bash
+date -u +%FT%TZ     # for the API and the poller
+date +%F            # for a release-notes date
+date +%H:%M         # for a time shown in a report
+```
+
 The stock plugin greps for `Come back again in a few minutes`. The marker observed
 in practice is `review in progress by coderabbit.ai`. Match either.
 
