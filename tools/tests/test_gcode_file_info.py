@@ -14,6 +14,7 @@ belong to the running job, never to the one before it.
 
 import asyncio
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -414,3 +415,124 @@ def test_late_metadata_still_creates_them_exactly_once():
         if getattr(e, "_attr_translation_key", "") in ESTIMATE_KEYS
     ]
     assert sorted(keys) == sorted(ESTIMATE_KEYS)
+
+
+# --------------------------------------------------------------------------- #
+# Non-finite values from the printer
+# --------------------------------------------------------------------------- #
+#
+# `json.loads` accepts the bare `NaN` and `Infinity` tokens and `float()`
+# accepts the strings, so the payload can carry either. These sensors have a
+# unit and a state class, so a non-finite value is not merely displayed: it is
+# written into history and long-term statistics.
+
+
+@pytest.mark.parametrize("bad", [float("inf"), float("-inf"), float("nan"), "inf", "nan"])
+def test_a_non_finite_expected_length_is_declined(bad):
+    """`mm and mm > 0` rejected NaN but let infinity straight through."""
+    assert _sensor(ExpectedMaterialLengthSensor, {**ENTRY, "consumables": bad}).native_value is None
+
+
+@pytest.mark.parametrize("bad", [float("inf"), float("nan"), "nan"])
+def test_a_non_finite_expected_weight_is_declined(bad):
+    """NaN compares false against everything, so `grams <= 0` never caught it."""
+    assert _sensor(ExpectedMaterialWeightSensor, {**ENTRY, "filamentWeight": bad}).native_value is None
+
+
+@pytest.mark.parametrize("bad", [float("inf"), float("nan")])
+def test_a_non_finite_used_length_does_not_reach_the_percentage(bad):
+    """The used length is divided by the estimate, so it propagates unchecked."""
+    assert _sensor(FilamentConsumptionSensor, used_mm=bad).native_value is None
+
+
+# --------------------------------------------------------------------------- #
+# The listing is a one-shot reply, not telemetry
+# --------------------------------------------------------------------------- #
+
+
+def test_the_listing_does_not_ride_along_on_later_frames():
+    """`KClient` accumulates frames into `_state` and hands out a copy of it.
+
+    Left in there, the ~150 KiB listing would be on every subsequent frame and
+    the coordinator would rescan the whole thing once per frame, on the receive
+    path the integration is otherwise careful to keep cheap.
+
+    A source contract because `conftest` stubs `KClient` for the whole suite,
+    so the real receive loop cannot be driven from here.
+    """
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "custom_components" / "ha_creality_ws" / "ws_client.py"
+    ).read_text(encoding="utf-8")
+
+    assert "self._state.pop(GCODE_FILE_RESPONSE, None)" in source, (
+        "the one-shot listing is no longer removed from the cumulative state"
+    )
+    # The snapshot has to be taken before the pop and delivered by name. Going
+    # back to `_on_message(dict(self._state))` would either resurrect the bug
+    # or, after the pop, deliver a frame the listing had already been taken out
+    # of -- so the coordinator would never see it at all.
+    assert "await self._on_message(frame)" in source
+    assert "await self._on_message(dict(self._state))" not in source
+
+
+# --------------------------------------------------------------------------- #
+# Recovery when static registration fails
+# --------------------------------------------------------------------------- #
+
+
+def test_a_failed_static_add_lets_a_later_pass_retry_the_estimates():
+    """The uids are marked before the entities are handed over.
+
+    So if `async_add_entities` raises, the three sensors are already recorded
+    as added and every later discovery pass returns [] for them. The chamber
+    set was cleared in that handler for exactly this reason; the estimate set
+    was added later and missed it.
+    """
+    from test_late_discovery import _EntryStub, _sensor_platform
+
+    _loop()
+    coord = SimpleNamespace(
+        data={"printFileName": RUNNING, GCODE_INFO_KEY: ENTRY},
+        client=SimpleNamespace(_host="1.2.3.4"),
+        available=True,
+        power_is_off=lambda: False,
+        config_entry=SimpleNamespace(data={}),
+    )
+    added, connected, calls = [], [], []
+
+    def _add(ents):
+        calls.append(ents)
+        if len(calls) == 1:
+            raise RuntimeError("entity registry unavailable")
+        added.extend(ents)
+
+    hass = SimpleNamespace(
+        data={"ha_creality_ws": {}},
+        loop=SimpleNamespace(call_soon=lambda fn, *a: fn(*a)),
+        config_entries=SimpleNamespace(async_get_entry=lambda _e: SimpleNamespace(data={})),
+    )
+    entry = _EntryStub({})
+    hass.data["ha_creality_ws"][entry.entry_id] = coord
+
+    import custom_components.ha_creality_ws.sensor as sensor_mod
+
+    original = sensor_mod.async_dispatcher_connect
+    sensor_mod.async_dispatcher_connect = (
+        lambda _hass, _signal, target: connected.append(target) or (lambda: None)
+    )
+    try:
+        asyncio.get_event_loop().run_until_complete(
+            sensor_mod.async_setup_entry(hass, entry, _add)
+        )
+    finally:
+        sensor_mod.async_dispatcher_connect = original
+
+    assert calls, "the static add was never attempted"
+    assert _estimate_names(added) == set(), "the failing add must not have registered anything"
+
+    # The printer is still reporting metadata, so the next discovery pass has
+    # to offer the three sensors again rather than treating them as done.
+    for cb in connected:
+        cb()
+    assert _estimate_names(added) == ESTIMATE_KEYS

@@ -2,6 +2,7 @@
 from __future__ import annotations
 import logging
 import json
+import math
 from collections.abc import Callable, Mapping
 from typing import Any
 from .utils import (
@@ -72,7 +73,10 @@ def _expected_length_mm(coordinator) -> float | None:
     if info is None:
         return None
     mm = _safe_float(info.get("consumables"))
-    return mm if mm and mm > 0 else None
+    # `mm and mm > 0` rejects NaN but not inf, and `json.loads` accepts an
+    # `Infinity` token, so a non-finite length would reach the state
+    # machine and be recorded in statistics.
+    return mm if mm is not None and math.isfinite(mm) and mm > 0 else None
 
 # position parsing moved to utils.parse_position
 
@@ -459,7 +463,10 @@ class ExpectedMaterialWeightSensor(KEntity, SensorEntity):
         # goes unknown, which beats publishing one filament's weight as the
         # whole job's.
         grams = _safe_float(info.get("filamentWeight"))
-        return None if grams is None or grams <= 0 else round(grams, 2)
+        # NaN compares false against everything, so `<= 0` lets it past.
+        if grams is None or not math.isfinite(grams) or grams <= 0:
+            return None
+        return round(grams, 2)
 
 
 class FilamentConsumptionSensor(KEntity, SensorEntity):
@@ -477,7 +484,7 @@ class FilamentConsumptionSensor(KEntity, SensorEntity):
         if expected_mm is None:
             return None
         used_mm = _safe_float((self.coordinator.data or {}).get("usedMaterialLength"))
-        if used_mm is None:
+        if used_mm is None or not math.isfinite(used_mm):
             return None
         # Left uncapped on purpose. A job that runs past its estimate has
         # genuinely used more filament than the slicer predicted, and clamping
@@ -1199,10 +1206,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
         async_add_entities(ents)
     except Exception as err:  # pylint: disable=broad-except
         _LOGGER.error("Failed to add static sensors: %s", err)
-        # add_chamber_entities marked its uids before handing them over, so a
+        # Both helpers marked their uids before handing the entities over, so a
         # failure here would otherwise make every later discovery pass return []
-        # and the chamber sensors would stay missing for the whole session.
+        # and those sensors would stay missing for the whole session.
         added_chamber_uids.clear()
+        added_gcode_uids.clear()
 
     # --- CFS Entities (Dynamic Initial Load) ---
     try:

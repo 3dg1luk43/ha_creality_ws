@@ -15,6 +15,7 @@ from websockets.exceptions import ConnectionClosedOK, ConnectionClosed
 
 from .const import (
     GCODE_FILE_REQUEST,
+    GCODE_FILE_RESPONSE,
     RETRY_MIN_BACKOFF,
     RETRY_MAX_BACKOFF,
     RETRY_BACKOFF_MULTIPLIER,
@@ -271,8 +272,16 @@ class KClient:
                             merged = coerce_numbers(payload)
                             self._state.update(merged)
                             self.msg_count += 1
+                            frame = dict(self._state)
+                            # One-shot, not telemetry: the reply lists
+                            # every G-code file on the printer (~150 KiB
+                            # on a K1C). Left in the cumulative state it
+                            # would ride on every later frame, and the
+                            # coordinator would rescan the whole listing
+                            # once per frame on the receive path.
+                            self._state.pop(GCODE_FILE_RESPONSE, None)
                             try:
-                                await self._on_message(dict(self._state))
+                                await self._on_message(frame)
                             except Exception:
                                 _LOGGER.exception("K on_message failed host=%s", self._host)
                         else:

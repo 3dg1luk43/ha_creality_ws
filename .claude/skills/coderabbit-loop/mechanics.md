@@ -162,9 +162,16 @@ check_rate_limit() {
   #
   # Ids first, then one fetch each, because `--paginate --jq` runs the filter
   # per page, so a jq-side `.[0]` emits one body per page.
+  # The sort is a separate statement on purpose. `$(gh api ... | sort -n)`
+  # reports *sort's* status, and `sort` succeeds on the empty input a failed
+  # request leaves behind, so `|| return 2` never fired and an API error read
+  # as "nothing refused" -- the exact defect this `return 2` path exists to
+  # prevent. `set -o pipefail` would also do it; keeping them separate means
+  # the snippet is correct however it is pasted.
   ids=$(gh api "repos/$owner/$repo/issues/$pr/comments" --paginate --jq \
-    "[.[] | select(.user.login as \$l | $_CR_LOGINS | index(\$l)) | select(.id > $last_comment_id)] | .[].id" \
-    | sort -n) || return 2   # API error, not a negative result
+    "[.[] | select(.user.login as \$l | $_CR_LOGINS | index(\$l)) | select(.id > $last_comment_id)] | .[].id") \
+    || return 2   # API error, not a negative result
+  ids=$(sort -n <<<"$ids")
   for id in $ids; do
     [[ $id =~ ^[0-9]+$ ]] || continue
     body=$(gh api "repos/$owner/$repo/issues/comments/$id" --jq '.body') || return 2
