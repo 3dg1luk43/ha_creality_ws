@@ -57,7 +57,9 @@ def card_version(card_name: str) -> str:
     return digest.hexdigest()[:10]
 
 
-def _register_static_path(hass: HomeAssistant, url_path: str, path: str) -> None:
+def _register_static_path(
+    hass: HomeAssistant, url_path: str, path: str, *, cache_headers: bool = True
+) -> None:
     """Serve a file or directory straight out of the integration package.
 
     Deliberately served from the integration's own `www/` folder rather than
@@ -86,7 +88,7 @@ def _register_static_path(hass: HomeAssistant, url_path: str, path: str) -> None
     async def _register() -> None:
         try:
             await hass.http.async_register_static_paths(
-                [StaticPathConfig(url_path, path, True)]
+                [StaticPathConfig(url_path, path, cache_headers)]
             )
         except Exception as exc:  # pylint: disable=broad-except
             # Warning, not debug: if this fails the Lovelace cards 404 on every
@@ -277,7 +279,14 @@ class CrealityCardRegistration:
 
         i18n_path = Path(__file__).parent / "www" / "i18n"
         if i18n_path.exists():
-            _register_static_path(self.hass, I18N_URL_BASE, str(i18n_path))
+            # No cache headers here, unlike the cards. Their URLs carry a
+            # `?v=` derived from the file's own bytes, so a month-long
+            # max-age is exactly what you want; the i18n files are fetched
+            # by bare path, so the same header would leave a browser on the
+            # old translations until the cache expired.
+            _register_static_path(
+                self.hass, I18N_URL_BASE, str(i18n_path), cache_headers=False
+            )
 
         # Fix any base-only resource entries (e.g. "/ha_creality_ws/?v=1") by expanding
         # them into the concrete card file URL(s).

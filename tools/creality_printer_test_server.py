@@ -1955,8 +1955,12 @@ def build_argparser() -> argparse.ArgumentParser:
                    help="Remove all randomness (temp oscillation, fan jitter, XYZ "
                         "drift) so telemetry is reproducible between runs. Use this "
                         "when diffing entity states across integration versions. "
-                        "Print-progress fields stay derived from elapsed wall-clock "
-                        "time and so still depend on when you sample them.")
+                        "Anything derived from elapsed wall-clock time still "
+                        "depends on when you sample it: printProgress, "
+                        "printJobTime, printLeftTime, layer and "
+                        "usedMaterialLength, plus state and everything computed "
+                        "from progress (dProgress, curObjectIndex, "
+                        "realTimeFlow).")
     p.add_argument("--cfs-variant", choices=["default", "edge"], default="default",
                    help="'edge' adds awkward CFS payloads: an already-correct 6-char "
                         "colour, a slot with no vendor, a multi-colour spool, rfid "

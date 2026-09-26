@@ -17,11 +17,10 @@ These instructions tell GitHub Copilot Chat how to work in this repo. Assume cha
 - `custom_components/ha_creality_ws/ws_client.py` – Resilient WebSocket client, heartbeat, jittered backoff, periodic GETs
 - `custom_components/ha_creality_ws/sensor.py` – Sensors (status, temps, progress, positions, etc.)
 - `custom_components/ha_creality_ws/button.py` – Pause/Resume/Stop controls
-- `custom_components/ha_creality_ws/light.py` – Chamber light; there is no switch platform
+- `custom_components/ha_creality_ws/light.py` – Light platform (printer chamber light); there is no switch platform
 - `custom_components/ha_creality_ws/number.py` – Number entities (speed/flow/targets; K2 box control only)
 - `custom_components/ha_creality_ws/camera.py` – MJPEG (K1) and WebRTC (K2) camera implementations
 - `custom_components/ha_creality_ws/image.py` – Image platform exposing current print preview (attempted for every model; see the Image section)
-- `custom_components/ha_creality_ws/light.py` – Light platform (printer chamber light)
 - `custom_components/ha_creality_ws/fan.py` – Fan platform (model/case/side fans)
 - `custom_components/ha_creality_ws/config_flow.py` – UI config + Options (power switch binding, camera mode, go2rtc)
 - `custom_components/ha_creality_ws/entity.py` – Base entity with zeroing rules and device info

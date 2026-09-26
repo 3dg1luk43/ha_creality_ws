@@ -530,3 +530,33 @@ def test_stream_source_is_none_before_a_stream_exists():
             return await cam.stream_source()
 
     assert asyncio.run(run()) is None
+
+
+def test_a_standalone_go2rtc_on_the_default_pair_is_still_used_without_has_own():
+    """The predicate can only tell the two apart when HA's go2rtc exists.
+
+    A Home Assistant Core install ships no bundled binary, so a user runs their
+    own go2rtc and points the integration at it. If that happens to be on the
+    default loopback pair, the predicate called it "HA's own", the custom
+    branch was skipped, and the next branch failed with "go2rtc component not
+    loaded" -- so the camera did not come up at all. Gating on the component
+    actually being loaded is what keeps that case working.
+    """
+    import asyncio
+
+    cam = _camera(go2rtc_url="localhost", go2rtc_port=11984)
+    cam.hass = MagicMock()
+    cam.hass.data = {}  # no `go2rtc` key: the component is not loaded
+    client = MagicMock()
+    client.validate_server_version = AsyncMock(return_value="1.9.11")
+
+    with patch(
+        "custom_components.ha_creality_ws.camera.Go2RtcRestClient",
+        return_value=client,
+    ):
+        assert asyncio.run(cam._initialize_go2rtc_client()) is True
+
+    assert cam._go2rtc_is_ha_managed is False, (
+        "a stand-alone go2rtc was recorded as Home Assistant's own, so the RTSP "
+        "endpoint will derive 18554 for a server listening on 8554"
+    )

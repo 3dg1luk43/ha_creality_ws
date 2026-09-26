@@ -606,7 +606,16 @@ class CrealityWebRTCCamera(_BaseCamera):
         
         # Custom go2rtc configuration. Not entered for HA's own go2rtc
         # arriving as the camera step's stored default; see the predicate.
-        if self._custom_go2rtc_url and not self._configured_go2rtc_is_has_own():
+        #
+        # Gated on HA's go2rtc actually being loaded, because the predicate
+        # only distinguishes the two when it is. On a Core install there is no
+        # bundled binary, so a user pointing the integration at their own
+        # go2rtc on the default loopback pair would otherwise skip this branch
+        # and then fail in the next one with "go2rtc component not loaded".
+        ha_go2rtc_loaded = bool(self.hass.data.get(GO2RTC_DOMAIN))
+        if self._custom_go2rtc_url and not (
+            ha_go2rtc_loaded and self._configured_go2rtc_is_has_own()
+        ):
             try:
                 # Use default session
                 session = async_get_clientsession(self.hass)
