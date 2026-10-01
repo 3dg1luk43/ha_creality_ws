@@ -1,0 +1,106 @@
+name: Release
+
+# On a version tag: run tools/release_check.sh against it, then open a DRAFT
+# GitHub release whose body is the tag's CHANGELOG.md section. Publishing stays
+# a manual click, and publishing is what fires release_references.yml.
+#
+# A tag whose release already exists (for example one created from the GitHub
+# UI, which pushes the tag itself) is verified but left alone.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version to verify against (e.g. v0.9.9). Defaults to manifest.json. Never drafts a release."
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+      - name: Install test dependencies
+        run: pip install pytest voluptuous pyyaml
+      - name: Resolve the version under test
+        id: ver
+        env:
+          # Never interpolate a dispatch input into shell code: anyone who can
+          # dispatch the workflow could run commands on the runner.
+          TAG_INPUT: ${{ inputs.tag }}
+          # Only a tag push carries a version in the ref name; a manual run is on
+          # a branch, so it verifies manifest.json against the CHANGELOG only.
+          REF_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          TAG="${TAG_INPUT:-$REF_TAG}"
+          if [ -n "$TAG" ] && ! printf '%s' "$TAG" | grep -Eq '^v?[0-9][A-Za-z0-9._-]*$'; then
+            echo "Not a version tag: $TAG" >&2
+            exit 1
+          fi
+          printf 'tag=%s\n' "$TAG" >> "$GITHUB_OUTPUT"
+          echo "Verifying against: ${TAG:-manifest.json}"
+      - name: Release preflight
+        env:
+          WANT_TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          if [ -n "$WANT_TAG" ]; then
+            bash tools/release_check.sh --tag "$WANT_TAG"
+          else
+            bash tools/release_check.sh
+          fi
+
+  draft:
+    name: Draft the GitHub release
+    needs: preflight
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Cut the release notes from CHANGELOG.md
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+          version = os.environ["TAG"].lstrip("v")
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          head = re.search(rf"^##\s+\[?v?{re.escape(version)}\]?(?:\s|$).*$", text, re.M)
+          if not head:
+              sys.exit(f"no CHANGELOG.md entry for {version}")
+          rest = text[head.end():]
+          nxt = re.search(r"^##\s", rest, re.M)
+          body = head.group(0) + rest[: nxt.start() if nxt else len(rest)].rstrip() + "\n"
+          open(os.environ["RUNNER_TEMP"] + "/notes.md", "w", encoding="utf-8").write(body)
+          print(body)
+          PY
+      - name: Create the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "A release for $TAG already exists; leaving it as it is."
+            exit 0
+          fi
+          PRERELEASE=""
+          case "$TAG" in *-*) PRERELEASE="--prerelease" ;; esac
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" $PRERELEASE
+          echo "Draft release created for $TAG. Review and publish it from the Releases page."

@@ -13,3 +13,6 @@ pytest-asyncio>=0.23
 # Floor matches what Home Assistant has shipped since 2023; older releases
 # coerce differently and would fail the schema tests for unrelated reasons.
 voluptuous>=0.13
+# Needed by tools/tests/test_issue_validator_workflow.py, which reads the
+# GitHub workflow it tests. Skipped, not failed, without it.
+PyYAML>=6.0

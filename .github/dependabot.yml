@@ -1,0 +1,13 @@
+# Keeps the SHA-pinned actions in .github/workflows current. One grouped PR a
+# week rather than one per action. Bot PRs are exempt from validate_pr.yml.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(ci)"

@@ -8,7 +8,7 @@ These instructions tell GitHub Copilot Chat how to work in this repo. Assume cha
 - Purpose: Low-latency local WebSocket telemetry and control for Creality K-series and compatible printers. Bundles a dependency-free Lovelace card.
 - Connectivity: Local WebSocket (default ws://<host>:9999) with push updates; no polling.
 - Discovery: Zeroconf matches for names containing creality/k1/k2.
-- Python target: 3.11, matching the CI workflow. No formatter or linter is configured; see "Dev quick checks".
+- Python target: 3.11 (the dev venv) and 3.13 (what Home Assistant runs); the Tests workflow runs both. No formatter or linter is configured; see "Dev quick checks".
 
 ## Repo layout quick map
 
@@ -115,6 +115,7 @@ Use `ModelDetection` which reads both `model` and `modelVersion` codes.
 
 - Lint: **nothing is configured**. `pyproject.toml` holds only `[tool.pytest.ini_options]`, there is no `ruff.toml`/`.flake8`/`.pylintrc`, and no workflow runs a linter. A `.ruff_cache/` directory is someone's ad-hoc run, not repo configuration. Do not describe a formatting change as needed to pass a lint check.
 - Manual validation: run HA with the component and observe logs/telemetry
+- Release: `tools/release_check.sh` is the preflight (version in `manifest.json` == top `CHANGELOG.md` heading == tag). The top heading reads `## X.Y.Z - Unreleased` until release day. Pushing a `v*` tag runs it and drafts the GitHub release from that CHANGELOG section.
 - Deployment: `tools/test_files/deploy_to_ha.sh --run` syncs to the HA test instance. `tools/test_files/` is gitignored, so this script is a local maintainer helper and is not present in a clone.
  - Diagnostic samples: sample WebSocket diagnostic JSONs are stored under `tools/test_files/ws_diagnostic_dumps/` for reference when adding or validating fields
 

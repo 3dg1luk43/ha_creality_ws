@@ -1,0 +1,51 @@
+name: Documentation Improvement
+description: Report missing, wrong or unclear documentation
+title: "[Docs] "
+labels: ["documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve the docs. Fixing it yourself? Tick the box below and wait for the `accepted` label before opening a PR; docs PRs follow the same [contributor flow](https://github.com/3dg1luk43/ha_creality_ws/blob/main/CONTRIBUTING.md#contributor-pr-flow-non-translation-prs) as code.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before You Submit
+      options:
+        - label: I checked that this has not already been reported.
+          required: true
+        - label: I plan to submit a PR fixing this, and will wait for the `accepted` label first (leave unticked to just report it).
+          required: false
+
+  - type: input
+    id: page
+    attributes:
+      label: Page / Section
+      description: Which file or section.
+      placeholder: "README.md → Notifications"
+    validations:
+      required: true
+
+  - type: textarea
+    id: wrong
+    attributes:
+      label: What is Wrong or Missing?
+      description: Quote the existing text if relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested Change
+      description: Even a rough draft helps.
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+    validations:
+      required: false
