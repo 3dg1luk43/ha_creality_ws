@@ -1154,6 +1154,33 @@ def test_a_lost_connection_is_not_a_stopped_print():
         ) is None, blind
 
 
+def test_a_self_test_after_the_first_printing_frame_is_not_a_stop():
+    """#124: the K2 reports "printing" at 0% for a frame, then self-tests for
+    minutes before the print actually starts."""
+    watch = _watching(progress=0)
+
+    for tick in range(1, 300):
+        assert watch.observe(
+            state="self-testing", progress=0, filename="3DBenchy.gcode",
+            now_mono=float(tick),
+        ) is None, tick
+    assert watch.pending() is False
+    assert watch.observe(
+        state="printing", progress=0, filename="3DBenchy.gcode", now_mono=300.0
+    ) is None
+
+
+def test_a_self_test_with_no_job_seen_printing_does_not_arm_the_watch():
+    """It derives from `withSelfTest` alone, so it can be a calibration with no
+    job behind it, and the idle that follows must not read as a stop."""
+    watch = JobEndWatch()
+    watch.observe(state="self-testing", progress=0, filename="", now_mono=0.0)
+
+    assert watch.observe(
+        state="idle", progress=0, filename="", now_mono=1.0
+    ) is None
+
+
 def test_a_finished_print_is_never_a_stopped_one():
     """The completion notification owns a job that reached 100%. This is the
     frame *before* the caller's completion latch is set, so the guard cannot be

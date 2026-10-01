@@ -631,6 +631,15 @@ class JobEndWatch:
             self.pending_since = None
             return None
 
+        if state == "self-testing":
+            # The K2 reports "printing" for a frame and then runs its pre-print
+            # checks for minutes, so the confirmation below would always call
+            # them a stop (#124). Part of the job, but not a running state
+            # either: it derives from `withSelfTest` alone, file name or not, so
+            # arming on it would arm on a calibration with no job behind it.
+            self.pending_since = None
+            return None
+
         if progress >= 100:
             # A finished job, which the completion notification owns. Not left
             # to the caller's own latch alone: this is the frame *before* that

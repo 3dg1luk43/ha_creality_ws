@@ -169,7 +169,7 @@ where a standing rule discourages posting to GitHub generally.
   line from the system reminder.
 - **Release notes:** fixes to unreleased work on the current branch get **no new
   entry**, the bug never shipped. Only correct stale wording in
-  `.release_notes/RELEASE_NOTES.md`. Fixes to already-shipped behaviour do get an
+  `CHANGELOG.md`. Fixes to already-shipped behaviour do get an
   entry.
 - Push. A push auto-retriggers CodeRabbit. If the round produced replies only,
   retrigger explicitly with `@coderabbitai full review`.

@@ -6,7 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [0.9.8] - 2026-09-26
+## 0.9.9 - Unreleased
+
+### TL;DR
+
+- A K2 that self-tests at the start of a print no longer reports it as stopped at 0%.
+
+### Fixes
+
+- **A self-test at the start of a K2 print was announced as "stopped at 0%"** ([#124](https://github.com/3dg1luk43/ha_creality_ws/issues/124)): the printer reports one `printing` frame, then self-tests for minutes. The stop detector only counted printing and paused as a running job, so after 15 seconds it called the self-test a cancelled print and replaced the live card with that notification. A self-test is now part of the job; a print cancelled during one is still announced once the self-test ends. Thanks to @sammyke007 for the diagnosis and the tested patch.
+
+## 0.9.8 - 2026-09-26
 > [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)
 
 > **Requires Home Assistant 2026.7.0.** The live print card needs the companion
@@ -124,7 +134,7 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
 - **Test-control endpoints** (`POST /test/set`, `/test/reset`, `/test/cfs`, `GET /test/state`) pin any telemetry field, so notification scenarios can be driven in seconds. Real printers have no such endpoints.
 - Log lines carry timestamps, and the offer/answer SDP is dumped under `--debug`.
 
-## [0.9.7] - 2026-07-28
+## 0.9.7 - 2026-07-28
 > [List of issues (0.9.7)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.7)
 
 ### Added
@@ -157,7 +167,7 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
 - **LED-brightness plumbing** (#108): added the `LED_PIN_BY_MODEL` capability table and brightness-capability caching/migration, plus `ClassVar` and keyword-only-argument cleanups.
 
 
-## [0.9.6.1] - 2026-06-11
+## 0.9.6.1 - 2026-06-11
 > [List of issues (0.9.6.1)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.6.1)
 
 ### Fixed
@@ -167,7 +177,7 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
   - The first poll of each periodic GET (printer params, print objects, and CFS box info) now fires immediately once the connection is ready, restoring the pre-0.9.6 behavior. The 5-minute steady-state cadence for CFS is unchanged, and the 0.9.6 "availability requires real data" gate still applies.
 
 
-## [0.9.6] - 2026-06-10
+## 0.9.6 - 2026-06-10
 > [List of issues (0.9.6)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.6)
 
 ### Added
@@ -203,7 +213,7 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
 - **#88 diagnostics**: added debug logging of the negotiated WebRTC video codec/profile on stream start, to help diagnose the brief pre-keyframe visual artifact reported on some K2 cameras (no behavior change).
 
 
-## [0.9.5] - 2026-05-22
+## 0.9.5 - 2026-05-22
 > [List of issues (0.9.5)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.5)
 
 ### Fixed
@@ -226,7 +236,7 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
 - Stabilized the static pytest suite by reading source files as UTF-8 and added layout tests for telemetry-driven card sizing.
 
 
-## [0.9.4] - 2026-05-21
+## 0.9.4 - 2026-05-21
 > [List of issues (0.9.4)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.4)
 
 ### Fixed
@@ -236,7 +246,7 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
   - 0.9.3 users seeing "Failed to start WebRTC stream: go2rtc error" or a permanently unavailable camera entity should be fixed by upgrading to 0.9.4 without any config changes.
 
 
-## [0.9.3] - 2026-05-20
+## 0.9.3 - 2026-05-20
 > [List of issues (0.9.3)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.3)
 
 ### Added
@@ -281,7 +291,7 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
   - Updated async test setup to improve reliability and remove older pytest configuration issues.
 
 
-## [0.9.2] - 2026-01-27
+## 0.9.2 - 2026-01-27
 > [List of issues (0.9.2)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.2
 
 ### Added
@@ -289,7 +299,7 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
   - **Mini Mode Filament Type**: Added a new valid option to show the filament material type (e.g., PLA, ASA) in the compact "Mini Mode" view.
   - **Improved Rendering**: Enhanced the visual rendering of mini spools and improved click target areas for better usability.
 
-## [0.9.1] - 2026-01-24
+## 0.9.1 - 2026-01-24
 > [List of issues (0.9.1)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.1
 
 ### Added
@@ -305,7 +315,7 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
 - **WebRTC Regression**: Fixed camera initialization failure when custom go2rtc settings were unreachable; added automatic fallback to discovery.
 - **Service Stability**: Fixed crash in `request_cfs_info` when printer disconnected.
 
-## [0.9.0] - 2026-01-23
+## 0.9.0 - 2026-01-23
 > [List of issues (0.9.0)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.0
 
 ### Added
@@ -330,7 +340,7 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
   - Resolved merge conflicts and sync issues for reliable state tracking.
 - **Frontend Assets**: Improved resource loading and fixed loading issues for custom card resources.
 
-## [0.8.0] - 2026-01-05
+## 0.8.0 - 2026-01-05
 > [List of issues (0.8.0)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.8.0
 
 ### Added
@@ -352,7 +362,7 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
   - Added application-level probes to detect and recover from stale WebSocket connections.
 - **Log Noise**: Connection warnings are now limited to the first 3 failures; subsequent failures are logged as debug only to prevent spam when the printer is intentionally off.
 
-## [0.7.1] - 2026-01-04
+## 0.7.1 - 2026-01-04
 > [List of issues (0.7.1)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.7.1
 
 ### Added
@@ -361,7 +371,7 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
 ### Fixed
 - Minor bug fixes and performance improvements.
 
-## [0.7.0] - 2025-12-19
+## 0.7.0 - 2025-12-19
 > [List of issues (0.7.0)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.7.0
 
 ### Added

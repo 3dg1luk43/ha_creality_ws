@@ -1317,6 +1317,21 @@ def test_one_idle_frame_mid_print_costs_no_notification():
     assert coord._notified_stopped is False
 
 
+def test_a_self_test_at_the_start_of_a_print_is_not_a_stopped_print():
+    """#124: the K2 reports one "printing" frame at 0%, then self-tests for
+    minutes. That arrived on the phone as "stopped at 0%"."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(0))
+
+    for _ in range(3):
+        hass.loop.advance(NOTIFY_END_CONFIRM_SECS + 1)
+        assert _events(_frame(coord, hass, **_printing(0, withSelfTest=50))) == []
+
+    hass.loop.advance(1)
+    assert _events(_frame(coord, hass, **_printing(1))) == []
+    assert coord._notified_stopped is False
+
+
 def test_a_dropped_connection_is_not_a_stopped_print():
     """Every entity goes unavailable when telemetry stops, and the derived state
     is "unknown" -- which says nothing about the job. Announcing a stop off it
