@@ -103,6 +103,9 @@ async def _has_webrtc_signaling(hass, host: str) -> bool:
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 3
 
+    _discovered_host: str | None = None
+    _discovered_mac: str | None = None
+
     @staticmethod
     def async_get_options_flow(config_entry: config_entries.ConfigEntry):
         # The entry is deliberately not passed on: OptionsFlow.config_entry is
@@ -135,42 +138,79 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_zeroconf(self, discovery_info: Any) -> ConfigFlowResult:
-        from .utils import extract_info_from_zeroconf
+        from .utils import extract_info_from_zeroconf, normalize_printer_hostname
         host, mac = extract_info_from_zeroconf(discovery_info)
-        
+
         if not host:
             return self.async_abort(reason="cannot_connect")
-            
-        # Robust Update Check:
-        # Check if an existing entry has this MAC address but a different IP.
-        # If so, update it automatically and abort this new flow.
-        if mac:
-            for entry in self.hass.config_entries.async_entries(DOMAIN):
-                cached_mac = entry.data.get("_cached_mac")
-                if cached_mac and cached_mac.upper() == mac.upper():
-                    if entry.data.get(CONF_HOST) != host:
-                        _LOGGER.warning(
-                            "Discovered printer with known MAC %s at new IP %s. Updating existing entry.", 
-                            mac, host
-                        )
-                        self.hass.config_entries.async_update_entry(
-                            entry, 
-                            data={**entry.data, CONF_HOST: host, "_last_ip": host}
-                        )
-                        self.hass.async_create_task(
-                            self.hass.config_entries.async_reload(entry.entry_id)
-                        )
-                    return self.async_abort(reason="already_configured")
 
-        # Standard check: if we already have this IP configured, abort
-        if not await _probe_tcp(host, WS_PORT):
-            return self.async_abort(reason="not_K")
-
+        # Already configured at this address. Checked before anything touches
+        # the network: every mDNS re-announcement lands here.
         await self.async_set_unique_id(host)
         self._abort_if_unique_id_configured()
 
-        title = f"{DEFAULT_NAME} ({host})"
-        return self.async_create_entry(title=title, data={CONF_HOST: host, "_cached_mac": mac})
+        # The same printer at a new address (a new DHCP lease): move the entry
+        # rather than offer the printer a second time. The setup that the
+        # update triggers moves the device and entities too.
+        hostname = normalize_printer_hostname(getattr(discovery_info, "hostname", None))
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            cached_mac = str(entry.data.get("_cached_mac") or "").upper()
+            same_mac = bool(mac and cached_mac and cached_mac == mac.upper())
+            same_name = bool(
+                hostname
+                and normalize_printer_hostname(entry.data.get("_cached_hostname")) == hostname
+            )
+            if not (same_mac or same_name):
+                continue
+            old_host = entry.data.get(CONF_HOST)
+            if same_name and not same_mac and old_host and await _probe_tcp(old_host, WS_PORT):
+                # A hostname is only a hint, and the configured address still
+                # answers: either a second interface of this printer, or a
+                # different printer with the same name. Change nothing.
+                return self.async_abort(reason="already_configured")
+            _LOGGER.info(
+                "Discovered the printer at %s (was %s); updating its entry",
+                host,
+                old_host,
+            )
+            # A data change reloads the entry through its update listener.
+            self.hass.config_entries.async_update_entry(
+                entry, data={**entry.data, CONF_HOST: host}
+            )
+            return self.async_abort(reason="already_configured")
+
+        if not await _probe_tcp(host, WS_PORT):
+            return self.async_abort(reason="not_K")
+
+        self._discovered_host = host
+        self._discovered_mac = mac
+        self.context["title_placeholders"] = {"name": hostname or host}
+        return await self.async_step_zeroconf_confirm()
+
+    async def async_step_zeroconf_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ask before adding a discovered printer.
+
+        Adding it silently put every K1/K2-named host on the network into Home
+        Assistant, and a printer the user had deleted came back on its next
+        announcement.
+        """
+        host = self._discovered_host
+        if user_input is not None:
+            data: dict[str, Any] = {CONF_HOST: host}
+            if self._discovered_mac:
+                data["_cached_mac"] = self._discovered_mac
+            return self.async_create_entry(title=f"{DEFAULT_NAME} ({host})", data=data)
+
+        self._set_confirm_only()
+        return self.async_show_form(
+            step_id="zeroconf_confirm",
+            description_placeholders={
+                "name": self.context["title_placeholders"]["name"],
+                "host": host,
+            },
+        )
 
 
 # The collapsible groups on the notifications page, and what each field falls

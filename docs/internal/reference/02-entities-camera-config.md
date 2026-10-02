@@ -320,12 +320,18 @@ Flow: `unique_id = host.strip()`, abort `already_configured` if taken (`:116-118
 
 Matchers: `_http._tcp.local.` and `_workstation._tcp.local.` with names `*creality*`, `*k1*`, `*k2*` (`manifest.json`). Steps:
 
-1. `extract_info_from_zeroconf` (`utils.py:97-189`): routable IPv4 first, then any IPv4, then first address; MAC from properties `mac` / `device_mac` / `serial` (bytes keys on the object branch, `utils.py:176`).
+Rewritten for R4 (#39); verified on the test box against real Home Assistant.
+
+1. `extract_info_from_zeroconf`: routable IPv4 first, then any IPv4, then first address; MAC from properties `mac` / `device_mac` / `serial`. Home Assistant passes `decoded_properties` (str keys); the old bytes-key lookup never matched, so no MAC was ever stored. Bytes keys are still accepted.
 2. No host -> abort `cannot_connect`.
-3. MAC matches an entry's `_cached_mac` -> if the IP differs, update `host` and `_last_ip`, schedule a reload; abort `already_configured` (`:147-163`).
-4. TCP probe 9999 fails -> abort `not_K` (`:166-167`).
-5. `unique_id = host`, abort if configured (`:169-170`).
-6. Create the entry immediately, no confirmation step, `title="<DEFAULT_NAME> (<host>)"`, `data={"host", "_cached_mac"}` (`:172-173`).
+3. `unique_id = host`, abort `already_configured` if taken, **before** any network probe (every mDNS re-announcement lands here).
+4. Same printer at a new address: an entry whose `_cached_mac` matches the MAC, or whose `_cached_hostname` matches the mDNS hostname (`normalize_printer_hostname`: lower case, `.local.` stripped, so `K1C-C627.local.` equals telemetry `K1C-C627`). A hostname-only match whose configured address still answers on 9999 changes nothing (a second interface, or another printer with the same name). Otherwise `host` is updated in `entry.data`; the update listener reloads the entry and `_async_follow_host` moves the device and entities at setup. Abort `already_configured`. (The old MAC branch also scheduled its own reload, so it reloaded twice.)
+5. TCP probe 9999 fails -> abort `not_K`.
+6. `async_step_zeroconf_confirm`: `_set_confirm_only()`, `title_placeholders={"name": hostname or host}` (`config.flow_title` is `{name}`), description placeholders `name`, `host`. Only the confirmation creates the entry: `title="<DEFAULT_NAME> (<host>)"`, `data={"host"}` plus `_cached_mac` when one was found. Before R4 the entry was created silently, so every `*k1*`/`*k2*` host was added and a deleted printer came back on its next announcement.
+
+### 10.2a Identity follows the host (`_async_follow_host`, `__init__.py`)
+
+Runs at every setup before the platforms. Entity unique ids are still `"<host>-<key>"` and the device identifier `(DOMAIN, host)`; when this entry's device carries a different host, the device identifier and every `"<old>-"` unique id are moved to the current host, and the entry's own `unique_id` follows (unless another entry holds it). Prefix match, not a split, so hostnames with dashes work. A registry already split by the pre-R4 bug (a device and `_2` entities at the new address) is left alone and logged at INFO, because merging either way renames entities someone may have rebuilt automations on. The device lookup is done among the entry's own devices: `device_registry.async_get_device` is deprecated in 2026.9 and its replacement does not exist in older supported cores. Pinned by `tools/tests/test_host_change.py`.
 
 ### 10.3 Options flow (`OptionsFlowHandler`, `config_flow.py:264-811`)
 
@@ -336,7 +342,7 @@ A menu (`async_step_init`, `:347-371`) with four pages. Each page validates, fol
 | `camera` | `camera_mode` (select `auto`, `mjpeg`, `webrtc`, `webrtc_direct`, `custom`, translation_key `camera_mode`); `go2rtc_url`, `go2rtc_port`, `go2rtc_rtsp_port` shown for `webrtc`, `auto`, and custom go2rtc schemes; `custom_camera_url` for `custom` | `auto` replaced by `_detect_camera_type()` (`:310-345`); custom URL needs scheme `http`/`https`/`rtsp`/`rtmp`/`srt` and a hostname, else `invalid_camera_url`; go2rtc keys default to `localhost`/11984, kept only for webrtc or a go2rtc custom source and dropped otherwise; RTSP `0` removes the key | `:373-529` |
 | `notifications` | `notify_targets` (multi-select of `notify.*` services and notify entities, custom values allowed); sections `events` (`notify_live`, `notify_completed`, `notify_error`, `notify_minutes_to_end`, `minutes_to_end_value` 1-60), `extras` (`notify_actions`, `notify_preview_image`, `notify_camera_snapshot`, `notify_tap_path`), `text` (six `notify_template_*`) | templates checked against `TEMPLATE_FIELDS`, error `unknown_placeholder`; `None` never persisted; sections flattened (`:209-224`) | `:560-728` |
 | `power` | `power_switch_enabled` (bool), `power_switch` (entity: `switch`, `input_boolean`, `light`) | enabled without an entity stores `None` | `:746-788` |
-| `connection` | `host` (**entry.data**), `polling_rate` (0-60 s) | no connectivity or uniqueness check; `unique_id` unchanged | `:790-811` |
+| `connection` | `host` (**entry.data**), `polling_rate` (0-60 s) | no connectivity or uniqueness check; since R4 the reload moves the device, entities and `unique_id` to the new host (section 10.2a) | `:790-811` |
 
 Changes confined to `NOTIFY_ONLY_OPTION_KEYS` (`const.py:204-219`) are applied in place; anything else reloads the entry, retried three times on `OperationNotAllowed` (`__init__.py:971-1010`).
 
@@ -397,7 +403,8 @@ Locales: `en`, `es` (`translations/`). `strings.json`, `en.json` and `es.json` e
 
 | Area | Keys present | Gaps |
 |---|---|---|
-| `config.step.user` | title, description, `host`, `name` | no `data_description`; no zeroconf confirm step to translate |
+| `config.step.user` | title, description, `host`, `name` | no `data_description` |
+| `config.step.zeroconf_confirm`, `config.flow_title` | title, description (`{name}`, `{host}`) | added for R4, en + es |
 | `config.error` | `cannot_connect`, `not_K`, `already_configured` | `not_K` and `already_configured` are only ever used as aborts |
 | `config.abort` | `already_configured`, `cannot_connect`, `not_K` | none |
 | `options.step.*` | `init` (menu), `camera`, `notifications` (sections), `power`, `connection` | `connection` has no description; selector units `sec`/`min` are literals in code (`config_flow.py:650`, `:809`) |

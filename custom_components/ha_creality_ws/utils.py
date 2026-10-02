@@ -203,25 +203,43 @@ def extract_info_from_zeroconf(info: Any) -> tuple[str | None, str | None]:
         elif getattr(info, "hostname", None):
             host = str(info.hostname).rstrip(".")
             
-        # Extract MAC from properties
+        # Extract MAC from properties. Home Assistant hands these over decoded
+        # (`decoded_properties`: str keys and values); looking them up by bytes
+        # keys, as this used to, never matched, so no MAC was ever stored.
+        # Bytes are still accepted for anything that passes raw TXT records.
         if hasattr(info, "properties") and info.properties:
-            # Check for MAC in properties
-            # Note: HA zeroconf properties are usually bytes, needing decode
             props = info.properties
-            for k in (b"mac", b"device_mac", b"serial"):
+            for k in ("mac", "device_mac", "serial"):
                 val = props.get(k)
-                if val:
+                if val is None:
+                    val = props.get(k.encode())
+                if isinstance(val, (bytes, bytearray)):
                     try:
-                        mac_str = val.decode("utf-8")
-                        mac = mac_str.upper()
-                        break
-                    except Exception:
-                        pass
+                        val = val.decode("utf-8")
+                    except UnicodeDecodeError:
+                        val = None
+                if val:
+                    mac = str(val).upper()
+                    break
         
     except Exception:
         pass
         
     return (host, mac)
+
+def normalize_printer_hostname(value: Any) -> str | None:
+    """A printer hostname comparable between mDNS and telemetry, or None.
+
+    mDNS announces `K1C-C627.local.`; the printer's own telemetry says
+    `K1C-C627`. Both reduce to `k1c-c627`.
+    """
+    if not isinstance(value, str):
+        return None
+    name = value.strip().rstrip(".").lower()
+    if name.endswith(".local"):
+        name = name[: -len(".local")]
+    return name or None
+
 
 class ModelDetection:
     """Detect printer model and capabilities from telemetry data.

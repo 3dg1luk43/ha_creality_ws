@@ -178,6 +178,82 @@ def _core_version() -> tuple[int, int] | None:
         return None
 
 
+@callback
+def _async_follow_host(hass: HomeAssistant, entry: ConfigEntry, host: str) -> None:
+    """Move this entry's device and entities onto `host` after it changed.
+
+    Entity unique ids and the device identifier embed the host
+    (`"<host>-<key>"`, `(DOMAIN, host)`). A new IP, from the options
+    Connection page or a rediscovery, used to recreate every entity with a
+    `_2` id on a second device, stranding the originals with their history,
+    their customisations and every automation that named them (#39).
+
+    Runs at every setup, so it covers any way the host can change. Where an
+    entity already exists under the new id (a registry split by that bug in
+    an earlier version), that entity is left alone: merging in either
+    direction would rename entities someone may have rebuilt automations on.
+    """
+    dev_reg = dr.async_get(hass)
+    ent_reg = er.async_get(hass)
+
+    old_hosts: set[str] = set()
+    devices = dr.async_entries_for_config_entry(dev_reg, entry.entry_id)
+    # Searched among this entry's own devices, not with a registry lookup:
+    # identifiers are scoped per entry, and the lookup that ignored that is
+    # deprecated.
+    target_exists = any((DOMAIN, host) in d.identifiers for d in devices)
+    for device in devices:
+        ours = {i for i in device.identifiers if i[0] == DOMAIN}
+        stale = {i[1] for i in ours if i[1] != host}
+        if not stale:
+            continue
+        old_hosts |= stale
+        if target_exists:
+            # INFO, not WARNING: it is a standing state, logged on every start.
+            _LOGGER.info(
+                "Printer moved to %s, but a device for that address already "
+                "exists; leaving the device for %s as it is",
+                host,
+                ", ".join(sorted(stale)),
+            )
+            continue
+        dev_reg.async_update_device(
+            device.id,
+            new_identifiers=(device.identifiers - ours) | {(DOMAIN, host)},
+        )
+
+    moved = conflicts = 0
+    for old in old_hosts:
+        prefix = f"{old}-"
+        for reg_entry in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+            if not reg_entry.unique_id.startswith(prefix):
+                continue
+            new_uid = f"{host}-{reg_entry.unique_id[len(prefix):]}"
+            if ent_reg.async_get_entity_id(reg_entry.domain, DOMAIN, new_uid):
+                conflicts += 1
+                continue
+            ent_reg.async_update_entity(reg_entry.entity_id, new_unique_id=new_uid)
+            moved += 1
+    if old_hosts:
+        _LOGGER.info(
+            "Printer moved from %s to %s: kept %d entities%s",
+            ", ".join(sorted(old_hosts)),
+            host,
+            moved,
+            f" ({conflicts} already existed at the new address)" if conflicts else "",
+        )
+
+    # The entry's own unique id is the host too. Left behind, it blocks adding
+    # another printer that later gets the old address, and lets this printer
+    # be added a second time at the new one.
+    if entry.unique_id != host and not any(
+        other.unique_id == host
+        for other in hass.config_entries.async_entries(DOMAIN)
+        if other.entry_id != entry.entry_id
+    ):
+        hass.config_entries.async_update_entry(entry, unique_id=host)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the Creality integration from a config entry."""
     # HACS refuses to install this version on an older core, but a manual or git
@@ -211,7 +287,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _migrate_go2rtc_settings(hass, entry)
     
     host: str = entry.data["host"]
-    
+    # Before any platform registers an entity under the new address.
+    _async_follow_host(hass, entry, host)
+
     # Handle power switch - only use if both enabled and entity is set
     power_switch_enabled = entry.options.get(CONF_POWER_SWITCH_ENABLED, False)
     power_switch = entry.options.get(CONF_POWER_SWITCH)

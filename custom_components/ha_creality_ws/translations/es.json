@@ -1,5 +1,6 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
       "user": {
         "title": "Conectar a la impresora Creality",
@@ -8,6 +9,10 @@
           "host": "Dirección IP",
           "name": "Nombre descriptivo"
         }
+      },
+      "zeroconf_confirm": {
+        "title": "Añadir impresora descubierta",
+        "description": "¿Quieres añadir la impresora Creality {name} en {host}?"
       }
     },
     "error": {

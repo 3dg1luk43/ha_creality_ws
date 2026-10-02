@@ -397,7 +397,7 @@ Targets resolve through `_coordinators_for_devices` (`:508-540`), device registr
 
 - Matchers (`manifest.json:17-24`): `_http._tcp.local.` and `_workstation._tcp.local.` with names `*creality*`, `*k1*`, `*k2*`.
 - `extract_info_from_zeroconf` (`utils.py:97-189`): prefers a routable IPv4, then any IPv4, then the first address, then the hostname; a MAC only from properties `mac`/`device_mac`/`serial`.
-- `async_step_zeroconf` (`config_flow.py:137-173`): MAC match against `_cached_mac` updates the host and reloads (`:147-162`); otherwise TCP-probe port 9999 (2.5 s), then `async_set_unique_id(host)` and `_abort_if_unique_id_configured()` without `updates`, then **`async_create_entry` directly**, with no confirmation step.
+- `async_step_zeroconf`: rewritten for R4; see `02-entities-camera-config.md` section 10.2 (unique-id check before probing, MAC or hostname match moves an existing entry, a confirmation step before anything is created) and 10.2a (`_async_follow_host`).
 - `async_step_user` (`config_flow.py:113-134`): unique id is the typed host string.
 
 ---
