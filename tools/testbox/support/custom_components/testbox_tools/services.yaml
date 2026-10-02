@@ -1,0 +1,15 @@
+zeroconf_discover:
+  fields:
+    host:
+      required: true
+      selector:
+        text:
+    hostname:
+      selector:
+        text:
+    name:
+      selector:
+        text:
+    properties:
+      selector:
+        object:

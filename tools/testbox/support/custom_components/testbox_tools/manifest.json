@@ -1,0 +1,10 @@
+{
+  "domain": "testbox_tools",
+  "name": "Test Box Tools",
+  "codeowners": [],
+  "dependencies": ["http"],
+  "documentation": "https://github.com/3dg1luk43/ha_creality_ws",
+  "iot_class": "local_push",
+  "requirements": [],
+  "version": "1.0.0"
+}

@@ -1,0 +1,75 @@
+# Creality WS test box: a disposable, real Home Assistant plus the mock printer.
+#
+# The unit suite stubs Home Assistant, so setup, unload, the config flow, the
+# entity and device registries, the notify schemas and mobile_app's push path
+# never run under it. Here they are all real. The integration is bind-mounted
+# read-only from the working tree, so the box always runs the code being edited;
+# `./hactl.py restart` reloads it.
+#
+# Both containers sit on a private network with fixed addresses, so a test can
+# move a printer to a new IP. Nothing is published beyond 127.0.0.1, and the box
+# cannot see the real Home Assistant or any real printer.
+name: creality-testbox
+
+networks:
+  box:
+    ipam:
+      config:
+        - subnet: 172.31.77.0/24
+  # A second path to the same printer, so a test can move it to a new IP
+  # (172.31.77.10 -> 172.31.78.10) and disconnect the old one.
+  alt:
+    ipam:
+      config:
+        - subnet: 172.31.78.0/24
+
+services:
+  printer:
+    build: ./printer
+    container_name: creality-testbox-printer
+    restart: "no"
+    command: >
+      python /tools/creality_printer_test_server.py
+      --model ${PRINTER_MODEL:-k1c}
+      --simulate-print --print-seconds ${PRINT_SECONDS:-900}
+      --self-test-seconds 5 --low-power --no-audio
+    volumes:
+      - ../../tools:/tools:ro
+    networks:
+      box:
+        ipv4_address: 172.31.77.10
+      alt:
+        ipv4_address: 172.31.78.10
+    ports:
+      # Only the test-control endpoint (POST /test/set ...) for hactl.py.
+      - "127.0.0.1:8323:8000"
+
+  ha:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: creality-testbox-ha
+    restart: "no"
+    depends_on:
+      - printer
+    ports:
+      - "127.0.0.1:8322:8123"
+    environment:
+      TZ: Europe/Prague
+      # The integration is mounted read-only; without this HA tries to write
+      # __pycache__ into the working tree.
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./config:/config
+      - ../../custom_components/ha_creality_ws:/config/custom_components/ha_creality_ws:ro
+      - ./support/custom_components/testbox_notify:/config/custom_components/testbox_notify:ro
+      - ./support/custom_components/testbox_tools:/config/custom_components/testbox_tools:ro
+    networks:
+      box:
+        ipv4_address: 172.31.77.2
+      alt:
+        ipv4_address: 172.31.78.2
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8123/manifest.json', timeout=3).status==200 else 1)\""]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
