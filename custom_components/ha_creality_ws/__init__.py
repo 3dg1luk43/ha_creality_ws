@@ -75,6 +75,7 @@ from .utils import (
     ModelDetection,
     build_modify_material_payload,
     derive_activity_state,
+    detect_camera_type,
 )
 
 
@@ -425,16 +426,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 new_data["_cached_max_chamber_temp"] = d.get("maxBoxTemp", entry.data.get("_cached_max_chamber_temp"))
                 new_data["_cached_max_box_temp"] = new_data["_cached_max_chamber_temp"]
                 
-                # Re-detect camera type only if missing (not on every update)
-                cached_camera_type = entry.data.get("_cached_camera_type")
-                if not cached_camera_type:
-                    new_data["_cached_camera_type"] = "webrtc" if (printermodel.is_k2_family or printermodel.supports_webrtc) else (
-                        "mjpeg_optional" if (printermodel.is_k1_se or printermodel.is_ender_v3_family) else "mjpeg"
-                    )
-                    _LOGGER.info("Camera type detected: %s", new_data["_cached_camera_type"])
-                else:
-                    # Keep existing camera type (don't override on updates)
-                    new_data["_cached_camera_type"] = cached_camera_type
+                # Re-detected from the evidence every time, not kept once set:
+                # a firmware update can move a K1C from MJPEG to WebRTC (#46).
+                new_data["_cached_camera_type"] = detect_camera_type(
+                    d, entry.data.get("_cached_camera_type")
+                )
                 
                 hass.config_entries.async_update_entry(entry, data=new_data)
                 _LOGGER.info(
@@ -486,6 +482,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             
             # Migrate go2rtc settings even when printer is off
             _migrate_go2rtc_settings(hass, entry)
+
+    # The device-info cache above only refreshes on an upgrade, but the camera
+    # can change with the printer's firmware. Checked on every start the
+    # printer is talking at, before the camera platform reads it.
+    live_camera = detect_camera_type(coord.data, entry.data.get("_cached_camera_type"))
+    if live_camera and live_camera != entry.data.get("_cached_camera_type"):
+        _LOGGER.info(
+            "Camera type for %s is now %s (was %s)",
+            host,
+            live_camera,
+            entry.data.get("_cached_camera_type"),
+        )
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, "_cached_camera_type": live_camera}
+        )
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coord
 

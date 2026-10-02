@@ -299,7 +299,9 @@ entry.data["_cached_camera_type"] (default "mjpeg")
 `- anything else     -> MJPEG camera                  camera.py:1548-1549
 ```
 
-The options flow never stores `auto`: choosing it runs `_detect_camera_type` and stores the concrete result (`config_flow.py:386-392`), so path 9.2 is only taken by entries whose camera page was never submitted.
+`_cached_camera_type` comes from `utils.detect_camera_type(data, previous)` (R5, #46): K2 family or `webrtcSupport == 1` -> `webrtc`; an explicit `webrtcSupport` other than 1, or no previous value -> `mjpeg` (`mjpeg_optional` for K1 SE / Ender 3 V3); a frame without the key keeps `previous`, so piecemeal frames cannot flip a working camera; no model at all decides nothing. It is recomputed whenever the device cache refreshes and, independently, on every setup that has telemetry, before the camera platform reads it. In auto mode the camera platform records `coord.camera_type_in_use`; `KCoordinator._check_camera_type` compares it with live telemetry on every frame and, once, writes the corrected type to `entry.data`, which reloads the entry and builds the right camera (covers an HA start with the printer off and a firmware update while running). Verified on the test box both ways, and against a real K1C on firmware 1.3.5.22 (`webrtcSupport: 1`, nothing on :8080, video through go2rtc with `#format=creality`).
+
+The options flow stores `auto` as `auto` since R5 and keeps the go2rtc fields for it. Before, choosing Auto resolved the mode (MJPEG for any K1 before `webrtcSupport` was consulted) and saved the result as a forced mode; those saved modes cannot be told apart from a deliberate choice, so affected users must re-select Auto. The old resolver and its signalling probes were removed.
 
 ---
 

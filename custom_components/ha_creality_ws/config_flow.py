@@ -14,15 +14,12 @@ from homeassistant import config_entries #type: ignore[import]
 from homeassistant.config_entries import ConfigFlowResult #type: ignore[import]
 from homeassistant.data_entry_flow import section #type: ignore[import]
 from homeassistant.helpers import selector #type: ignore[import]
-from homeassistant.helpers.aiohttp_client import async_get_clientsession #type: ignore[import]
 from .const import (
     DOMAIN,
     CONF_HOST,
     CONF_NAME,
     DEFAULT_NAME,
     WS_PORT,
-    WEBRTC_URL_TEMPLATE,
-    WEBRTC_CALL_ROOT_URL_TEMPLATE,
     CONF_POWER_SWITCH,
     CONF_POWER_SWITCH_ENABLED,
     CONF_CAMERA_MODE,
@@ -52,7 +49,6 @@ from .const import (
     DEFAULT_POLLING_RATE,
     NOTIFY_TEMPLATE_OPTIONS,
 )
-from .utils import ModelDetection
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,39 +63,6 @@ async def _probe_tcp(host: str, port: int, timeout: float = 2.5) -> bool:
         return False
 
 
-async def _probe_webrtc_signaling(hass, url: str, timeout: float = 1.5) -> bool:
-    """Probe the Creality WebRTC signaling endpoint.
-    
-    Returns:
-        bool: True if WebRTC signaling is available, False otherwise
-    """
-    session = async_get_clientsession(hass)
-    try:
-        async with session.head(url, timeout=timeout) as resp:
-            if resp.status in (200, 204, 405):
-                return True
-    except Exception:
-        pass
-    try:
-        async with session.get(url, timeout=timeout) as resp:
-            if resp.status in (200, 204, 405):
-                return True
-    except Exception:
-        return False
-    return False
-
-
-async def _has_webrtc_signaling(hass, host: str) -> bool:
-    """Return True if any known Creality WebRTC signaling endpoint responds.
-
-    Newer K1C firmwares expose the signaling endpoint on `/call` while K2-family
-    printers use `/call/webrtc_local`; probe both before deciding.
-    """
-    for template in (WEBRTC_CALL_ROOT_URL_TEMPLATE, WEBRTC_URL_TEMPLATE):
-        url = template.format(host=host)
-        if await _probe_webrtc_signaling(hass, url, timeout=2.0):
-            return True
-    return False
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 3
 
@@ -347,43 +310,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         self._persist()
         return await self.async_step_init()
 
-    async def _detect_camera_type(self) -> str:
-        """Detect the camera type for this printer."""
-        host = self.config_entry.data["host"]
-        
-        # Get the coordinator to access printer data
-        try:
-            coord = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
-            if coord and coord.data:
-                # Use model detection if we have telemetry data
-                printermodel = ModelDetection(coord.data)
-                
-                # K2 family uses WebRTC
-                if printermodel.is_k2_family:
-                    _LOGGER.debug("ha_creality_ws: detected K2 family printer (WebRTC)")
-                    return CAM_MODE_WEBRTC
-                
-                # K1 family, K1 Max, K1C, Creality Hi use MJPEG
-                if printermodel.is_k1_family or printermodel.is_k1_max or printermodel.is_k1c or printermodel.is_creality_hi:
-                    _LOGGER.debug("ha_creality_ws: detected MJPEG camera model")
-                    return CAM_MODE_MJPEG
-                
-                # K1 SE and Ender V3 may have optional MJPEG
-                if printermodel.is_k1_se or printermodel.is_ender_v3_family:
-                    _LOGGER.debug("ha_creality_ws: detected optional camera model, trying MJPEG")
-                    return CAM_MODE_MJPEG
-        except Exception as exc:
-            _LOGGER.debug("ha_creality_ws: failed to detect camera from telemetry: %s", exc)
-        
-        # Fallback: probe WebRTC signaling endpoints (both /call and /call/webrtc_local)
-        if await _has_webrtc_signaling(self.hass, host):
-            _LOGGER.debug("ha_creality_ws: detected WebRTC via probe")
-            return CAM_MODE_WEBRTC
-
-        # Default to MJPEG
-        _LOGGER.debug("ha_creality_ws: defaulting to MJPEG")
-        return CAM_MODE_MJPEG
-
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Top-level options menu (the hub each section returns to).
 
@@ -425,10 +351,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         if user_input is not None:
             camera_mode = user_input.get(CONF_CAMERA_MODE, CAM_MODE_AUTO)
-            if camera_mode == CAM_MODE_AUTO:
-                camera_mode = await self._detect_camera_type()
-                _LOGGER.info("ha_creality_ws: auto mode detected camera type: %s", camera_mode)
-
+            # Auto is stored as auto. Resolving it here and saving the result
+            # turned it into a forced mode that no later firmware change could
+            # undo, and the resolver chose MJPEG for any K1 before it looked at
+            # `webrtcSupport`, so a WebRTC K1C lost its video for good (#46).
+            # The camera platform resolves it from telemetry at every setup.
             staged[CONF_CAMERA_MODE] = camera_mode
 
             if camera_mode == CAM_MODE_CUSTOM:
@@ -456,7 +383,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     .scheme.lower() in GO2RTC_SOURCE_SCHEMES
             )
 
-            if camera_mode == CAM_MODE_WEBRTC or custom_uses_go2rtc:
+            # Auto keeps them too: it resolves to WebRTC on a K2 or a WebRTC K1C,
+            # and the page renders the go2rtc fields for it.
+            if camera_mode in (CAM_MODE_WEBRTC, CAM_MODE_AUTO) or custom_uses_go2rtc:
                 # Only fields the form actually rendered are applied. A submit can
                 # reach here without them: switching to Custom hides the go2rtc
                 # fields, and the Custom-uses-go2rtc branch then ran with no

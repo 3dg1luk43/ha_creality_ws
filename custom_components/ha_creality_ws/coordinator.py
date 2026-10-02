@@ -18,6 +18,7 @@ from .utils import (
     BUSY_PRINT_STATES,
     ModelDetection,
     derive_activity_state,
+    detect_camera_type,
     safe_float,
 )
 from .notification_rules import (
@@ -164,6 +165,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._pending_pause = False
         self._pending_resume = False
         self._last_power_off: bool = False
+        # The camera type the camera platform built in auto mode; None when a
+        # mode is forced or no camera has been set up yet.
+        self.camera_type_in_use: str | None = None
         self._power_lock = asyncio.Lock()
         
         # Notification & Performance
@@ -316,6 +320,30 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.client.is_connected:
             return False
         return self._switch_reports_off()
+
+    def _check_camera_type(self) -> None:
+        """Rebuild the camera if telemetry shows it is the wrong kind.
+
+        The type is decided at setup, often before the printer has said
+        anything: an HA start with the printer switched off, or a firmware
+        update that moved a K1C to WebRTC while HA kept running (#46). Recording
+        the corrected type reloads the entry through its update listener, and
+        the reload builds the right camera. Once per coordinator.
+        """
+        in_use = self.camera_type_in_use
+        if in_use is None or self.config_entry is None:
+            return
+        live = detect_camera_type(self.data, in_use)
+        if not live or live == in_use:
+            return
+        self.camera_type_in_use = None
+        _LOGGER.info(
+            "Printer reports a %s camera, not %s; rebuilding the camera", live, in_use
+        )
+        self.hass.config_entries.async_update_entry(
+            self.config_entry,
+            data={**self.config_entry.data, "_cached_camera_type": live},
+        )
 
     def _switch_reports_off(self) -> bool:
         """What the power switch itself says, whatever the socket is doing.
@@ -734,6 +762,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._absorb_gcode_file_listing(payload)
 
         self.merge_telemetry(payload)
+        self._check_camera_type()
 
         self._recompute_paused_from_telemetry()
         

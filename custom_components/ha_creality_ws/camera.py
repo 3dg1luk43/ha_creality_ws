@@ -1422,43 +1422,6 @@ class CrealityWebRTCCamera(_BaseCamera):
         return data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9")
 
 
-async def _probe_webrtc_signaling(hass: HomeAssistant, url: str, timeout: float = 1.5) -> bool:
-    """Probe the Creality WebRTC signaling endpoint.
-
-    This function performs a lightweight probe of the printer's WebRTC signaling
-    endpoint to determine if the printer supports WebRTC. It tries HEAD first
-    (cheaper), then falls back to GET if HEAD is not supported.
-
-    Printers typically answer on /call/webrtc_local even without a full offer body.
-    We treat any 200-405 (method not allowed) as presence; 404/connection errors -> absent.
-    
-    Args:
-        hass: Home Assistant instance
-        url: WebRTC signaling URL to probe
-        timeout: Request timeout in seconds
-        
-    Returns:
-        bool: True if WebRTC signaling is available, False otherwise
-    """
-    session = async_get_clientsession(hass)
-    try:
-        # First try HEAD (cheap). If not supported, fall back to GET
-        async with session.head(url, timeout=timeout) as resp:
-            _LOGGER.debug("ha_creality_ws: probe HEAD %s -> status=%s", url, resp.status)
-            if resp.status in (200, 204, 405):
-                return True
-    except Exception:
-        pass
-    try:
-        async with session.get(url, timeout=timeout) as resp:
-            _LOGGER.debug("ha_creality_ws: probe GET %s -> status=%s", url, resp.status)
-            if resp.status in (200, 204, 405):
-                return True
-    except Exception:
-        return False
-    return False
-
-
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities):
     """Set up camera entities for a Creality printer.
     
@@ -1523,6 +1486,9 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities):
 
     # Use cached camera type from entry data (detected during onboarding)
     cached_camera_type = entry.data.get("_cached_camera_type", "mjpeg")
+    # Auto mode only: lets the coordinator rebuild this camera if the printer's
+    # telemetry later shows it is the wrong kind.
+    coord.camera_type_in_use = cached_camera_type
     
     # WebRTC cameras (K2 family - always present)
     if cached_camera_type == "webrtc":

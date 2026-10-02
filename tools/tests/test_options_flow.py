@@ -113,6 +113,7 @@ from custom_components.ha_creality_ws.config_flow import (  # noqa: E402
     OptionsFlowHandler,
 )
 from custom_components.ha_creality_ws.const import (  # noqa: E402
+    CAM_MODE_AUTO,
     CAM_MODE_CUSTOM,
     CONF_POLLING_RATE,
     CONF_NOTIFY_TEMPLATE_COMPLETED,
@@ -267,6 +268,22 @@ def test_a_submitted_go2rtc_url_is_still_applied():
     assert handler._working[CONF_GO2RTC_URL] == "10.0.0.55"
     assert handler._working[CONF_GO2RTC_PORT] == 1985
     assert handler._working[CONF_GO2RTC_RTSP_PORT] == 8556
+
+
+@requires_voluptuous
+def test_auto_is_stored_as_auto_and_keeps_the_go2rtc_settings():
+    """#46. Auto used to be resolved on submit and the result saved, which made
+    it a forced mode: a K1C taken for MJPEG kept MJPEG through the firmware
+    update that moved it to WebRTC, with nothing on :8080 to show. Auto can
+    resolve to WebRTC, so its go2rtc fields are kept like WebRTC's."""
+    handler = _handler(EXTERNAL)
+
+    result = _submit(handler, {CONF_CAMERA_MODE: CAM_MODE_AUTO})
+
+    assert result["step"] == "menu"
+    assert handler._working[CONF_CAMERA_MODE] == CAM_MODE_AUTO
+    assert handler._working[CONF_GO2RTC_URL] == "10.0.0.9"
+    assert handler._working[CONF_GO2RTC_PORT] == 1984
 
 
 @requires_voluptuous

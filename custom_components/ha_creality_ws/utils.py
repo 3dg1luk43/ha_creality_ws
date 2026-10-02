@@ -227,6 +227,31 @@ def extract_info_from_zeroconf(info: Any) -> tuple[str | None, str | None]:
         
     return (host, mac)
 
+def detect_camera_type(data: Mapping[str, Any] | None, previous: str | None = None) -> str | None:
+    """The camera a printer serves: "webrtc", "mjpeg" or "mjpeg_optional".
+
+    Decided from evidence and never from the model alone. Firmware 1.3.5.22
+    moved the K1C and K1 Max from mjpg-streamer on :8080 to WebRTC on :8000 and
+    announces it with `webrtcSupport: 1`; nothing on :8080 answers any more, so
+    a K1C taken for MJPEG shows no video at all (#46). The K2 family is WebRTC
+    whatever it reports.
+
+    `previous` is the type already in use. A missing `webrtcSupport` key keeps
+    it: frames arrive piecemeal, and deciding on a frame that has the model but
+    not yet the flag would flip a working WebRTC camera back to MJPEG. Without
+    telemetry at all, nothing is known and `previous` is returned too.
+    """
+    d = data or {}
+    if not (d.get("model") or d.get("modelVersion")):
+        return previous
+    detected = ModelDetection(d)
+    if detected.is_k2_family or d.get("webrtcSupport") == 1:
+        return "webrtc"
+    if "webrtcSupport" in d or previous is None:
+        return "mjpeg_optional" if (detected.is_k1_se or detected.is_ender_v3_family) else "mjpeg"
+    return previous
+
+
 def normalize_printer_hostname(value: Any) -> str | None:
     """A printer hostname comparable between mDNS and telemetry, or None.
 
