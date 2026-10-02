@@ -58,6 +58,8 @@ from .notification_rules import (
     render_user_template,
     TEMPLATE_FIELDS,
     notify_tag_base,
+    is_apple_platform,
+    native_data,
     stringify_data,
 )
 from .const import (
@@ -201,9 +203,10 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # platforms are forwarded after this coordinator exists, so nothing
         # can be resolved here.
         self._entity_id_cache: dict[tuple[str, str], str] = {}
-        # notify target -> companion `os_name`. Resolved lazily; a target the
-        # user has just added would not be in a cache built at setup.
-        self._target_os_cache: dict[str, str | None] = {}
+        # notify target -> companion `(os_name, manufacturer)`. Resolved
+        # lazily; a target the user has just added would not be in a cache
+        # built at setup.
+        self._target_os_cache: dict[str, tuple[str | None, str | None]] = {}
         self._notify_completed = False
         self._notify_error = False
         self._notify_minutes_to_end = False
@@ -1479,9 +1482,8 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # A card is already on the phone, so this push updates one rather
             # than starting one -- which is what makes it silent on iOS.
             refresh=self._live_card.card_active,
-            # For the iOS Live Activity's own rendered state.
+            # The card's subtitle on both platforms.
             job_name=display_filename(snap.filename) or snap.filename or "",
-            device_name=self._notify_title(),
         )
         self._notify_dispatch(
             payload, kind=f"live:{reason.value}", live_only=True
@@ -2055,17 +2057,25 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         than guessing from the service name, because "macbookairlukas" is not
         distinguishable from a phone by inspection.
         """
+        return self._target_platform(target)[0]
+
+    def _target_is_apple(self, target: str) -> bool:
+        """Whether a notify target is an Apple companion app (native types)."""
+        return is_apple_platform(*self._target_platform(target))
+
+    def _target_platform(self, target: str) -> tuple[str | None, str | None]:
+        """`(os_name, manufacturer)` of the companion behind a target, cached."""
         if target in self._target_os_cache:
             return self._target_os_cache[target]
 
         slug = notify_service_slug(target)
-        found: str | None = None
+        found: tuple[str | None, str | None] = (None, None)
         if slug:
             entries = getattr(self.hass.config_entries, "async_entries", None)
             for entry in (entries("mobile_app") if entries else ()):
                 data = getattr(entry, "data", None) or {}
                 if slugify(str(data.get("device_name", ""))) == slug:
-                    found = data.get("os_name")
+                    found = (data.get("os_name"), data.get("manufacturer"))
                     break
         self._target_os_cache[target] = found
         return found
@@ -2238,10 +2248,16 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if title:
                 service_data["title"] = title
             if data:
-                # Only the mobile branch reaches here with data still attached,
-                # and that is the one the FCM string rule applies to.
-                service_data["data"] = stringify_data(data)
-                _warn_on_unsendable(service_data["data"], target)
+                # Only the mobile branch reaches here with data still attached.
+                # The FCM string rule is Android's: an iPhone needs the real
+                # types, and gets them whenever it can be identified. An
+                # unidentified target gets strings, which Android requires and
+                # the typed `content_state` copy covers on iOS.
+                if self._target_is_apple(target):
+                    service_data["data"] = native_data(data)
+                else:
+                    service_data["data"] = stringify_data(data)
+                    _warn_on_unsendable(service_data["data"], target)
             await self.hass.services.async_call(domain, service, service_data)
         except Exception:  # pylint: disable=broad-except
             # One unreachable phone must not starve the others.

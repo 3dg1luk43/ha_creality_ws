@@ -249,7 +249,7 @@ Fired regardless of targets or options (`coordinator.py:873-878`, `1011-1021`, `
 | other `domain.service` | `coordinator.py:2223-2235` | title and message only; sentinel never sent |
 | no dot | `coordinator.py:2214-2221` | warning, nothing sent |
 
-Platform lookup: `_target_os` matches `slugify(device_name)` of `mobile_app` entries against the service slug and caches `os_name` (`coordinator.py:2050-2071`); cleared on every options load (`coordinator.py:294`). Only used for the macOS live gate (`coordinator.py:2144`, `2092`, `1875`).
+Platform lookup: `_target_platform` matches `slugify(device_name)` of `mobile_app` entries against the service slug and caches `(os_name, manufacturer)`; `_target_os` and `_target_is_apple` read it. Cleared on every options load. `os_name` drives the macOS live gate; `_target_is_apple` (`manufacturer == "Apple"`, as core decides, else an Apple `os_name`) drives wire shaping. Fixed for R1 (#125).
 
 ### 7.2 Fan-out
 
@@ -257,7 +257,7 @@ Platform lookup: `_target_os` matches `slugify(device_name)` of `mobile_app` ent
 
 ### 7.3 Wire shaping
 
-`_async_deliver_one` (`coordinator.py:2177-2248`) applies `stringify_data` to every mobile target's `data` (`coordinator.py:2240-2244`): top-level scalars and scalars inside dicts nested in lists become strings (bools lowercase), dict values pass through whole, `None` drops the key (`notification_rules.py:417-464`). `_warn_on_unsendable` then logs any native scalar left (`coordinator.py:106-139`). There is no per-platform branch; see trap 1.
+`_async_deliver_one` shapes a mobile target's `data` per platform. Apple targets get `native_data`: `None` dropped at the same depths, every type kept. Android and unidentified targets get `stringify_data`: top-level scalars and scalars inside dicts nested in lists become strings (bools lowercase), dict values pass through whole, `None` drops the key; `_warn_on_unsendable` then logs any native scalar left. Before R1 (#125) every mobile target got `stringify_data`.
 
 ---
 
@@ -275,7 +275,7 @@ Live card (`notification_rules.py:983-1080`):
 | `alert_once` | `True` | always (`990`) |
 | `activity` | `"start"` | first push of a card (`1019-1021`) |
 | `silent`, `push.interruption-level` | `True`, `"passive"` | refresh pushes (`1010-1018`) |
-| `content_state` | `{state, device, progress_pct?, eta_timestamp?, program?}` | `live_update` (`1032-1044`) |
+| `content_state` | copy of the typed keys the relay reads: `progress`, `progress_max`, `chronometer`, `critical_text`, and `when` as `countdown_end` | `live_update`. A dict survives `stringify_data` whole, so an unidentified iPhone still decodes. Before R1 it held `state, device, progress_pct, eta_timestamp, program`, which nothing read |
 | `subtitle` | job file name | `live_update` and a name (`1041-1043`) |
 | `progress`, `progress_max` | 0-100, 100 | progress known (`1046-1051`) |
 | `progress_indeterminate` | `True` | progress unknown (`1047-1048`) |
@@ -306,7 +306,7 @@ Verified against HA core 2026.9.3 (`homeassistant/components/mobile_app`), the p
 2. Relay (`functions/live-activity.js`): `content-state` is built from top-level `message, title, critical_text, progress, progress_max, chronometer, notification_icon, notification_icon_color, progress_bar_color, progress_bar_direction, url, when` (as `countdown_end`), then overridden by `content_state.{title, message, critical_text, progress, progress_max, chronometer, countdown_end, icon, color, background_color, text_color, progress_bar_color, progress_bar_direction, url}` (`live-activity.js:184-234`). Start always carries an alert (`live-activity.js:90-92`); an update is quiet and sent at APNs priority 5 only when `data.silent === true` (`live-activity.js:94`, `122`).
 3. App: `ContentState` decodes `progress`/`progress_max` leniently, but `chronometer` as a strict `Bool` and `countdown_end` as a strict `Double` (`Sources/Shared/LiveActivity/HALiveActivityAttributes.swift:223-226`). A string in either throws, and ActivityKit drops the push silently.
 
-The integration's own `activity` key and every key it puts in `content_state` (`state, device, progress_pct, eta_timestamp, program`) are read by none of the three.
+The integration's own `activity` key is read by none of the three (tests use it to tell terminal payloads apart). Since R1, `content_state` carries only relay keys.
 
 **iOS ordinary notification** (`functions/legacy.js`, used when no live-activity token applies): `tag` to `apns-collapse-id`, `group` to `thread-id`, `subtitle`, `push` merged into `aps`, `actions` passed through, `image` as attachment, `url`, `icon_url` (`legacy.js:120-237`). Actions are parsed with ObjectMapper `value(key, default:)`, which falls back to the default on a type mismatch (`Sources/Shared/API/Responses/MobileAppConfig/MobileAppConfigPushCategory.swift:21,24`; ObjectMapper `Sources/Map.swift:220-226`), so `"true"` reads as `false`.
 
@@ -368,11 +368,11 @@ Not used for print notifications. `notify.persistent_notification` as a target i
 | `tools/tests/test_notification_rules.py` | pure module | 83 test functions; watch tables at `1049-1240` |
 | `tools/tests/test_notification_live.py` | real `_check_notifications`, fake clock | `_frame` at `132-140`; #124 at `1320-1332` |
 | `tools/tests/test_notifications.py` | gating, `_notify_event` monkeypatched | stub deliberately lacks services (`32-44`) |
-| `tools/tests/test_notification_dispatch.py` | `_notify_dispatch`, `_async_deliver_one` | stub has no `config_entries.async_entries`, so `_target_os` is always `None` (`40`) |
+| `tools/tests/test_notification_dispatch.py` | `_notify_dispatch`, `_async_deliver_one`, per-platform shaping | stub carries `mobile_entries` for `config_entries.async_entries` since R1 |
 | `tools/tests/test_notification_payload.py` | media, links, tags | |
 | `tools/tests/test_notification_actions.py` | ids, buttons, handler | asserts pre-wire dicts |
 | `tools/tests/test_notification_templates.py` | custom text | |
-| `tools/tests/test_notification_wire_format.py` | `stringify_data` | Android rules only |
+| `tools/tests/test_notification_wire_format.py` | `stringify_data` | Android rules; Apple shaping is tested in `test_notification_dispatch.py` |
 | `tools/tests/test_options_flow.py:350-` | notifications page | |
 
 All drive production code; none reimplements the logic under test. The #124 tests fail when the fix is reverted (checked by disabling `notification_rules.py:634` in a scratch copy).
@@ -381,9 +381,9 @@ All drive production code; none reimplements the logic under test. The #124 test
 
 ## 14. Traps
 
-1. **One wire format for every mobile target.** `stringify_data` is Android's rule, applied to iPhones too (`coordinator.py:2240-2244`). On iOS it breaks the Live Activity decode, the local-push live check, `silent`, and the Stop button's authentication (section 8.2).
+1. **One wire format for every mobile target.** FIXED (R1): Apple targets now get native types. Historical: `stringify_data` is Android's rule and was applied to iPhones too, breaking the Live Activity decode, the local-push live check, `silent` and the Stop action's flags.
 2. **`activity: start/end` does nothing.** Start versus update is decided by core from its per-tag token store (section 8.2). Every `live_update` push sent while no token is stored is a push-to-start with an alert.
-3. **`content_state` keys are not the relay's.** Only `title, message, critical_text, progress, progress_max, chronometer, countdown_end, icon, color, background_color, text_color, progress_bar_color, progress_bar_direction, url` are read. A dict survives `stringify_data`, so typed overrides placed there with those names would reach the phone intact.
+3. **`content_state` keys are not the relay's.** FIXED (R1): it now repeats the relay's typed keys.
 4. **One tag carries three things, and their order is not guaranteed.** `_live` holds the card, the terminal banner and the dismiss sentinel. `_async_replace_one` awaits the dismissal before the banner (`coordinator.py:2111-2115`), but `_async_deliver_one` calls `hass.services.async_call` without `blocking=True` (`coordinator.py:2209-2211`, `2245`). Core then runs the service as a background task and returns at once (`homeassistant/core.py:2953-2959` in 2026.9.3), so both HTTPS posts to the relay are in flight together and can arrive in either order. For the same reason the `except` at `coordinator.py:2246-2248` never sees a failed push; core logs those itself.
 5. **Detection runs without targets.** Latches and the job clock advance with no target or with an event toggle off (`coordinator.py:873-878`, `1011-1021`); only sends are gated.
 6. **`printProgress` uses an explicit `None` check** in four places (`coordinator.py:857-859`, `778-780`, `2042-2044`, `utils.py:527-531`). `or` would read a real 0% as missing and fall back to a stale `dProgress` of 100.

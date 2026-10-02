@@ -37,7 +37,14 @@ class HassStub:
         self.tasks: list = []
         self.entries: dict[str, SimpleNamespace] = {}
         self.config = SimpleNamespace(language="en")
-        self.config_entries = SimpleNamespace(async_get_entry=self.entries.get)
+        # `mobile_app` registrations, which is how a target's platform is found.
+        self.mobile_entries: list[SimpleNamespace] = []
+        self.config_entries = SimpleNamespace(
+            async_get_entry=self.entries.get,
+            async_entries=lambda domain=None: (
+                self.mobile_entries if domain == "mobile_app" else []
+            ),
+        )
 
     async def _async_call(self, domain, service, data, **_kw):
         target = data.get("entity_id") or f"{domain}.{service}"
@@ -133,6 +140,92 @@ def test_a_legacy_mobile_service_receives_the_full_payload():
             },
         )
     ]
+
+
+# A live-card payload as the builder makes it: native bools and ints at the top
+# level and inside the Stop action, a None that must not arrive as "None".
+LIVE_SHAPED = {
+    "title": "K1C",
+    "message": "42%",
+    "data": {
+        "tag": "ha_creality_ws_abc_live",
+        "live_update": True,
+        "silent": True,
+        "chronometer": False,
+        "when": 1790962603,
+        "progress": 42,
+        "icon_url": None,
+        "actions": [
+            {"action": "CREALITY_STOP_AB", "title": "Stop", "destructive": True}
+        ],
+    },
+}
+
+
+def _register(hass, device_name, os_name, manufacturer):
+    hass.mobile_entries.append(
+        SimpleNamespace(
+            data={
+                "device_name": device_name,
+                "os_name": os_name,
+                "manufacturer": manufacturer,
+            }
+        )
+    )
+
+
+def test_an_iphone_receives_native_types():
+    """#125. The iOS app decodes `chronometer` as a Bool and `countdown_end`
+    (the relay's name for `when`) as a Double, so the strings Android needs
+    made every Live Activity push throw and vanish. `silent` must be a real
+    bool for the relay, and the Stop action's `destructive` for the app."""
+    coord, hass = _coordinator(["notify.mobile_app_iphone_15_pro"])
+    _register(hass, "iPhone 15 PRO", "iOS", "Apple")
+    coord._notify_dispatch(LIVE_SHAPED)
+    [(_, service, sent)] = _flush(hass)
+    assert service == "mobile_app_iphone_15_pro"
+    data = sent["data"]
+    assert data["live_update"] is True
+    assert data["silent"] is True
+    assert data["chronometer"] is False
+    assert data["when"] == 1790962603 and isinstance(data["when"], int)
+    assert data["progress"] == 42 and isinstance(data["progress"], int)
+    assert data["actions"][0]["destructive"] is True
+    assert "icon_url" not in data
+
+
+def test_an_android_phone_still_receives_strings():
+    """The FCM relay rejects the whole push over one native scalar, at the top
+    level or inside the flattened `actions` list."""
+    coord, hass = _coordinator(["notify.mobile_app_s24"])
+    _register(hass, "S24", "Android", "samsung")
+    coord._notify_dispatch(LIVE_SHAPED)
+    [(_, _, sent)] = _flush(hass)
+    data = sent["data"]
+    assert data["live_update"] == "true"
+    assert data["chronometer"] == "false"
+    assert data["when"] == "1790962603"
+    assert data["actions"][0]["destructive"] == "true"
+    assert "icon_url" not in data
+
+
+def test_an_apple_registration_is_recognised_by_manufacturer_alone():
+    """Core decides on `manufacturer == "Apple"`; `os_name` is only a fallback."""
+    coord, hass = _coordinator(["notify.mobile_app_ipad"])
+    _register(hass, "iPad", None, "Apple")
+    coord._notify_dispatch(LIVE_SHAPED)
+    [(_, _, sent)] = _flush(hass)
+    assert sent["data"]["live_update"] is True
+
+
+def test_an_unidentified_target_gets_the_android_safe_strings():
+    """A wrong guess towards native types loses every Android push; a wrong
+    guess towards strings is what the typed `content_state` copy is for."""
+    coord, hass = _coordinator(["notify.mobile_app_mystery"])
+    _register(hass, "Someone else", "iOS", "Apple")
+    coord._notify_dispatch(LIVE_SHAPED)
+    [(_, _, sent)] = _flush(hass)
+    assert sent["data"]["live_update"] == "true"
 
 
 def test_a_notify_entity_routes_to_send_message_without_data():

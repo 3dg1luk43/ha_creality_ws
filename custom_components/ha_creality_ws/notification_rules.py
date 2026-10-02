@@ -113,6 +113,8 @@ def coerce_targets(options: Mapping[str, Any]) -> list[str]:
 # there is an ordinary banner that cannot be updated in place -- one every
 # refresh interval, none of which supersede the last.
 LIVE_INCAPABLE_OS = frozenset({"macos"})
+# `os_name` values the Apple companion apps register with.
+APPLE_OS = frozenset({"ios", "ipados", "macos", "watchos", "visionos"})
 
 
 def is_live_capable(os_name: str | None) -> bool:
@@ -453,6 +455,50 @@ def stringify_data(data: Mapping[str, Any] | None) -> dict[str, Any]:
         else:
             out[key] = _scalar_to_str(value)
     return out
+
+
+def native_data(data: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The same ``data`` dict for an Apple target: ``None`` dropped, types kept.
+
+    The FCM string rule is Android's alone, and applying it to an iPhone broke
+    every Live Activity (#125). The relay copies ``chronometer`` and ``when``
+    into the activity's content state, and the iOS app decodes those strictly as
+    a ``Bool`` and a ``Double``: ``"false"`` and ``"1790962603"`` make the
+    decode throw, and ActivityKit drops the push without a trace. ``silent`` is
+    compared with ``=== true`` by the relay and ``live_update`` must be a real
+    ``Bool`` for local push, so neither survives as a string either, and the
+    action parser reads ``"true"`` as ``false``, which cost Stop its
+    confirmation.
+
+    ``None`` is dropped at the same depths `stringify_data` drops it, so both
+    platforms see the same set of keys.
+    """
+    out: dict[str, Any] = {}
+    for key, value in (data or {}).items():
+        if value is None:
+            continue
+        if isinstance(value, (list, tuple)):
+            out[key] = [
+                native_data(item) if isinstance(item, Mapping) else item
+                for item in value
+            ]
+        elif isinstance(value, Mapping):
+            out[key] = dict(value)
+        else:
+            out[key] = value
+    return out
+
+
+def is_apple_platform(os_name: str | None, manufacturer: str | None = None) -> bool:
+    """Whether a companion registration is one of Apple's apps.
+
+    Core makes the same call on ``manufacturer == "Apple"`` before it routes a
+    push through its Live Activity handling; ``os_name`` is the fallback for a
+    registration that does not carry one.
+    """
+    if manufacturer and manufacturer.strip().lower() == "apple":
+        return True
+    return bool(os_name) and os_name.strip().lower() in APPLE_OS
 
 
 def _scalar_to_str(value: Any) -> Any:
@@ -965,7 +1011,6 @@ def build_live_payload(
     actions: list[dict[str, Any]] | None = None,
     refresh: bool = False,
     job_name: str = "",
-    device_name: str = "",
 ) -> dict[str, Any]:
     """A live-card push.
 
@@ -1020,28 +1065,8 @@ def build_live_payload(
         # Tells iOS to begin a Live Activity rather than update one.
         data["activity"] = "start"
 
-    if live_update:
-        # What an iOS Live Activity actually renders from. `activity` alone only
-        # says "start one" -- with no state to draw, iOS falls back to an
-        # ordinary notification, and an ordinary iOS notification is dismissed
-        # by a tap with no key able to prevent it. That was the whole iOS
-        # symptom: a card that vanished when touched.
-        #
-        # A nested dict, so the FCM string rule does not apply to its values
-        # and these stay real numbers.
-        content: dict[str, Any] = {
-            "state": "paused" if paused else "printing",
-            "device": device_name or title,
-        }
-        pct_for_state = _clamp_progress(progress)
-        if pct_for_state is not None:
-            content["progress_pct"] = pct_for_state
-        if when is not None:
-            content["eta_timestamp"] = when
-        if job_name:
-            content["program"] = job_name
-            data["subtitle"] = job_name
-        data["content_state"] = content
+    if live_update and job_name:
+        data["subtitle"] = job_name
 
     pct = _clamp_progress(progress)
     if pct is None:
@@ -1069,6 +1094,19 @@ def build_live_payload(
             data["chronometer"] = False
             if status_text:
                 data["critical_text"] = status_text
+        # The relay builds the Live Activity's content state from the top-level
+        # keys above, then lets `content_state` override them. Repeating the
+        # typed ones here keeps an iPhone working when its platform could not
+        # be identified and the top level went out as strings: a dict is passed
+        # through whole by `stringify_data`, and Android drops this key.
+        content: dict[str, Any] = {
+            key: data[key]
+            for key in ("progress", "progress_max", "chronometer", "critical_text")
+            if key in data
+        }
+        if "when" in data:
+            content["countdown_end"] = data["when"]
+        data["content_state"] = content
 
     # No snapshot on live pushes: Android re-downloads a big picture every time
     # and an iOS Live Activity has no image slot, so it would be pure waste on
