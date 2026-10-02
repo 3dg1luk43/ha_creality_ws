@@ -128,7 +128,7 @@ body:
       description: |
         **Required.** Any evidence of what went wrong. Best is both of:
 
-        1. **Diagnostic dump**: Developer Tools → Actions → `ha_creality_ws.diagnostic_dump`, then copy the `printers` section of the response. Long output: attach it as a file.
+        1. **Diagnostics**: Settings → Devices & services → Creality WebSocket Integration → the printer's ⋮ menu → **Download diagnostics**, then attach the file. Or Developer Tools → Actions → `ha_creality_ws.diagnostic_dump` and copy the `printers` section of the response. Addresses, names and tokens are hidden in both.
         2. **Log lines** filtered for `ha_creality_ws` from Settings → System → Logs. For debug logging, add this to `configuration.yaml` and restart:
            ```yaml
            logger:

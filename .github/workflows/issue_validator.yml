@@ -428,8 +428,9 @@ jobs:
               (logContent.length > 50 || hasAttachment);
             if (!hasLogs && !logIsExplainedNA) {
               problems.push(
-                '**Logs / Diagnostics** are missing or too short to diagnose anything. Paste the `printers` section of ' +
-                '`ha_creality_ws.diagnostic_dump` (Developer Tools → Actions), log lines filtered for `ha_creality_ws`, or attach either as a file. ' +
+                '**Logs / Diagnostics** are missing or too short to diagnose anything. Attach the printer\'s **Download diagnostics** file ' +
+                '(Settings → Devices & services → the printer\'s ⋮ menu), paste the `printers` section of ' +
+                '`ha_creality_ws.diagnostic_dump` (Developer Tools → Actions), or paste log lines filtered for `ha_creality_ws`. ' +
                 'At least one complete log line is needed; the field must hold more than 50 characters of real output. ' +
                 'If logs genuinely do not apply (a card layout glitch, a docs typo), replace the placeholder with `N/A` and a one-line reason, ' +
                 'for example `N/A - card text overlaps, no backend involved`.'

@@ -45,6 +45,49 @@ class ServiceCall:  # pragma: no cover - a type only
 
 core_mod.ServiceCall = ServiceCall
 
+
+class SupportsResponse(enum.StrEnum):
+    NONE = "none"
+    OPTIONAL = "optional"
+    ONLY = "only"
+
+
+core_mod.SupportsResponse = SupportsResponse
+core_mod.ServiceResponse = dict
+
+# --- MOCK components.diagnostics ---
+# `async_redact_data` copied from Home Assistant (components/diagnostics/util.py)
+# rather than stubbed: what it redacts is the behaviour under test.
+diagnostics_mod = types.ModuleType("homeassistant.components.diagnostics")
+REDACTED = "**REDACTED**"
+
+
+def async_redact_data(data, to_redact):
+    from collections.abc import Mapping as _Mapping
+
+    if not isinstance(data, (_Mapping, list)):
+        return data
+    if isinstance(data, list):
+        return [async_redact_data(val, to_redact) for val in data]
+    redacted = {**data}
+    for key, value in redacted.items():
+        if value is None:
+            continue
+        if isinstance(value, str) and not value:
+            continue
+        if key in to_redact:
+            redacted[key] = REDACTED
+        elif isinstance(value, _Mapping):
+            redacted[key] = async_redact_data(value, to_redact)
+        elif isinstance(value, list):
+            redacted[key] = [async_redact_data(item, to_redact) for item in value]
+    return redacted
+
+
+diagnostics_mod.REDACTED = REDACTED
+diagnostics_mod.async_redact_data = async_redact_data
+sys.modules["homeassistant.components.diagnostics"] = diagnostics_mod
+
 setattr(ha_mod, "core", core_mod)
 setattr(ha_mod, "helpers", helpers_mod)
 setattr(ha_mod, "components", components_mod)

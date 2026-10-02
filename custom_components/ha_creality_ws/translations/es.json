@@ -279,11 +279,11 @@
   "services": {
     "diagnostic_dump": {
       "name": "Volcado de diagnóstico",
-      "description": "Vuelca todos los datos de telemetría WebSocket de las impresoras Creality conectadas en formato JSON para resolución de problemas y análisis.",
+      "description": "Recopila los diagnósticos de todas las impresoras Creality y los devuelve como respuesta, para resolver problemas. También se escriben en el registro.",
       "fields": {
         "include_sensitive_data": {
           "name": "Incluir datos sensibles",
-          "description": "Si se deben incluir datos potencialmente sensibles en la salida de diagnóstico (actualmente sin uso, reservado para uso futuro)"
+          "description": "Muestra las direcciones y los nombres de red de las impresoras, los destinos de notificación y los tokens de acceso en lugar de ocultarlos. Déjalo desactivado para todo lo que compartas públicamente."
         }
       }
     },

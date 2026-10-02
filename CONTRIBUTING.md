@@ -23,7 +23,7 @@ A bug report needs:
 
 - the integration version and the Home Assistant version
 - the printer model (and firmware version, if you know it)
-- logs showing the error, or the `printers` section of a `ha_creality_ws.diagnostic_dump` response (Developer Tools > Actions)
+- logs showing the error, or the printer's **Download diagnostics** file (Settings > Devices & services > the printer's menu), or the `printers` section of a `ha_creality_ws.diagnostic_dump` response (Developer Tools > Actions)
 
 Reproduce on the latest release first, on a supported Home Assistant version (the minimum is `homeassistant` in `hacs.json`); a report against an older version is asked to update. An incomplete bug report is labelled `more info required`, gets a reminder after 2 days and is closed after 5. Reply with a comment and it moves to `awaiting maintainer review`. A maintainer can clear the check with a `/fine` comment.
 

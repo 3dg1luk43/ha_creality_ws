@@ -843,56 +843,36 @@ Currently verified on:
 
 ---
 
-## Diagnostic Service
+## Diagnostics
 
-The integration provides a diagnostic service to help with troubleshooting and understanding what data different printer models send via WebSocket.
+Two ways to collect what is needed to look into a problem. Both carry the same
+data: the raw telemetry from the printer, how its model and features were
+detected, the camera type, the connection state, the notification settings and
+every entity's state.
 
-### Usage
+### Download diagnostics (recommended)
 
-1. Go to **Developer Tools** → **Services**
-2. Select service: `ha_creality_ws.diagnostic_dump`
-3. Click **Call Service**
-4. **Copy the diagnostic data** from the service response in the UI
+**Settings** > **Devices & services** > **Creality WebSocket Integration** >
+the printer's **⋮** menu > **Download diagnostics**. This saves a JSON file for
+that printer.
 
-The service will return the complete diagnostic data in the response that you can copy and paste directly. The data is also saved to a file in your Home Assistant config directory as a backup.
+### The `ha_creality_ws.diagnostic_dump` action
 
-**Service Response includes:**
+**Developer Tools** > **Actions** > `ha_creality_ws.diagnostic_dump` >
+**Perform action**. The response appears below the button; it covers every
+printer, one section each under `printers`. The same data is also written to the
+Home Assistant log between `CREALITY DIAGNOSTIC DATA START` and `END`. The
+action additionally lists the links the printer's own web page contains, which
+helps find the camera or preview path on a new model.
 
-- **Complete WebSocket telemetry data** from all connected printers
-- **Model detection results** showing how each printer is classified
-- **Feature detection results** showing which features are enabled/disabled
-- **Printer status information** (availability, power state, etc.)
-- **Home Assistant and integration version information**
-- **Printer‑local HTTP URLs accessed** (e.g., preview fetch attempts) for support diagnostics
+### What is hidden
 
-### What's Included
-
-The diagnostic file contains:
-- All raw telemetry data received from the printer
-- Model detection logic results (K1, K2, Ender 3 V3, etc.)
-- Feature detection results (camera type, light, box temperature, etc.)
-- Connection status and timing information
-- Integration configuration details
- - Cache of local HTTP(S) URLs the integration accessed (no cloud)
-
-### Sharing Diagnostic Data
-
-The diagnostic data can be safely shared with developers for troubleshooting. It contains only telemetry data and configuration information - no sensitive personal data.
-
-**How to share:**
-1. Call the service as described above
-2. Copy the `diagnostic_data` field from the service response
-3. Paste it into a text file or share directly with developers
-
-**Service Response Format:**
-```json
-{
-  "diagnostic_data": "{...complete JSON data...}",
-  "file_path": "/config/creality_diagnostic_20241220_143022.json",
-  "data_size": 12345,
-  "printers_count": 1
-}
-```
+Both hide the printer's IP address and network name, notify target names (they
+are often a person's phone), entity names, camera and preview URLs, and access
+tokens, so the output can be attached to a public issue. Entity ids are kept,
+since they are needed to make sense of the rest. The action has an
+`include_sensitive_data` option that turns the hiding off; leave it off for
+anything you post.
 
 ---
 

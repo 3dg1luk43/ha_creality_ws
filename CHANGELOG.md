@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A printer that gets a new IP address keeps its entities and their history, and a discovered printer is offered for confirmation instead of being added silently.
 - K1C and K1 Max printers on firmware 1.3.5.22 get their camera back: it moved to WebRTC, and the integration now notices.
 - The printer card no longer breaks on names like "Tiskárna č.1", stops rebuilding itself on narrow screens, and stops redrawing on every change in Home Assistant.
+- Diagnostics: the standard **Download diagnostics** now works, and the diagnostic action finally returns what it collects, with addresses, names and tokens hidden.
 
 ### Fixes
 
@@ -30,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A printer card named with characters outside Western European ones showed an error instead of the card**: a name such as "Tiskárna č.1", or one with an en dash, Chinese or an emoji, made the card fail to load, and renaming a card to one in the editor was silently not saved.
 - **On a narrow screen the printer card rebuilt itself every two seconds**: when the temperature row wrapped onto a second line the card asked the dashboard for more room, the dashboard answered with a new copy of the card, and the copy asked again. It now remembers the size it measured.
 - **The printer card redrew itself completely on every state change anywhere in Home Assistant**, not only its printer's, which cost CPU on tablets and wall panels and dropped keyboard focus. It now updates only when something it shows changes.
+- **The diagnostic action returned nothing, and the data it logged exposed the camera's access token**: the README, the bug form and the issue bot all asked for the action's response, but it only wrote the data to the log, unredacted, including printer addresses, phone names and the camera's access token, and it ignored its `include_sensitive_data` option. It now returns the data as its response, hides those details unless that option is set, and the integration supports Home Assistant's own **Download diagnostics** with the same content.
 
 ## 0.9.8 - 2026-09-26
 > [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)

@@ -20,6 +20,7 @@ recorder:
   purge_keep_days: 1
 mobile_app:      # real companion registrations: notify services and push path
 go2rtc:          # the WebRTC camera path
+diagnostics:     # Settings > Devices & services > Download diagnostics
 testbox_tools:   # push capture endpoint + zeroconf injection (support/)
 
 # The printer's smart plug, as the integration's power switch.

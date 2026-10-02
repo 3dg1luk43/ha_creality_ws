@@ -3,19 +3,14 @@ import logging
 import asyncio
 import json
 import os
-import time
 from datetime import timedelta
-import re
-from urllib.parse import urljoin, urlparse
 from collections.abc import Callable
 from typing import Any
 
 
 
 from homeassistant.config_entries import ConfigEntry, OperationNotAllowed # type: ignore[import]
-from homeassistant.core import HomeAssistant, ServiceCall, callback # type: ignore[import]
-from homeassistant.const import __version__ as HA_VERSION  # type: ignore[import]
-from homeassistant.util import dt as dt_util  # type: ignore[import]
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback # type: ignore[import]
 from homeassistant.exceptions import ConfigEntryNotReady  # type: ignore[import]
 try:
     from homeassistant.exceptions import ConfigEntryError  # type: ignore[import]
@@ -37,7 +32,6 @@ from homeassistant.helpers.event import (  # type: ignore[import]
 )
 import voluptuous as vol  # type: ignore[import]
 from homeassistant.helpers import config_validation as cv, entity_registry as er, device_registry as dr # type: ignore[import]
-from homeassistant.helpers.aiohttp_client import async_get_clientsession # type: ignore[import]
 from .notification_rules import (
     build_clear_payload,
     coerce_targets,
@@ -55,13 +49,6 @@ from .const import (
     STALE_AFTER_SECS, 
     CONF_POWER_SWITCH,
     CONF_POWER_SWITCH_ENABLED,
-    CONF_CAMERA_MODE,
-    CONF_POLLING_RATE,
-    CONF_NOTIFY_DEVICE,
-    CONF_NOTIFY_COMPLETED,
-    CONF_NOTIFY_ERROR,
-    CONF_NOTIFY_MINUTES_TO_END,
-    CONF_MINUTES_TO_END_VALUE,
     CONF_GO2RTC_URL,
     CONF_GO2RTC_PORT,
     DEFAULT_GO2RTC_URL,
@@ -843,201 +830,37 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
 async def _register_diagnostic_service(hass: HomeAssistant) -> None:
     """Register diagnostic service - outputs all data to logs (no file storage)."""
     
-    async def diagnostic_dump(call: ServiceCall) -> None:
-        """Collect and log telemetry data for all printers."""
-        try:
-            # Get all coordinators (all printer instances)
-            coordinators: list[tuple[str, KCoordinator]] = []
-            for entry_id, coord in hass.data[DOMAIN].items():
-                if isinstance(coord, KCoordinator):
-                    coordinators.append((entry_id, coord))
-            
-            if not coordinators:
-                _LOGGER.error("No Creality printers found to dump data from")
-                return
-            
-            # Create diagnostic data structure
-            diagnostic_data = {
-                "timestamp": dt_util.utcnow().isoformat(),
-                "home_assistant_version": HA_VERSION,
-                "integration_version": await _get_integration_version(hass),
-                "printers": {}
-            }
+    async def diagnostic_dump(call: ServiceCall) -> ServiceResponse:
+        """Collect every printer's diagnostics, log them and return them.
 
-            
-            for entry_id, coord in coordinators:
-                # Collect config entry details for this coordinator (non-sensitive)
-                cfg_entry = hass.config_entries.async_get_entry(entry_id)
-                entry_meta: dict[str, Any] = {
-                    "entry_id": entry_id,
-                    "title": getattr(cfg_entry, "title", None),
-                    "options": {
-                        "power_switch": cfg_entry.options.get(CONF_POWER_SWITCH),
-                        "power_switch_enabled": cfg_entry.options.get(CONF_POWER_SWITCH_ENABLED),
-                        "camera_mode": cfg_entry.options.get(CONF_CAMERA_MODE),
-                        "polling_rate": cfg_entry.options.get(CONF_POLLING_RATE),
-                        "notify_device": cfg_entry.options.get(CONF_NOTIFY_DEVICE),
-                        "notify_completed": cfg_entry.options.get(CONF_NOTIFY_COMPLETED),
-                        "notify_error": cfg_entry.options.get(CONF_NOTIFY_ERROR),
-                        "notify_minutes_to_end": cfg_entry.options.get(CONF_NOTIFY_MINUTES_TO_END),
-                        "minutes_to_end_value": cfg_entry.options.get(CONF_MINUTES_TO_END_VALUE),
-                        "go2rtc_url": cfg_entry.options.get(CONF_GO2RTC_URL),
-                        "go2rtc_port": cfg_entry.options.get(CONF_GO2RTC_PORT),
-                    } if cfg_entry else {},
-                    "cached": {
-                        "model": cfg_entry.data.get("_cached_model") if cfg_entry else None,
-                        "hostname": cfg_entry.data.get("_cached_hostname") if cfg_entry else None,
-                        "model_version": cfg_entry.data.get("_cached_model_version") if cfg_entry else None,
-                        "camera_type": cfg_entry.data.get("_cached_camera_type") if cfg_entry else None,
-                        "has_light": cfg_entry.data.get("_cached_has_light") if cfg_entry else None,
-                        "has_chamber_sensor": cfg_entry.data.get("_cached_has_chamber_sensor", cfg_entry.data.get("_cached_has_box_sensor")) if cfg_entry else None,
-                        "has_chamber_control": cfg_entry.data.get("_cached_has_chamber_control", cfg_entry.data.get("_cached_has_box_control")) if cfg_entry else None,
-                        "max_bed_temp": cfg_entry.data.get("_cached_max_bed_temp") if cfg_entry else None,
-                        "max_nozzle_temp": cfg_entry.data.get("_cached_max_nozzle_temp") if cfg_entry else None,
-                        "max_chamber_temp": cfg_entry.data.get("_cached_max_chamber_temp", cfg_entry.data.get("_cached_max_box_temp")) if cfg_entry else None,
-                    } if cfg_entry else {},
-                }
+        Returned as the action's response (Developer Tools > Actions shows it),
+        which is what the README, the bug form and the issue bot always told
+        reporters to copy; before, the data only went to the log. Redacted
+        unless `include_sensitive_data` is set, an option that used to be
+        accepted and ignored.
+        """
+        from .diagnostics import TO_REDACT, async_collect  # pylint: disable=import-outside-toplevel
+        from homeassistant.components.diagnostics import async_redact_data  # type: ignore[import]  # pylint: disable=import-outside-toplevel
 
-                # WebSocket connection diagnostics
-                client = coord.client
-                ws_diag = {
-                    "ws_url": client.get_url(),
-                    "ws_connected": client.is_connected,
-                    "ws_ready": client.is_connected,  # approximate mapping
-                    "connected_once": client.has_connected_once(),
-                    "task_running": client.is_task_running(),
-                    "last_rx_monotonic": client.last_rx_monotonic(),
-                    "reconnect_count": client.reconnect_count,
-                    "msg_count": client.msg_count,
-                    "last_error": client.last_error,
-                    # Accessing private memeber for debug/diagnostics is acceptable or expose another property?
-                    # uptime_start is public in ws_client (lines 66)
-                    "uptime_seconds": (time.monotonic() - client.uptime_start) if client.uptime_start > 0 and client.is_connected else 0,
-                }
-
-                # Attempt a minimal crawl of the printer web UI to collect resource URLs
-                try:
-                    host = coord.client.host
-
-                    urls_cache = getattr(coord, "_http_urls_accessed", None)
-                    if urls_cache is None:
-                        urls_cache = set()
-                        setattr(coord, "_http_urls_accessed", urls_cache)
-
-                    session = async_get_clientsession(hass)
-                    for scheme in ("https", "http"):
-                        base = f"{scheme}://{host}/"
-                        try:
-                            # Record the base URL attempt
-                            urls_cache.add(base)
-                            # Allow self-signed certs on local printers
-                            ssl_opt = False if scheme == "https" else None
-                            async with session.get(base, timeout=5, ssl=ssl_opt) as resp:  # type: ignore[arg-type]
-                                if resp.status == 200:
-                                    txt = await resp.text(errors="ignore")
-                                    # Extract href/src URLs (shallow)
-                                    for m in re.findall(r"(?:src|href)=[\"']([^\"']+)[\"']", txt, re.IGNORECASE):
-                                        absu = urljoin(base, m)
-                                        pu = urlparse(absu)
-                                        if pu.scheme in ("http", "https") and pu.hostname == host:
-                                            urls_cache.add(absu)
-                        except Exception:
-                            # Ignore crawl failures; we still record base URL
-                            pass
-                except Exception:
-                    _LOGGER.debug("Diagnostic URL crawl skipped due to error", exc_info=True)
-
-                printer_data = {
-                    "host": client.host,
-
-                    "available": coord.available,
-                    "power_is_off": coord.power_is_off(),
-                    "power_switch_entity": getattr(coord, "_power_switch_entity", None),
-                    "http_urls_accessed": sorted(list(getattr(coord, "_http_urls_accessed", set()))) if hasattr(coord, "_http_urls_accessed") else [],
-                    "paused_flag": coord.paused_flag(),
-                    "pending_pause": coord.pending_pause(),
-                    "pending_resume": coord.pending_resume(),
-                    "last_rx_time": client.last_rx_monotonic(),
-                    "ws": ws_diag,
-                    "config_entry": entry_meta,
-                    "telemetry_data": coord.data.copy() if coord.data else {}
-                }
-                
-                # Add model detection info
-                printermodel = ModelDetection(coord.data)
-                model = (coord.data or {}).get("model") or ""
-                model_l = str(model).lower()
-                printer_data["model_detection"] = {
-                    "raw_model": model,
-                    "model_lower": model_l,
-                    "is_k1_family": printermodel.is_k1_family,
-                    "is_k1_base": printermodel.is_k1_base,
-                    "is_k1c": printermodel.is_k1c,
-                    "is_k1_se": printermodel.is_k1_se,
-                    "is_k1_max": printermodel.is_k1_max,
-                    "is_k2_family": printermodel.is_k2_family,
-                    "is_k2_base": printermodel.is_k2_base,
-                    "is_k2_pro": printermodel.is_k2_pro,
-                    "is_k2_plus": printermodel.is_k2_plus,
-                    "is_ender_v3_family": printermodel.is_ender_v3_family,
-                    "is_creality_hi": printermodel.is_creality_hi,
-                    "supports_webrtc": printermodel.supports_webrtc
-                }
-                
-                # Add feature detection (matching sensor.py logic)
-                printer_data["feature_detection"] = {
-                    "has_light": printermodel.has_light,
-                    "has_chamber_sensor": printermodel.has_chamber_sensor,
-                    "has_chamber_control": printermodel.has_chamber_control,
-                    "camera_type": "webrtc" if (printermodel.is_k2_family or printermodel.supports_webrtc) else 
-                                  "mjpeg_optional" if (printermodel.is_k1_se or printermodel.is_ender_v3_family) else 
-                                  "mjpeg"
-                }
-
-                # CFS Diagnostics
-                cfs_data = coord.data.get("boxsInfo", {})
-                cfs_status = {
-                    "connected": coord.data.get("cfsConnect"),
-                    "box_count": len(cfs_data.get("materialBoxs", [])),
-                    "raw_boxsInfo": cfs_data,
-                }
-                printer_data["cfs"] = cfs_status
-
-
-                # Dump actual HA entities
-                ent_reg = er.async_get(hass)
-                # er.async_entries_for_config_entry returns list of RegistryEntry
-                entity_entries = er.async_entries_for_config_entry(ent_reg, entry_id)
-                entities_dump = []
-                for e in entity_entries:
-                    st = hass.states.get(e.entity_id)
-                    entities_dump.append({
-                        "entity_id": e.entity_id,
-                        "name": e.name or e.original_name,
-                        "state": st.state if st else None,
-                        "attributes": dict(st.attributes) if st else None
-                    })
-                printer_data["entities"] = entities_dump
-                
-                diagnostic_data["printers"][entry_id] = printer_data
-            
-            # Convert to JSON string for UI display
-            json_output = json.dumps(diagnostic_data, indent=2, ensure_ascii=False)
-            
-            
-            # Log the diagnostic data to make it visible in Home Assistant logs (using WARNING level for visibility)
-            _LOGGER.warning("=== CREALITY DIAGNOSTIC DATA START ===\n%s\n=== CREALITY DIAGNOSTIC DATA END ===", json_output)
-            
-            # Create a persistent notification with summary
-            pn_async_create(
-                hass,
-                title="Creality Diagnostic Data",
-                message=f"Diagnostic data collected for {len(diagnostic_data['printers'])} printer(s). Data size: {len(json_output)} bytes. Check the logs for the full JSON data.",
-                notification_id="creality_diagnostic_data"
-            )
-                
-        except Exception as exc:
-            _LOGGER.exception("Failed to create diagnostic dump: %s", exc)
+        data = await async_collect(hass, await _get_integration_version(hass))
+        if not data["printers"]:
+            _LOGGER.error("No Creality printers found to dump data from")
+            return data
+        if not call.data.get("include_sensitive_data"):
+            data = async_redact_data(data, TO_REDACT)
+        json_output = json.dumps(data, indent=2, ensure_ascii=False)
+        # Still logged, for anyone following the older instructions.
+        _LOGGER.warning(
+            "=== CREALITY DIAGNOSTIC DATA START ===\n%s\n=== CREALITY DIAGNOSTIC DATA END ===",
+            json_output,
+        )
+        pn_async_create(
+            hass,
+            title="Creality Diagnostic Data",
+            message=f"Diagnostic data collected for {len(data['printers'])} printer(s). Data size: {len(json_output)} bytes. Check the logs for the full JSON data.",
+            notification_id="creality_diagnostic_data"
+        )
+        return data
     
     # Register the service
     schema = vol.Schema({
@@ -1048,7 +871,8 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
         DOMAIN, 
         "diagnostic_dump", 
         diagnostic_dump, 
-        schema=schema
+        schema=schema,
+        supports_response=SupportsResponse.OPTIONAL,
     )
     
     _LOGGER.info("Diagnostic service registered: ha_creality_ws.diagnostic_dump")
