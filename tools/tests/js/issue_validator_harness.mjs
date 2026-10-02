@@ -7,9 +7,10 @@
  * the tests fail when the workflow drifts.
  *
  * Usage: node issue_validator_harness.mjs <spec.json>
- *   spec: { restoreScript, validateScript,
+ *   spec: { restoreScript, validateScript, templatelessScript?,
  *           scenarios: [{ name, body, labels, releases, minHa }] }
- *   out : JSON array of { name, restore: {...}, validate: {...} } on stdout
+ *   out : JSON array of { name, restore: {...}, validate: {...},
+ *         templateless?: { closed, comments } } on stdout
  */
 import fs from 'node:fs';
 
@@ -30,6 +31,7 @@ function makeStub({ body, labels, releases, minHa }) {
         addLabels: async ({ labels: ls }) => { state.addedLabels.push(...ls); state.labels.push(...ls); },
         removeLabel: async ({ name }) => { state.removedLabels.push(name); state.labels = state.labels.filter(l => l !== name); },
         createComment: async ({ body: b }) => { state.comments.push(b); },
+        update: async ({ state: s }) => { state.closed = s === 'closed'; },
         updateComment: async ({ body: b }) => { state.comments.push(b); },
         listComments: async () => ({ data: state.comments.map((b, i) => ({ user: { type: 'Bot' }, body: b, id: i })) }),
       },
@@ -62,6 +64,12 @@ async function run(src, stub) {
 const spec = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const out = [];
 for (const sc of spec.scenarios) {
+  let templateless;
+  if (spec.templatelessScript) {
+    const stub = makeStub(sc);
+    await run(spec.templatelessScript, stub);
+    templateless = { closed: Boolean(stub.state.closed), comments: stub.state.comments };
+  }
   const restore = makeStub(sc);
   await run(spec.restoreScript, restore);
   // The validate job re-reads the issue, so it sees whatever restore applied.
@@ -69,6 +77,7 @@ for (const sc of spec.scenarios) {
   await run(spec.validateScript, validate);
   out.push({
     name: sc.name,
+    templateless,
     restore: { addedLabels: restore.state.addedLabels, logs: restore.state.logs },
     validate: {
       addedLabels: validate.state.addedLabels,

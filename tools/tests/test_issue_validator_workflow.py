@@ -47,6 +47,7 @@ def _run(scenarios: list[dict]) -> dict[str, dict]:
     spec = {
         "restoreScript": _script("restore-template-label"),
         "validateScript": _script("validate-bug-report"),
+        "templatelessScript": _script("close-templateless-issues"),
         "scenarios": scenarios,
     }
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
@@ -169,6 +170,40 @@ def test_fields_are_read_at_any_heading_level(heading):
     validate = _validate_one(_bug_body(heading))
     assert validate["comments"] == []
     assert validate["addedLabels"] == []
+
+
+@requires_node
+@pytest.mark.parametrize("indent", ["", " ", "   "])
+def test_an_indented_heading_is_still_a_heading(indent):
+    """CommonMark allows up to three spaces before an ATX heading, and GitHub
+    renders them as headings. A body pasted from an editor that indents was
+    closed as templateless and had its fields reported missing."""
+    body = "\n".join(
+        f"{indent}{line}" if line.startswith("#") else line
+        for line in _bug_body("###").splitlines()
+    )
+    res = _run([_scenario("x", body)])["x"]
+    assert res["templateless"]["closed"] is False
+    # The form's label is restored from the headings, and every field is read.
+    assert res["restore"]["addedLabels"] == ["bug"]
+    assert res["validate"]["comments"] == []
+
+
+@requires_node
+def test_a_free_form_issue_is_still_closed_as_templateless():
+    """The policy itself is unchanged: no template label and no template
+    heading means the issue is closed with the pointer to the forms."""
+    body = "## Description\nthe camera broke\n\n## Logs\nnone"
+    res = _run([_scenario("x", body)])["x"]
+    assert res["templateless"]["closed"] is True
+    assert "without one of the issue templates" in res["templateless"]["comments"][0]
+
+
+@requires_node
+def test_four_spaces_is_code_not_a_heading():
+    body = "    ### Describe the Bug\nsomething"
+    res = _run([_scenario("x", body)])["x"]
+    assert res["templateless"]["closed"] is True
 
 
 @requires_node

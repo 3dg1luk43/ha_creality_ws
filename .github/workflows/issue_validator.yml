@@ -69,7 +69,7 @@ jobs:
             ];
             const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const hasTemplateHeading = KNOWN_HEADINGS.some(
-              h => new RegExp('^#{1,6}[ \\t]+' + escapeRe(h) + '(?=[ \\t]|$)', 'im').test(body)
+              h => new RegExp('^ {0,3}#{1,6}[ \\t]+' + escapeRe(h) + '(?=[ \\t]|$)', 'im').test(body)
             );
 
             // Close only when BOTH signals are absent, so a renamed field the list
@@ -232,7 +232,7 @@ jobs:
             // Any heading level: a hand-written body uses `##` where the web form
             // renders `###`, and both are the same field.
             const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const headingRe = h => new RegExp('^#{1,6}[ \\t]+' + escapeRe(h) + '(?=[ \\t]|$)', 'im');
+            const headingRe = h => new RegExp('^ {0,3}#{1,6}[ \\t]+' + escapeRe(h) + '(?=[ \\t]|$)', 'im');
 
             const scored = Object.entries(DISTINCTIVE)
               .map(([label, hs]) => [label, hs.filter(h => headingRe(h).test(body)).length])
@@ -297,7 +297,7 @@ jobs:
             // Reports filed with the markdown template that preceded the issue forms
             // have none of these fields. Editing one must not earn it a "everything is
             // missing" comment.
-            if (/^##[ \t]+Environment[ \t]*$/im.test(body)) {
+            if (/^ {0,3}##[ \t]+Environment[ \t]*$/im.test(body)) {
               console.log(`#${issue.number}: legacy markdown template - skipping bug validation.`);
               return;
             }
@@ -310,14 +310,14 @@ jobs:
             // First non-empty line under the heading (single-line fields).
             const fieldLine = label => {
               const m = body.match(new RegExp(
-                '^#{1,6}[ \\t]+' + escapeRe(label) + '[ \\t]*\\r?\\n+([^\\n#]+)', 'im'));
+                '^ {0,3}#{1,6}[ \\t]+' + escapeRe(label) + '[ \\t]*\\r?\\n+([^\\n#]+)', 'im'));
               return m ? m[1].trim() : '';
             };
             // Everything up to the next heading (multi-line fields). End of input is
             // `(?![\s\S])`, not `$`: with the `m` flag `$` matches every line end.
             const fieldBlock = label => {
               const m = body.match(new RegExp(
-                '^#{1,6}[ \\t]+' + escapeRe(label) + '[ \\t]*\\r?\\n([\\s\\S]*?)(?=\\n#{1,6}[ \\t]|(?![\\s\\S]))', 'im'));
+                '^ {0,3}#{1,6}[ \\t]+' + escapeRe(label) + '[ \\t]*\\r?\\n([\\s\\S]*?)(?=\\n {0,3}#{1,6}[ \\t]|(?![\\s\\S]))', 'im'));
               return m ? m[1].trim() : '';
             };
             const isBlank = v => !v || v === '_No response_';
