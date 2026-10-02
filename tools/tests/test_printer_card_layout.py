@@ -28,10 +28,9 @@ def test_printer_card_size_tracks_measured_telemetry_lines():
     assert "@container (max-width:" not in source
     assert "@media (max-width:" not in source
     assert "telemetry-scroll" not in source
-    assert re.search(
-        r"getCardSize\(\)\s*\{\s*return\s+this\._cardSize\s*\|\|\s*3;\s*\}",
-        source,
-    )
+    # The size survives Lovelace rebuilding the element; the behaviour itself is
+    # driven in tools/tests/js/test_printer_render.mjs.
+    assert "_measuredCardSize" in source
     assert "_setupTelemetrySizeObserver()" in source
     assert "_updateTelemetryCardSize()" in source
     assert "ResizeObserver" in source

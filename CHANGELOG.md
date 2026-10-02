@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Temperature and other sensors no longer stay "unavailable" after a printer boots and sends blank values.
 - A printer that gets a new IP address keeps its entities and their history, and a discovered printer is offered for confirmation instead of being added silently.
 - K1C and K1 Max printers on firmware 1.3.5.22 get their camera back: it moved to WebRTC, and the integration now notices.
+- The printer card no longer breaks on names like "Tiskárna č.1", stops rebuilding itself on narrow screens, and stops redrawing on every change in Home Assistant.
 
 ### Fixes
 
@@ -26,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Changing a printer's IP address doubled every entity** ([#39](https://github.com/3dg1luk43/ha_creality_ws/issues/39)): entity and device ids include the address, so a new one, set on the Connection page or picked up by discovery, created a second device with `_2` entities and left the originals unavailable along with their history and every automation that used them. The integration now moves the device and entities to the new address when it starts. Entities already doubled by an earlier version are left as they are, because merging them could rename entities you have since used elsewhere.
 - **Discovered printers were added without asking**: any network device with "k1", "k2" or "creality" in its name was set up silently, and a printer you had deleted came back the next time it announced itself. Discovered printers now appear under Discovered and are added only once you confirm. A printer that reappears at a new address is matched by its network name and moved instead of added twice.
 - **No camera image on a K1C or K1 Max with firmware 1.3.5.22** ([#46](https://github.com/3dg1luk43/ha_creality_ws/issues/46)): that firmware replaced the printer's MJPEG camera server with WebRTC. The integration picked the camera type once, at first setup, and never checked again, and the Auto setting in the camera options chose MJPEG for every K1 without looking at what the printer reports. The type is now read from the printer each time the integration starts, and a running camera is rebuilt as soon as the printer shows it is the other kind. Auto is now saved as Auto, so later firmware changes are picked up too. **If you chose Auto in the camera options before this release, choose it again**: it was saved as MJPEG. Thanks to @BCschwifty for the report and the diagnostics.
+- **A printer card named with characters outside Western European ones showed an error instead of the card**: a name such as "Tiskárna č.1", or one with an en dash, Chinese or an emoji, made the card fail to load, and renaming a card to one in the editor was silently not saved.
+- **On a narrow screen the printer card rebuilt itself every two seconds**: when the temperature row wrapped onto a second line the card asked the dashboard for more room, the dashboard answered with a new copy of the card, and the copy asked again. It now remembers the size it measured.
+- **The printer card redrew itself completely on every state change anywhere in Home Assistant**, not only its printer's, which cost CPU on tablets and wall panels and dropped keyboard focus. It now updates only when something it shows changes.
 
 ## 0.9.8 - 2026-09-26
 > [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)

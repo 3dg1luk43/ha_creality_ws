@@ -48,6 +48,13 @@ function _requestI18n(instance, hass, onLoaded) {
 // loop if size measurement on the fresh instance keeps producing the same delta.
 const LL_REBUILD_MIN_INTERVAL_MS = 2000;
 const _lastCardRebuildDispatch = new Map();
+// The size each card last measured, by its full name/status key. Lovelace answers
+// ll-rebuild by building a NEW element, which used to start at size 3, measure
+// the same wrapped row again and fire again once the throttle cleared: a rebuild
+// every two seconds on a narrow screen, with the reported size never sticking.
+// A fresh element reads its predecessor's size from here, so it measures no
+// change and stays put.
+const _measuredCardSize = new Map();
 
 // How much wider, in px, the telemetry row has to get before the units it
 // dropped are worth retrying. Retrying at the width that rejected them would
@@ -249,9 +256,31 @@ function loadThemeFromStorage(cardId) {
  * @returns {string} Unique card identifier
  */
 function generateCardId(config) {
-  // Generate a unique ID based on the card configuration
-  const key = `${config.name || "printer"}-${config.status || "unknown"}`;
-  return btoa(key).replace(/[^a-zA-Z0-9]/g, '').substring(0, 16);
+  return cardIdForKey(cardKey(config));
+}
+
+/** The full identity a card's id is derived from: its name and status entity. */
+function cardKey(config) {
+  return `${config.name || "printer"}-${config.status || "unknown"}`;
+}
+
+function cardIdForKey(key) {
+  // `btoa` takes Latin-1 only and throws on anything above U+00FF, so a card
+  // named "Tiskárna č.1" (or with an en dash, CJK or an emoji in its name)
+  // threw out of setConfig and became an error card, and in the editor the
+  // throw landed inside the debounce, so the edit was silently never saved.
+  // Latin-1 names keep the id they always had, so a theme stored under it is
+  // still found; anything else is encoded as UTF-8 bytes first.
+  let encoded;
+  try {
+    encoded = btoa(key);
+  } catch (_err) {
+    const bytes = new TextEncoder().encode(key);
+    let binary = "";
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    encoded = btoa(binary);
+  }
+  return encoded.replace(/[^a-zA-Z0-9]/g, '').substring(0, 16);
 }
 
 // Home Assistant rewrites a DURATION sensor's state into whichever display unit
@@ -438,7 +467,12 @@ class KPrinterCard extends HTMLElement {
     if (!this._optimisticStates) this._optimisticStates = {};
 
     // Generate card ID for theme persistence
-    this._cardId = generateCardId(this._cfg);
+    this._sizeKey = cardKey(this._cfg);
+    this._cardId = cardIdForKey(this._sizeKey);
+    // A rebuilt element starts from the size its predecessor measured.
+    this._cardSize = _measuredCardSize.get(this._sizeKey);
+    // A new config can name new entities: the next hass must update.
+    this._seenStates = null;
 
     // Load saved theme if no theme is provided in config
     if (!config?.theme) {
@@ -461,17 +495,6 @@ class KPrinterCard extends HTMLElement {
 
     // Always re-render when config changes to apply new theme
     this._render();
-
-    // Apply theme after render to ensure DOM is ready
-    this._applyTheme();
-  }
-  _applyTheme() {
-    if (!this._root || !this._cfg.theme) {
-      return;
-    }
-
-    // Re-render with updated CSS to apply theme changes
-    this._render();
   }
 
   // i18n helpers -------------------------------------------------------
@@ -486,18 +509,57 @@ class KPrinterCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     _requestI18n(this, hass, () => { if (this._root) this._update(); });
-    if (this._root) {
-      // Apply theme first, then update
-      this._applyTheme();
-      this._update();
-      // Schedule a follow-up update shortly after initial attach to absorb entity states once Home Assistant populates them
-      clearTimeout(this._initialUpdateTimer);
-      this._initialUpdateTimer = setTimeout(() => {
-        try { this._update(); } catch (_) { }
-      }, 150);
-    }
+    // Home Assistant assigns a new hass for every state change in the whole
+    // instance. This used to rebuild the shadow DOM each time (the theme only
+    // changes in setConfig, which renders anyway), re-parsing the stylesheet,
+    // recreating every icon and dropping keyboard focus, then update twice
+    // more. Now only a change to something this card shows updates it.
+    if (this._root && this._relevantChange(hass)) this._update();
   }
-  getCardSize() { return this._cardSize || 3; }
+
+  /** Whether `hass` changed anything `_update` reads, recording what it saw. */
+  _relevantChange(hass) {
+    const ids = this._watchedEntityIds();
+    const prev = this._seenStates;
+    const next = {};
+    let changed = !prev;
+    for (const id of ids) {
+      const st = hass?.states?.[id];
+      next[id] = st;
+      if (prev && prev[id] !== st) changed = true;
+    }
+    // The language picks the card's strings; the formatter, the units.
+    const lang = _resolveLang(hass);
+    const fmt = typeof hass?.formatEntityState;
+    if (lang !== this._seenLang || fmt !== this._seenFormatter) changed = true;
+    this._seenLang = lang;
+    this._seenFormatter = fmt;
+    this._seenStates = next;
+    return changed;
+  }
+
+  /**
+   * Every entity id the config names, plus the switch/light twin that
+   * `_resolveEntityId` may substitute for it. Cached per config object.
+   */
+  _watchedEntityIds() {
+    if (this._watchedFor === this._cfg && this._watched) return this._watched;
+    const ids = new Set();
+    for (const value of Object.values(this._cfg || {})) {
+      if (typeof value !== "string" || !/^[a-z0-9_]+\.[a-z0-9_]+$/.test(value)) continue;
+      ids.add(value);
+      const objectId = value.split(".")[1];
+      ids.add(`switch.${objectId}`);
+      ids.add(`light.${objectId}`);
+    }
+    this._watched = ids;
+    this._watchedFor = this._cfg;
+    return ids;
+  }
+
+  getCardSize() {
+    return this._cardSize ?? _measuredCardSize.get(this._sizeKey) ?? 3;
+  }
 
   _render() {
     if (!this._root) return;
@@ -783,7 +845,6 @@ class KPrinterCard extends HTMLElement {
   }
 
   disconnectedCallback() {
-    clearTimeout(this._initialUpdateTimer);
     if (this._telemetryResizeObserver) {
       if (this._telemetryObservedNode) {
         this._telemetryResizeObserver.unobserve(this._telemetryObservedNode);
@@ -900,16 +961,17 @@ class KPrinterCard extends HTMLElement {
     const currentSize = this._cardSize ?? 3;
     if (nextSize === currentSize) return;
 
-    const cardKey = this._cardId || CARD_TAG;
+    const throttleKey = this._sizeKey || CARD_TAG;
     const now = Date.now();
-    const lastDispatch = _lastCardRebuildDispatch.get(cardKey) || 0;
+    const lastDispatch = _lastCardRebuildDispatch.get(throttleKey) || 0;
     // Defer the _cardSize update until the throttle clears: otherwise a throttled
     // call would record the new size locally without telling Lovelace, and the
     // next measurement would short-circuit on the equality check above -- leaving
     // the rebuild permanently suppressed.
     if (now - lastDispatch < LL_REBUILD_MIN_INTERVAL_MS) return;
-    _lastCardRebuildDispatch.set(cardKey, now);
+    _lastCardRebuildDispatch.set(throttleKey, now);
     this._cardSize = nextSize;
+    _measuredCardSize.set(this._sizeKey, nextSize);
 
     this.dispatchEvent(new CustomEvent("ll-rebuild", { bubbles: true, composed: true }));
   }

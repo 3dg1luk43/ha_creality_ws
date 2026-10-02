@@ -202,25 +202,25 @@ Not shape migration (no key was ever renamed). Normalises colours the old editor
 ### Theme persistence in localStorage (`:120-255`, `:443-456`)
 
 - Key `k-printer-card-themes`, a map of `cardId -> theme`.
-- `cardId = btoa(name + "-" + status)`, non-alphanumerics stripped, first 16 chars (`generateCardId`, `:251-255`).
+- `cardId = btoa(name + "-" + status)`, non-alphanumerics stripped, first 16 chars (`generateCardId` -> `cardIdForKey(cardKey(cfg))`). Since R7 a key `btoa` rejects (anything above U+00FF) is encoded as UTF-8 bytes first; a Latin-1 key keeps its old id, so a theme stored under it is still found.
 - `setConfig` with a `theme` saves it; without a `theme` it loads the stored one. The editor also saves on every emit (`:2043`) and deletes on reset (`:2018-2024`).
 - Every config written by the editor contains a full `theme`, so the stored copy only matters for hand-written YAML without one.
 
-Two traps here (T3): `btoa` throws `InvalidCharacterError` for any character above U+00FF, and 16 base64 chars cover only the first 12 bytes of the key.
+Fixed (R7): `btoa` threw `InvalidCharacterError` for any character above U+00FF, so a card named "Tiskárna č.1" was an error card in a real browser and the editor silently dropped the edit (the throw landed in its debounce). The harness `btoa` now throws like a browser's; it encoded anything before, which hid this. Still true: 16 base64 chars cover only the first 12 bytes of the key, so two names that share them share a stored theme. The size memory (below) uses the full key.
 
 ### Render pipeline and update triggers
 
 | Trigger | What runs |
 |---|---|
-| `setConfig(config)` (`:433-467`) | merge, migrate, localStorage, `attachShadow` once, `_render()`, then `_applyTheme()` which is `_render()` again (`:468-475`). |
-| `set hass(hass)` (`:486-499`) | `_requestI18n` (once per instance), `_applyTheme()` -> full `_render()`, `_update()`, and re-arms a 150 ms timer that calls `_update()` again. |
+| `setConfig(config)` | merge, migrate, localStorage, `attachShadow` once, one `_render()` (the second via `_applyTheme` was removed in R6), resets `_seenStates` so the next hass updates. |
+| `set hass(hass)` | `_requestI18n` (once per instance), then `_update()` only if `_relevantChange(hass)`: a different state object for any watched entity (every entity id in the config plus its `switch.`/`light.` twin that `_resolveEntityId` may substitute), a different language, or the formatter appearing. No render, no timer (R6). |
 | i18n loaded | `_update()` |
 | `connectedCallback` (`:775-783`) | re-attaches the telemetry ResizeObserver if already rendered. |
 | `disconnectedCallback` (`:785-799`) | clears the 150 ms timer, the ResizeObserver and a pending rAF. |
 | ResizeObserver on `.telemetry` | rAF -> `_updateTelemetryDensity()` then `_updateTelemetryCardSize()` (`:825-836`). |
 | Every `_update()` | ends with `_scheduleTelemetrySizeUpdate()` (`:1187`). |
 
-There is no `shouldUpdate` equivalent. Every `hass` assignment (Home Assistant assigns a new `hass` object for any state change anywhere in the instance) rebuilds the whole shadow tree: `<ha-card>`, the stylesheet, six `ha-icon` elements plus one per visible chip, and the listeners (T1). Measured in the node harness: per `hass` assignment, 1 `_render` + 2 synchronous `_update` + 1 deferred `_update`; `setConfig` costs 2 `_render` + 2 `_update`.
+`_relevantChange` is the `shouldUpdate` equivalent (R6). Before it, every `hass` assignment (Home Assistant assigns a new `hass` for any state change anywhere in the instance) rebuilt the whole shadow tree: `<ha-card>`, the stylesheet, six `ha-icon` elements plus one per visible chip, and the listeners, dropping keyboard focus each time; per assignment 1 `_render` + 2 synchronous `_update` + 1 deferred. Pinned by `tools/tests/js/test_printer_render.mjs` and, in a real browser, `tools/testbox/card_check.mjs` (the card's `ha-card` node must survive live telemetry).
 
 `_render()` (`:502-773`) builds the shell (`:667-696`), wires `#more` click/keydown (more-info for `camera || status || progress`) and one delegated click listener on `#chips-container`, resets the telemetry measurement memory, calls `_update()` and re-observes `.telemetry`.
 
@@ -253,9 +253,9 @@ Telemetry row CSS (`:620-661`): `.telemetry-wrap` is an inline-size container; p
 
 Density (`_updateTelemetryDensity`, `:867-893`): line count is measured from distinct `offsetTop` values of visible pills. More than one line adds `.compact` (hides unit spans) and remembers the failing width; units are retried only once the row is `TELEMETRY_COMPACT_HYSTERESIS` (8 px) wider, or when the value signature changes.
 
-Card size (`_updateTelemetryCardSize`, `:895-915`): `max(3, 2 + lines)`. When it differs from `this._cardSize` and the module-level per-`cardId` throttle (`LL_REBUILD_MIN_INTERVAL_MS` = 2000) allows, it stores the size and dispatches `ll-rebuild`. `getCardSize()` returns `this._cardSize || 3` (`:500`).
+Card size (`_updateTelemetryCardSize`): `max(3, 2 + lines)`. When it differs from `this._cardSize` and the module-level throttle (`LL_REBUILD_MIN_INTERVAL_MS` = 2000, keyed by the full name/status key) allows, it stores the size in `this._cardSize` **and in the module-level `_measuredCardSize` map**, and dispatches `ll-rebuild`. `getCardSize()` returns `this._cardSize ?? _measuredCardSize.get(key) ?? 3`, and `setConfig` seeds `_cardSize` from the map.
 
-In HA 2026.9, `hui-card` answers `ll-rebuild` by calling `_loadElement(config)`, which constructs a new card element, then fires `card-updated` (masonry re-lays out). The new instance starts with `_cardSize` undefined, so it reports 3 and, once the throttle clears, measures again and fires again (T2).
+In HA 2026.9, `hui-card` answers `ll-rebuild` by constructing a new card element. Before R6 that instance started at 3, measured the same wrapped row and fired again once the throttle cleared: a rebuild loop (12 elements in 20 s at 300 px in a real browser). Now it inherits the measured size, measures no change and stays; each card is rebuilt at most once while it settles.
 
 No `getGridOptions`/`getLayoutOptions`: in a sections view the card gets HA's default `{columns: 12, rows: "auto"}`.
 
