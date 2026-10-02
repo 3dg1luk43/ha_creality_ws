@@ -44,6 +44,7 @@ cd tools/testbox
 | `printer/Dockerfile` | python 3.13 + the mock's dependencies (aiortc is not in the HA image) |
 | `up.sh` / `down.sh` | start + onboard / stop (`--wipe` deletes `config/`) |
 | `hactl.py` | the driver: REST, WebSocket, flows, registry, pushes, mock control |
+| `card_check.mjs`, `package.json` | the bundled cards in headless Chromium against the box |
 | `support/configuration.yaml` | baseline HA config, copied into `config/` on first start |
 | `support/custom_components/testbox_tools/` | push capture endpoint + zeroconf injection |
 | `support/custom_components/testbox_notify/` | `notify.plain_testbox`, a non-mobile target that records payloads |
@@ -69,6 +70,20 @@ $H errors                              # ERROR/WARNING lines from the HA log
 points back into the box, so `pushes` shows exactly what core sends to the push
 relay, after its own Live Activity routing. That is the only place the iOS and
 Android wire formats can be checked end to end without a phone.
+
+## The cards in a real browser
+
+```bash
+npm install                        # once, here; Playwright reuses cached browsers
+node card_check.mjs                # phone width (390 px), 20 s of live telemetry
+node card_check.mjs --width 300    # narrow enough to wrap the telemetry row
+```
+
+Builds a throwaway dashboard of two printer cards on the mock printer (one named
+in Czech), opens it in headless Chromium and fails on an error card, a rebuild
+loop or a card whose DOM is replaced by a state update. Against the 0.9.8 card it
+reports all three: the Czech-named card is an error card, and at 300 px Lovelace
+built 12 card elements in 20 seconds.
 
 ## Pointing it at a real printer
 

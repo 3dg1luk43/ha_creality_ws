@@ -1,0 +1,9 @@
+{
+  "name": "creality-testbox",
+  "private": true,
+  "type": "module",
+  "description": "Browser checks for the test box. npm install here once; browsers are shared with any other Playwright install.",
+  "devDependencies": {
+    "playwright": "1.61.1"
+  }
+}

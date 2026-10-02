@@ -13,3 +13,4 @@ conductor
 # Test box state (tools/testbox/README.md); the box itself is committed.
 tools/testbox/config/
 tools/testbox/**/__pycache__/
+tools/testbox/node_modules/

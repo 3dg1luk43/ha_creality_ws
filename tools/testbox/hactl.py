@@ -199,9 +199,17 @@ async def cmd_onboard(_args: argparse.Namespace) -> int:
             )
         TOKEN_FILE.write_text(long_lived)
         TOKEN_FILE.chmod(0o600)
-        for path in ("/api/onboarding/core_config", "/api/onboarding/analytics"):
+        # The remaining steps, so the frontend does not redirect to onboarding
+        # (card_check.mjs drives it). "integration" answers with an error for a
+        # token-only user but still marks the step done.
+        for path, body in (
+            ("/api/onboarding/core_config", {}),
+            ("/api/onboarding/analytics", {}),
+            ("/api/onboarding/integration",
+             {"client_id": CLIENT_ID, "redirect_uri": f"{BASE_URL}/?auth_callback=1"}),
+        ):
             try:
-                await rest(session, "POST", path, {})
+                await rest(session, "POST", path, body)
             except RuntimeError:
                 pass
     print(f"onboarded. token at {TOKEN_FILE}")
