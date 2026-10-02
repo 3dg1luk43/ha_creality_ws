@@ -74,7 +74,7 @@ Unique id is always `<host>-<key>`. "Default" availability is the `KEntity` rule
 
 ### 4.1 Telemetry-field sensors from `SPECS` (`KSimpleFieldSensor`, `sensor.py:89-218`, class `:236-303`)
 
-`native_value` returns the raw telemetry value, unconverted and unvalidated (`sensor.py:288`).
+`native_value` runs every SPECS value through `utils.numeric_state` (R3, #121): an int stays an int, a numeric string is converted, and a blank, non-number, NaN or infinity is None ("unknown"). Before R3 it returned the raw value, so a booting printer's `""` made Home Assistant reject the state write and the entity stayed "unavailable". Progress takes the first of `printProgress`, `dProgress` that holds a number (it used `or`, so a real 0% showed the previous job's value). The CFS box temperature/humidity and slot percent go through the same helper; `boxsInfo` is nested, so the client's top-level `coerce_numbers` never reaches it.
 
 | key (uid) | translation_key | Source field | Device class | Unit | State class | Attributes | Gate |
 |---|---|---|---|---|---|---|---|

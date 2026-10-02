@@ -86,6 +86,41 @@ def safe_float(v: Any) -> float | None:
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+def numeric_state(v: Any) -> int | float | None:
+    """A telemetry value as a numeric sensor state, or None.
+
+    Home Assistant rejects a numeric sensor's state write outright when the
+    value is not a number, and the entity then keeps whatever state it had,
+    which after a power-on is "unavailable". Printers send blanks (`""`) for
+    some fields while booting (#121), and the client's cumulative state keeps
+    the blank until the key is sent again, so one blank frame used to strand
+    a sensor for minutes. NaN and infinities are refused for the same reason.
+
+    An int stays an int: a layer count that became `128.0` would change the
+    entity's state string.
+    """
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        return v if math.isfinite(v) else None
+    if isinstance(v, str):
+        text = v.strip()
+        if not text:
+            return None
+        try:
+            num = float(text)
+        except ValueError:
+            return None
+        if not math.isfinite(num):
+            return None
+        if num.is_integer() and not any(c in text for c in ".eE"):
+            return int(num)
+        return num
+    return None
 def _is_routable_v4(addr: Any) -> bool:
     """An IPv4 address that is not link-local (169.254.0.0/16)."""
     text = str(addr).strip()

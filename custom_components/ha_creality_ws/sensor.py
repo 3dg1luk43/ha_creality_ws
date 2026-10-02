@@ -10,6 +10,7 @@ from .utils import (
     derive_print_state as _derive_print_state,
     format_filament_label as _format_filament_label,
     normalize_color_hex as _normalize_color_hex,
+    numeric_state as _numeric_state,
     parse_position as _parse_position,
     safe_float as _safe_float,
 )
@@ -279,13 +280,18 @@ class KSimpleFieldSensor(KEntity, SensorEntity):
         # Position parsing (computed from curPosition string)
         if self._field in ("__pos_x__", "__pos_y__", "__pos_z__"):
             x, y, z = _parse_position(d)
-            return {"__pos_x__": x, "__pos_y__": y, "__pos_z__": z}[self._field]
+            return _numeric_state(
+                {"__pos_x__": x, "__pos_y__": y, "__pos_z__": z}[self._field]
+            )
 
-        # Print progress
+        # Print progress: the first field that holds a number. Not `or`: a real
+        # 0% at the start of a job fell through to the previous job's dProgress.
         if self._field == "__progress__":
-            return d.get("printProgress") or d.get("dProgress")
+            progress = _numeric_state(d.get("printProgress"))
+            return progress if progress is not None else _numeric_state(d.get("dProgress"))
 
-        return d.get(self._field)
+        # Every SPECS field is numeric; a blank or non-number is "unknown".
+        return _numeric_state(d.get(self._field))
 
     @property
     def extra_state_attributes(self):
@@ -506,11 +512,8 @@ class PrintJobTimeSensor(KEntity, SensorEntity):
     def native_value(self) -> int | None:
         if self._should_zero():
             return 0
-        v = self.coordinator.data.get("printJobTime")
-        try:
-            return int(v) if v is not None else None
-        except (TypeError, ValueError):
-            return None
+        v = _numeric_state(self.coordinator.data.get("printJobTime"))
+        return int(v) if v is not None else None
 
 class PrintLeftTimeSensor(KEntity, SensorEntity):
     _attr_translation_key = "print_left_time"
@@ -526,11 +529,8 @@ class PrintLeftTimeSensor(KEntity, SensorEntity):
     def native_value(self) -> int | None:
         if self._should_zero():
             return 0
-        v = self.coordinator.data.get("printLeftTime")
-        try:
-            return int(v) if v is not None else None
-        except (TypeError, ValueError):
-            return None
+        v = _numeric_state(self.coordinator.data.get("printLeftTime"))
+        return int(v) if v is not None else None
 
 class RealTimeFlowSensor(KEntity, SensorEntity):
     _attr_translation_key = "real_time_flow"
@@ -695,7 +695,7 @@ class KCFSBoxSensor(KEntity, SensorEntity):
             return 0.0
         data = self._get_box_data()
         if data:
-            return data.get(self._type)
+            return _numeric_state(data.get(self._type))
         return None
 
 
@@ -787,7 +787,7 @@ class KCFSSlotSensor(KEntity, SensorEntity):
         if self._type == "color":
             return _normalize_color_hex(data.get("color"))
         if self._type == "percent":
-            return data.get("percent")
+            return _numeric_state(data.get("percent"))
         return None
 
     @property
@@ -854,7 +854,7 @@ class KCFSExtSlotSensor(KEntity, SensorEntity):
         if self._type == "color":
             return _normalize_color_hex(data.get("color"))
         if self._type == "percent":
-            return data.get("percent")
+            return _numeric_state(data.get("percent"))
         return None
 
     @property
