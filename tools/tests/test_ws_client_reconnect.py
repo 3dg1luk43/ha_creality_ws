@@ -168,36 +168,157 @@ def test_force_connect_attempts_connection_when_power_on():
 
 
 # ---------------------------------------------------------------------------
-# Test 2 -- force_connect=True, power OFF  →  connect is NOT attempted
+# Test 2 -- force_connect=True, power OFF  ->  connect IS attempted
 # ---------------------------------------------------------------------------
-def test_force_connect_skips_connection_when_power_off():
-    """With _force_connect=True but power OFF, the loop must NOT attempt to connect."""
+def test_force_connect_attempts_connection_even_when_power_off():
+    """A manual Reconnect bypasses the switch once: that is what the flag is
+    for, and the switch may be lagging or wrong. 0.9.1 inverted this, so a
+    forced attempt was the only one that checked the switch at all."""
 
     async def run():
-        """Run the test coroutine inside a fresh event loop."""
         call_counter: list[int] = []
 
         async def _on_msg(payload):
             """No-op message handler used for testing."""
 
         client = KClient("192.168.1.99", _on_msg)
-        # Power is OFF
         client._check_power_status = lambda: True
-        # Signal a forced reconnect
         client._force_connect = True
+
+        fake_connect = _make_failing_connect(
+            call_counter, exc=OSError("connection refused")
+        )
+
+        with patch.object(ws_client_module.websockets, "connect", fake_connect):
+            await client.start()
+            await asyncio.sleep(0.2)
+            await client.stop()
+
+        assert len(call_counter) == 1
+
+    asyncio.run(run())
+
+
+def test_an_unforced_loop_polls_the_switch_instead_of_a_dark_printer():
+    """#45. Without the check, the loop kept dialling a printer whose plug was
+    off and backed off to 300 s, so power-on was followed by minutes of
+    "unknown"."""
+
+    async def run():
+        call_counter: list[int] = []
+
+        async def _on_msg(payload):
+            """No-op message handler used for testing."""
+
+        client = KClient("192.168.1.99", _on_msg)
+        client._check_power_status = lambda: True
 
         fake_connect = _make_failing_connect(call_counter)
 
         with patch.object(ws_client_module.websockets, "connect", fake_connect):
             await client.start()
-            # The loop should sleep (10 s) before retrying; stop it before that
             await asyncio.sleep(0.2)
             await client.stop()
 
-        assert len(call_counter) == 0, (
-            "websockets.connect must NOT be called when force_connect=True "
-            "but the power switch reports the printer as OFF"
+        assert len(call_counter) == 0
+
+    asyncio.run(run())
+
+
+def test_the_first_attempt_after_power_returns_is_prompt():
+    """While off, the loop re-reads the switch every POWER_OFF_POLL_SECS with
+    the backoff reset, so the first connect follows power-on within one poll."""
+
+    async def run():
+        call_counter: list[int] = []
+        power_off = [True]
+
+        async def _on_msg(payload):
+            """No-op message handler used for testing."""
+
+        client = KClient("192.168.1.99", _on_msg)
+        client._check_power_status = lambda: power_off[0]
+
+        fake_connect = _make_failing_connect(
+            call_counter, exc=OSError("connection refused")
         )
+
+        with patch.object(ws_client_module.websockets, "connect", fake_connect), \
+                patch.object(ws_client_module, "POWER_OFF_POLL_SECS", 0.05):
+            await client.start()
+            await asyncio.sleep(0.2)
+            assert call_counter == []
+            power_off[0] = False
+            await asyncio.sleep(0.2)
+            await client.stop()
+
+        assert len(call_counter) >= 1
+
+    asyncio.run(run())
+
+
+def test_a_long_session_that_ends_in_an_error_resets_the_backoff():
+    """A Wi-Fi blip after hours of uptime is not a fifth consecutive failure.
+    The reset used to happen only on a clean close, so an error close retried
+    after the backoff the earlier failures had built up."""
+
+    async def run():
+        sleeps: list[float] = []
+        attempts: list[int] = []
+        done = asyncio.Event()
+        original_wait_for = asyncio.wait_for
+
+        async def _recording_wait_for(fut, timeout):
+            # Record the loop's chosen sleep, then return at once.
+            sleeps.append(timeout)
+            return await original_wait_for(fut, 0.001)
+
+        class _OneFrameThenError:
+            def __init__(self):
+                self.sent = False
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if not self.sent:
+                    self.sent = True
+                    return '{"nozzleTemp": "200"}'
+                raise OSError("connection reset by peer")
+
+            async def send(self, *a, **k):
+                """Periodic GETs may fire; nothing to do."""
+
+            async def close(self, *a, **k):
+                """No-op close."""
+
+        @asynccontextmanager
+        async def _fake_connect(url, **kwargs):
+            attempts.append(1)
+            n = len(attempts)
+            if n == 5:
+                done.set()
+            if n == 4:
+                yield _OneFrameThenError()
+                return
+            raise OSError("connection refused")
+
+        async def _on_msg(payload):
+            """No-op message handler used for testing."""
+
+        client = KClient("192.168.1.99", _on_msg)
+
+        with patch.object(ws_client_module.websockets, "connect", _fake_connect), \
+                patch.object(ws_client_module, "STABLE_CONNECT_SECS", 0.0), \
+                patch.object(ws_client_module.asyncio, "wait_for", _recording_wait_for):
+            await client.start()
+            await original_wait_for(done.wait(), 2.0)
+            await client.stop()
+
+        # Three failures grow the backoff (~1.8, ~3.2, ~5.8 s); the sleep after
+        # the healthy session must be back at the first step, not ~10 s.
+        assert sleeps[2] > 5.0
+        assert sleeps[3] <= (1.0 * 2.2)
 
     asyncio.run(run())
 

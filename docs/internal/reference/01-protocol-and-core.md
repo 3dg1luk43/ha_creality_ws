@@ -171,13 +171,12 @@ All are compact JSON (`separators=(",", ":")`, `ws_client.py:530`) sent through 
 
 ```
 STOPPED --start()--> LOOP
-LOOP: [force_connect && power off -> sleep 10 s -> LOOP]
+LOOP: [not forced && power off -> reset backoff, sleep POWER_OFF_POLL_SECS (10 s) -> LOOP]
       CONNECTING (websockets.connect, open_timeout 10 s)
         -> fail ---------------------------------------------> BACKOFF
         -> HANDSHAKEN (_ws set, heartbeat + ticker tasks started, NOT ready)
              -> first JSON frame or heart_beat -> READY (_ws_ready, _connected_once, _last_rx)
-             -> clean close (iterator ends) -> [stable >= 10 s: reset failures/backoff] -> BACKOFF
-             -> exception (close error, 1006, 1009, ...) ---------> BACKOFF  (no reset)
+             -> close, clean or not -> [session >= STABLE_CONNECT_SECS: reset failures/backoff] -> BACKOFF
 BACKOFF: sleep, interruptible by stop() -> LOOP
 stop(): _stop set, child tasks cancelled, ws.close(1000), loop task cancelled -> STOPPED
 ```
@@ -187,16 +186,16 @@ Readiness is deliberately decoupled from the TCP/WS handshake (`ws_client.py:232
 ### 2.2 `_loop` walkthrough (`ws_client.py:182-378`)
 
 1. Locals per loop run: `backoff = 1.0`, `connect_failures = 0`, `use_fixed_retry = not _check_power_status`, `max_backoff = 300` with a power switch else `60` (`:183-189`). These are evaluated once per `start()`; a later change of `_check_power_status` has no effect until the next start.
-2. **Force-connect branch** (`:195-215`): only when `_force_connect` is set (the Reconnect button, `:168-173`). If the power check then says OFF, it resets the backoff, sleeps **10 s** (the debug text says 60 s), and continues. In every other iteration there is **no power check before connecting**: the comment at `:192-194` ("skip connection attempt UNLESS forced") describes the opposite of what the code does. `tools/tests/test_ws_client_reconnect.py:173-205` pins the current behaviour.
+2. **Power check**: a forced iteration (the Reconnect button sets `_force_connect`) skips it once and connects. Every other iteration asks `_check_power_status`; while it says OFF the loop resets the backoff, waits `POWER_OFF_POLL_SECS` (10 s) and re-checks, so the first attempt after power-on is prompt. Fixed for R2: 0.9.1 (`85605c7`) had it inverted, checking only on forced iterations. `test_ws_client_reconnect.py` pins both directions.
 3. Connect, start `_heartbeat` and `_periodic_gets` (`:239-240`), iterate frames (section 1.2).
-4. Iterator ended without an exception: reset `connect_failures`/`backoff` only if the session lasted at least `STABLE_CONNECT_SECS` (`:292-294`).
+4. (removed in R2: the clean-close-only reset moved into `finally`, step 6.)
 5. Exception path (`:298-328`): `connect_failures += 1` regardless of how long the session lasted (`short_lived` is computed at `:299-302` but only logged). Logging: debug if the power check says OFF, debug if `_is_benign_close`, otherwise WARNING for the first three failures of this loop run, then debug. `last_error` is recorded.
-6. `finally` (`:329-337`): cancel child tasks, `_ws = None`, clear `_ws_ready`.
+6. `finally`: if this attempt connected and lasted at least `STABLE_CONNECT_SECS`, reset `connect_failures`/`backoff` however the session ended (R2); then cancel child tasks, `_ws = None`, clear `_ws_ready`.
 7. Sleep (`:341-346`): without a power switch, after 5 failures a fixed 60 s; otherwise `min(backoff * (1.8 + U(0, 0.4)), max_backoff)`. Sequence from a fresh loop: about 1.8-2.2, 3.2-4.8, 5.8-10.6, ... capped at 60 or 300.
 8. "mDNS fallback" block (`:348-367`): logs a WARNING ("Attempting mDNS fallback...") when the backoff is near the 300 s cap and the power check says ON, but performs no fallback. Only reachable for power-switch users.
 9. Interruptible wait on `_stop` (`:369-373`), then `backoff = min(sleep_for, max_backoff)` unless in the fixed-retry regime (`:375-376`).
 
-**Consequence worth knowing:** a session that ends abnormally (power cut, printer reboot, Wi-Fi drop, heartbeat-initiated close against a dead peer) never resets `backoff` or `connect_failures`, however long it was healthy. The first retry after it uses whatever backoff was reached before the session, up to 300 s with a power switch, or the fixed 60 s without one if 5 failures had accumulated at any point in this loop run.
+**Fixed (R2):** a session that ended abnormally after being healthy used to keep the backoff built up before it (up to 300 s). Now any session of at least `STABLE_CONNECT_SECS` resets it.
 
 ### 2.3 Benign closes (`ws_client.py:131-151`)
 
@@ -275,22 +274,22 @@ Only on a K2 Base. `GET http://<host>:7125/printer/objects/query?objects=tempera
 
 ### 4.2 `power_is_off` (`coordinator.py:308-325`)
 
-1. If the WebSocket is connected, **always False** (`:312-313`), so a connected link outranks a switch that says off.
+1. If the WebSocket is connected, **always False**, so a connected link outranks a switch that says off. This is availability semantics only; power *edges* use `_switch_reports_off()`, which is rules 2-4 without rule 1.
 2. No switch configured: False.
 3. Switch entity missing from the state machine: True (fail-safe, `:319-321`). A renamed or deleted switch therefore keeps the printer "off" forever: the client is never started at setup (`:329-332`) and every entity is unavailable, with only a debug line.
 4. Otherwise True for `off`, `unavailable`, `unknown`.
 
 ### 4.3 Power-switch edge handling (`coordinator.py:381-407`, wired at `__init__.py:458-469`)
 
-`async_track_state_change_event` on the configured switch calls `async_handle_power_change`, which compares `power_is_off()` with `_last_power_off`:
+`async_track_state_change_event` on the configured switch calls `async_handle_power_change`, which takes `_power_lock` and compares `_switch_reports_off()` (the raw switch, ignoring the socket) with `_last_power_off`:
 
-- off edge: `client.stop()`, `_last_power_off = True`;
+- off edge: `client.stop()`, `_last_power_off = True`. While the socket is connected only a literal `off` counts: `unavailable`/`unknown` is a plug blinking, not a power cut, and is ignored (R2);
 - on edge: stop a still-running task, sleep 0.1 s, `client.start()`, `_last_power_off = False`;
 - always `async_update_listeners()`.
 
-Because of rule 1 in 4.2, the off edge is **only seen if the WebSocket is already down when the switch turns off**. Turning off a smart plug under a running printer leaves the link "connected" until the heartbeat kills it 30-50 s later, so the handler sees `now_off == False`, does nothing, and `_last_power_off` stays False. The client then keeps retrying with growing backoff while the plug is off (the in-loop power check does not run, section 2.2), and the later on edge is also missed (`was_off` is False), so reconnection waits for the current backoff sleep, up to 300 s, plus boot time.
+**Fixed (R2, #45 regression from 0.9.1):** the edge used to be decided from `power_is_off()`, which is False while the socket still looks connected. Cutting the plug under a running printer therefore recorded no off edge, the loop kept dialling with growing backoff, and the on edge found nothing to do, so reconnection waited up to 300 s. `test_power_switch.py` pins the edges and the serialization.
 
-The watcher subscribes to the raw `power_switch` option (`__init__.py:217`, `:468`), not the effective one; when the switch is disabled in options the coordinator has no switch and the handler returns at `:384-386`. The handler is not serialized: overlapping off/on events can interleave across the awaits in `client.stop()`.
+The watcher subscribes to the raw `power_switch` option (`__init__.py:217`, `:468`), not the effective one; when the switch is disabled in options the coordinator has no switch and the handler returns at `:384-386`. The handler is serialized by `_power_lock` (R2), so an off edge still waiting on `client.stop()` cannot swallow a quick on edge.
 
 ---
 

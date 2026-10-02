@@ -37,6 +37,8 @@ GET_BOXS_INFO_SEC = 300.0             # CFS box info (temp/humidity/filaments) e
 # reset the failure/backoff counters. Prevents fast connect/drop flapping from
 # masquerading as healthy reconnects.
 STABLE_CONNECT_SECS = 10.0
+# How often the switch is re-read while it says the printer is off.
+POWER_OFF_POLL_SECS = 10.0
 
 
 
@@ -190,29 +192,28 @@ class KClient:
         
         while not self._stop.is_set():
             # --- Power Saving Check (Start of Loop) ---
-            # If printer is known to be powered off, sleep briefly and skip connection attempt
-            # UNLESS forced by user via Reconnect button
-            if self._force_connect:
+            # While the switch says the printer is off, poll the switch instead
+            # of the printer, with the backoff reset so the first attempt after
+            # power returns is immediate. A manual Reconnect skips the check
+            # once. 0.9.1 had this inverted: only a forced attempt checked, so
+            # an unforced loop backed off to 300 s against a dark printer.
+            forced = self._force_connect
+            self._force_connect = False
+            if forced:
                 _LOGGER.info("Forcing connection attempt (manual reconnect)")
-                self._force_connect = False
-                # bypass power check
-                if self._check_power_status:
-                    is_printer_off = self._check_power_status()
-                else:
-                    is_printer_off = False
-
-                if is_printer_off:
-                    _LOGGER.debug(
-                        "Printer power is OFF; sleeping 60s before next check host=%s", self._host
-                    )
-                    # Reset backoff so we start fresh when power returns
-                    backoff = RETRY_MIN_BACKOFF
-                    connect_failures = 0
-                    try:
-                        await asyncio.wait_for(self._stop.wait(), timeout=10.0)
-                    except asyncio.TimeoutError:
-                        pass
-                    continue
+            elif self._check_power_status and self._check_power_status():
+                _LOGGER.debug(
+                    "Printer power is OFF; checking again in %.0fs host=%s",
+                    POWER_OFF_POLL_SECS,
+                    self._host,
+                )
+                backoff = RETRY_MIN_BACKOFF
+                connect_failures = 0
+                try:
+                    await asyncio.wait_for(self._stop.wait(), timeout=POWER_OFF_POLL_SECS)
+                except asyncio.TimeoutError:
+                    pass
+                continue
 
             connected_this_attempt = False
             try:
@@ -287,12 +288,6 @@ class KClient:
                         else:
                             _LOGGER.debug("K WS unexpected frame type: %r", type(payload))
 
-                    # Connection closed cleanly. Only treat it as a healthy
-                    # session (resetting backoff) if it survived long enough.
-                    if time.monotonic() - self.uptime_start >= STABLE_CONNECT_SECS:
-                        connect_failures = 0
-                        backoff = RETRY_MIN_BACKOFF
-
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -327,6 +322,17 @@ class KClient:
                         _LOGGER.debug("K WS connection error host=%s err=%s (attempt=%d)", self._host, exc, connect_failures)
                 self.last_error = str(exc)
             finally:
+                # A session that survived long enough was healthy, however it
+                # ended. Resetting only on a clean close meant a Wi-Fi blip
+                # after hours of uptime waited out the backoff of the failures
+                # before it.
+                if (
+                    connected_this_attempt
+                    and time.monotonic() - self.uptime_start >= STABLE_CONNECT_SECS
+                ):
+                    connect_failures = 0
+                    backoff = RETRY_MIN_BACKOFF
+
                 # cleanup on disconnect
                 for t in (self._hb_task, self._tick_task):
                     if t:

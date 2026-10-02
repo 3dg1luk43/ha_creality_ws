@@ -12,11 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A K2 that self-tests at the start of a print no longer reports it as stopped at 0%.
 - iPhones get the live print card in a form the iOS app can read, and Stop on iOS asks for confirmation.
+- With a power switch configured, the printer reconnects within seconds of being switched on instead of up to five minutes later.
 
 ### Fixes
 
 - **A self-test at the start of a K2 print was announced as "stopped at 0%"** ([#124](https://github.com/3dg1luk43/ha_creality_ws/issues/124)): the printer reports one `printing` frame, then self-tests for minutes. The stop detector only counted printing and paused as a running job, so after 15 seconds it called the self-test a cancelled print and replaced the live card with that notification. A self-test is now part of the job; a print cancelled during one is still announced once the self-test ends. Thanks to @sammyke007 for the diagnosis and the tested patch.
 - **The iOS live print card was sent in a form the iPhone discards** ([#125](https://github.com/3dg1luk43/ha_creality_ws/issues/125)): every companion app got the payload in the all-strings form Android requires. The iOS app reads the card's timer flag as a true/false value and its end time as a number, so the strings made it discard every update without a trace. Refreshes also buzzed the phone instead of arriving silently, and Stop lost its confirmation. iPhones and iPads now get real values; Android is unchanged. Thanks to @jrspowers for the report and the side-by-side payload comparison.
+- **A printer on a switched plug could take up to five minutes to come back** ([#45](https://github.com/3dg1luk43/ha_creality_ws/issues/45), [#121](https://github.com/3dg1luk43/ha_creality_ws/issues/121)): since 0.9.1 the switch was only checked on a manual Reconnect, the opposite of what was intended. Cutting the plug under a live connection went unnoticed, so switching it back on did not restart the connection, and the integration kept retrying a dark printer with a delay that grew to five minutes. The switch now decides power-on and power-off, the integration checks it every 10 seconds while it is off, and a connection that ran for a while starts its retry delay from the beginning. Thanks to @vumario and @chammp for the reports.
 
 ## 0.9.8 - 2026-09-26
 > [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)

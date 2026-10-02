@@ -164,6 +164,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._pending_pause = False
         self._pending_resume = False
         self._last_power_off: bool = False
+        self._power_lock = asyncio.Lock()
         
         # Notification & Performance
         self._notify_targets: list[str] = []
@@ -256,7 +257,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Only enable power detection if a switch is configured
         if self._power_switch_entity:
             self.client._check_power_status = self.power_is_off
-            self._last_power_off = self.power_is_off()
+            self._last_power_off = self._switch_reports_off()
             _LOGGER.debug("Power switch configured: %s (initial state: %s)", 
                          self._power_switch_entity, "OFF" if self._last_power_off else "ON")
         else:
@@ -314,7 +315,17 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # This allows manual "Reconnect" to work even if the switch entity is lagging or wrong.
         if self.client.is_connected:
             return False
+        return self._switch_reports_off()
 
+    def _switch_reports_off(self) -> bool:
+        """What the power switch itself says, whatever the socket is doing.
+
+        Power *edges* must come from here, not from `power_is_off`. A plug that
+        cuts a running printer leaves the socket looking connected for another
+        30 s, during which `power_is_off` is False by design, so an edge decided
+        from it never saw the printer go off and never restarted the client
+        when it came back on (#45, regressed in 0.9.1).
+        """
         eid = self._power_switch_entity
         if not eid:
             return False
@@ -388,9 +399,23 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("Power change handler called but no switch configured; ignoring")
             return
         
-        now_off = self.power_is_off()
-        was_off = getattr(self, "_last_power_off", False)
-        
+        # Serialized: stopping can wait seconds on the socket close, and a quick
+        # off-then-on must not interleave into a stopped client with power on.
+        async with self._power_lock:
+            await self._apply_power_edge()
+        self.async_update_listeners()
+
+    async def _apply_power_edge(self) -> None:
+        now_off = self._switch_reports_off()
+        if now_off and self.client.is_connected:
+            st = self.hass.states.get(self._power_switch_entity)
+            if st is None or str(st.state).lower() != "off":
+                # A plug blinking to unavailable/unknown is not a power cut,
+                # and the printer is visibly streaming: keep the connection.
+                # Only a real "off" stops it.
+                return
+        was_off = self._last_power_off
+
         if now_off and not was_off:
             _LOGGER.info("Power OFF detected; stopping WebSocket client")
             await self.client.stop()
@@ -406,9 +431,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await asyncio.sleep(0.1)
             await self.client.start()
             self._last_power_off = False
-        
-        self.async_update_listeners()
-        
+
     def _notify_listeners_threadsafe(self) -> None:
         """Always execute listener updates on HA's event loop."""
         # Pass the callable itself (no parens); the loop invokes it safely.
