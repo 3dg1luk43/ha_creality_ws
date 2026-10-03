@@ -1296,8 +1296,14 @@ class KCFSCard extends HTMLElement {
         const name = filamentObj?.state;
         const type = filamentObj?.attributes?.type;
         const selected = filamentObj?.attributes?.selected;
-        const rawColor = colorObj?.state || filamentObj?.attributes?.color_hex;
-        const parsedColor = KCFSCard._parseColor(rawColor);
+        // Parsed in turn, not `||`: "unknown"/"unavailable" are truthy, so a
+        // colour sensor reading either hid the slot's color_hex attribute and
+        // the spool went grey (R28).
+        const rawColor = isSentinel(colorObj?.state)
+          ? filamentObj?.attributes?.color_hex
+          : colorObj.state;
+        const parsedColor = KCFSCard._parseColor(rawColor)
+          ?? KCFSCard._parseColor(filamentObj?.attributes?.color_hex);
         const color = parsedColor ?? "#cccccc";
         const percent = KCFSCard._parsePercent(percentObj);
         const percentText = fmtState(percentObj);
@@ -1364,8 +1370,11 @@ class KCFSCard extends HTMLElement {
       const name = filamentObj?.state;
       const type = filamentObj?.attributes?.type;
       const selected = filamentObj?.attributes?.selected;
-      const rawColor = colorObj?.state || filamentObj?.attributes?.color_hex;
-      const parsedColor = KCFSCard._parseColor(rawColor);
+      const rawColor = isSentinel(colorObj?.state)
+        ? filamentObj?.attributes?.color_hex
+        : colorObj.state;
+      const parsedColor = KCFSCard._parseColor(rawColor)
+        ?? KCFSCard._parseColor(filamentObj?.attributes?.color_hex);
       const color = parsedColor ?? "#cccccc";
       const percent = KCFSCard._parsePercent(percentObj);
       const percentText = fmtState(percentObj);
