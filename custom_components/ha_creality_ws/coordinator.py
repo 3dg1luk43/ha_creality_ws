@@ -686,7 +686,10 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._pending_resume = False
             return
 
-        if self._pending_pause and state == "printing":
+        # Not while homing, for the same reason request_pause queues then: the
+        # printer ignores a pause mid-move, and the queue was cleared as if it
+        # had landed (R28).
+        if self._pending_pause and state == "printing" and not self._is_busy_homing():
             try:
                 await self.client.send_set_retry(pause=1)
                 self._pending_pause = False

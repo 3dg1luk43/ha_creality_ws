@@ -90,6 +90,28 @@ def test_pause_resume_queue_logic(monkeypatch):
     asyncio.run(run())
 
 
+def test_a_pause_queued_for_homing_waits_until_homing_is_over(monkeypatch):
+    """R28. request_pause queues while the printer homes, because a pause sent
+    mid-move is ignored; the flush then sent it on the very next frame, still
+    homing, and cleared the queue as if it had landed."""
+    async def run():
+        coord, sent = _coord_with_send(monkeypatch)
+        coord.data = dict(PRINTING, deviceState=7)
+        await coord.request_pause()
+        assert sent == [] and coord.pending_pause() is True
+
+        await coord._flush_pending()  # next frame, still homing
+        assert sent == []
+        assert coord.pending_pause() is True
+
+        coord.data["deviceState"] = 0
+        await coord._flush_pending()
+        assert sent == [{"pause": 1}]
+        assert coord.pending_pause() is False
+
+    asyncio.run(run())
+
+
 def test_pause_is_not_sent_to_a_finished_print(monkeypatch):
     """The printer has stopped; there is nothing to pause.
 
