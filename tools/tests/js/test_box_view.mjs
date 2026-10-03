@@ -45,6 +45,25 @@ function boxCard(count, { external = false, externalStates = {} } = {}) {
 
 const html = (card) => card._root.getElementById("content").innerHTML;
 
+test("the external spool's type is not repeated after a name that says it (#115)", () => {
+  const out = html(boxCard(4, { external: true }));
+  assert.match(out, /Creality Hyper PETG</);
+  assert.doesNotMatch(out, /PETG PETG/);
+});
+
+test("the external spool's type is added to a name that does not say it", () => {
+  const out = html(boxCard(4, {
+    external: true,
+    externalStates: {
+      "sensor.printer_cfs_external_filament": {
+        state: "Creality Hyper Silk",
+        attributes: { type: "PLA", vendor: "Creality", name: "Hyper Silk" },
+      },
+    },
+  }));
+  assert.match(out, /Creality Hyper Silk PLA</);
+});
+
 test("a four-bay unit renders the box view", () => {
   const out = html(boxCard(4));
   assert.match(out, /class="box-view"/);

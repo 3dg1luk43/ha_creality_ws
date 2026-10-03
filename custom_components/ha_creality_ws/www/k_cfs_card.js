@@ -293,6 +293,19 @@ class KCFSCard extends HTMLElement {
    * used to prefill it like a real value -- so changing only the material type
    * and saving wrote `#cccccc` to the spool as though the printer had said so.
    */
+  /**
+   * The external spool's label: its name, plus the material type only when
+   * the name does not already say it. The filament sensor's state is already
+   * "Generic PLA", so appending the type read "Generic PLA PLA" (#115).
+   */
+  static _nameWithType(name, type) {
+    const n = String(name ?? "").trim();
+    const t = String(type ?? "").trim();
+    if (!t || t === "-") return n;
+    const words = n.toLowerCase().split(/\s+/);
+    return words.includes(t.toLowerCase()) ? n : `${n} ${t}`;
+  }
+
   static _parseColor(value) {
     if (isSentinel(value)) return null;
     const raw = String(value).trim();
@@ -1616,7 +1629,7 @@ class KCFSCard extends HTMLElement {
       const hasFilament = safeType !== "-" && safeName !== "-";
       const pct = hasFilament && external.percent !== null ? external.percent : 0;
       const percentTextDisplay = hasFilament ? (external.percentText || '-') : '-';
-      const displayName = hasFilament ? `${safeName} ${safeType}` : '-';
+      const displayName = hasFilament ? KCFSCard._nameWithType(safeName, safeType) : '-';
       externalSection = `
         <div class="external-section">
           <div class="external-normal" data-eid="${esc(external.entity_id)}">
@@ -1670,7 +1683,7 @@ class KCFSCard extends HTMLElement {
     const safeName = !isSentinel(external.name) ? String(external.name).trim() : "-";
     const hasFilament = safeType !== "-" && safeName !== "-";
     const percentTextDisplay = hasFilament ? (external.percentText || '-') : '-';
-    const displayName = hasFilament ? `${safeName} ${safeType}` : '-';
+    const displayName = hasFilament ? KCFSCard._nameWithType(safeName, safeType) : '-';
     return `
       <div class="external-section">
         <div class="external-compact" data-eid="${esc(external.entity_id)}">
