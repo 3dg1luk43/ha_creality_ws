@@ -159,9 +159,9 @@ async def _init_resource(hass: HomeAssistant, url: str, ver: str) -> bool:
 async def _migrate_local_resources(
     hass: HomeAssistant, local_prefix: str, new_url: str, ver: str
 ) -> int:
-    """Migrate any Lovelace resources pointing at the old /local/ prefix.
+    """Remove Lovelace resources left by older versions for this card.
 
-    Returns the number of resources migrated.
+    Returns the number of resources removed.
     """
     try:
         from homeassistant.components.lovelace.resources import ResourceStorageCollection
@@ -181,30 +181,33 @@ async def _migrate_local_resources(
     await resources.async_get_info()
 
     migrated = 0
+    # The card the prefix names, as served now. Older versions rewrote a
+    # `/local/` entry by appending what followed the card's path, so
+    # "<card>.js?v=1" became "<card>.js/?v=1?v=<new>", a 404, and an entry
+    # with no query was skipped while its file was deleted. _init_resource
+    # already maintains the correct entry, so legacy and malformed ones are
+    # removed rather than rewritten (R28).
+    malformed_prefix = f"{new_url.rstrip('/')}/?"
 
     for item in list(resources.async_items()):
         u = item.get("url", "")
-        if not u.startswith(local_prefix):
+        legacy = u == local_prefix or u.startswith(f"{local_prefix}?")
+        if not (legacy or u.startswith(malformed_prefix)):
             continue
-
-        # keep the filename/path suffix and place it under the new base URL
-        suffix = u[len(local_prefix) :]
-        if not suffix:
-            # nothing to migrate
+        if not isinstance(resources, ResourceStorageCollection):
+            _LOGGER.warning(
+                "Lovelace resource %s is out of date; remove it from your YAML "
+                "resources, %s replaces it",
+                u,
+                new_url,
+            )
             continue
-
-        new_base = new_url.rstrip("/")
-        url2 = f"{new_base}/{suffix}?v={ver}"
-
-        _LOGGER.info("Migrating Lovelace resource from %s to %s", u, url2)
+        _LOGGER.info("Removing out-of-date Lovelace resource %s", u)
         try:
-            if isinstance(resources, ResourceStorageCollection):
-                await resources.async_update_item(item["id"], {"res_type": "module", "url": url2})
-            else:
-                item["url"] = url2
+            await resources.async_delete_item(item["id"])
             migrated += 1
-        except Exception as exc:
-            _LOGGER.warning("Failed to migrate resource %s -> %s: %s", u, url2, exc)
+        except Exception as exc:  # pylint: disable=broad-except
+            _LOGGER.warning("Failed to remove resource %s: %s", u, exc)
 
     return migrated
 
@@ -262,7 +265,7 @@ class CrealityCardRegistration:
                     self.hass, f"/local/{LOCAL_SUBDIR}/{card_name}", integration_url, version
                 )
                 if migrated:
-                    _LOGGER.info("Migrated %d Lovelace /local/ resources to integration-hosted URL", migrated)
+                    _LOGGER.info("Removed %d out-of-date Lovelace resource(s) for %s", migrated, card_name)
             except Exception:
                 _LOGGER.debug("Local-to-integration resource migration failed for %s", integration_url)
 

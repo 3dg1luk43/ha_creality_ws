@@ -91,7 +91,7 @@ All three helpers lazy-import Lovelace internals and read `hass.data.get("lovela
 
 The method docstring on `CrealityCardRegistration.async_register` (`frontend.py:223-227`) still says "We do NOT auto-create or modify Lovelace resources"; the code does both.
 
-**`_migrate_local_resources(hass, local_prefix, new_url, ver)`** (`frontend.py:159-209`) is called with `local_prefix=/local/ha_creality_ws/<card>.js` and `new_url=/ha_creality_ws/<card>.js` (`frontend.py:261-263`). The suffix logic was written for a directory prefix:
+**`_migrate_local_resources(hass, local_prefix, new_url, ver)`**, FIXED (R28): it now **removes** storage-mode resources equal to `/local/ha_creality_ws/<card>.js` (with or without a query) and the malformed `/ha_creality_ws/<card>.js/?...` entries older versions wrote, since `_init_resource` maintains the correct entry; a YAML-mode resource is only warned about. Verified on the test box. Historical behaviour, from the suffix logic written for a directory prefix:
 
 | Legacy resource | Result |
 |---|---|
