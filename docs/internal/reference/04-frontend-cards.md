@@ -382,7 +382,7 @@ Toasts (`_showToast`, `:1978-1995`): one at a time, 4 s, `position: absolute` at
 ### Layout and sizing
 
 - `getCardSize()` (`:2450-2470`): compact = configured boxes + external row (+1 when more than 2); full and box = 5.
-- `getLayoutOptions()` (`:2472-2497`): `{grid_rows: N, grid_min_rows: N}` with the same N. HA 2026.9 still accepts this deprecated API and migrates it to `{rows: N, min_rows: N}`; a numeric `rows` makes the sections wrapper `.card.fit-rows` a fixed height of `N * (row-height + gap) - gap` (312 px for 5 rows).
+- `getGridOptions()` since R23: `{columns: 12, rows: "auto", min_columns: 6}`, so a sections view sizes the cell to the card. The previous `getLayoutOptions()` returned fixed `{grid_rows: N, grid_min_rows: N}` (5 for full), which HA turned into a fixed-height wrapper the card then drew past.
 - `:host` forces `display:block; height:auto; contain:none` with `!important`, plus `position:relative; z-index:1` (`:536-544`); `ha-card` forces `overflow:visible` and `height:auto` (`:549-558`). Content taller than the fixed sections wrapper therefore spills over the cards below instead of scrolling or clipping (T6), which is the symptom reported in #69/#71.
 
 ### Theming and HA variables used
@@ -447,7 +447,7 @@ Shim behaviour that differs from a browser and hides real bugs:
 | CFS dialog, escaping, payload, Escape | `test_edit_dialog.mjs` |
 | CFS clicks, unit selector | `test_interactions.mjs` |
 | Presets | `test_presets.mjs` |
-| CFS view modes, `getCardSize`, `getLayoutOptions` values | `test_view_mode.mjs` |
+| CFS view modes, `getCardSize`, `getGridOptions` (rows auto) | `test_view_mode.mjs`; overlap measured in Chromium by `tools/testbox/card_check.mjs` |
 | Printer editor build-once, labels, device prefill, debounce flush | `test_printer_editor.mjs`, `test_printer_card_editor.py` |
 | Printer colour migration | `test_printer_migration.mjs` |
 | Printer telemetry density on one instance | `test_printer_telemetry.mjs`, `test_printer_card_layout.py` |
@@ -477,7 +477,7 @@ Identical or near-identical in both files: the whole i18n block (section 3), `de
 
 **T5. The CFS dialog lives inside the card's stacking context.** `:host { position: relative; z-index: 1 }` makes every CFS card its own stacking context at level 1. The overlay's `z-index: 100` only orders it inside that context, so later siblings with their own stacking context (a second CFS card, which has the same host rule) and HA's toolbar paint over the backdrop and possibly the dialog. A native `<dialog>` with `showModal()` (top layer) would escape this and also give a focus trap and Escape handling.
 
-**T6. `getLayoutOptions` with numeric rows plus `height:auto !important` overflows sections.** Fixed-height wrapper, card forced to its content height, `overflow: visible`: a full or box mode CFS card taller than 312 px draws over the next card.
+**T6. FIXED (R23).** `getLayoutOptions` with numeric rows plus `height:auto !important` overflowed sections: measured overlap 176 px (full) and 31 px (compact) at 390 px wide, 0 with `getGridOptions` rows auto. The `!important` heights stay; with an auto row they no longer fight the wrapper.
 
 **T7. Translations and the CFS image are not cache-busted.** `i18n/*.json` is fetched by bare URL without `Cache-Control`, so heuristic caching can keep old strings after an upgrade (new keys then show the bundled English); `cfs_box.webp` is served with a 31-day `max-age` under a bare URL, so a replaced image (with re-measured bay geometry in CSS) stays stale. A locale without a file is re-requested by every new card instance, which T2 turns into a 404 every ~2 s.
 

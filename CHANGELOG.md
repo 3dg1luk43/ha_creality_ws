@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A printer with only the external spool holder showed its spool twice**: without a CFS, the external spool got "Box 0 Slot 1" sensors as well as the "External" ones. New installs get the "External" sensors only; an existing install keeps the extra ones, so dashboards that use them are not broken.
 - **A CFS unit that showed up later got no sensors until a restart**: a second CFS chained on while Home Assistant was running, or a CFS that reported after the external spool holder at startup, was never given entities. A change in the set of boxes now triggers the same discovery a first report does.
 - **Typing in the CFS card's editor lost the cursor after every character**: each change rebuilt the editor, so a title had to be typed one letter at a time, and changing the display mode jumped back to the first tab. The editor is now built once and keeps its focus and tab.
+- **In a sections dashboard the CFS card covered the card below it**: the card asked for a fixed height and then drew past it, by about 170 pixels for one CFS on a phone. It now takes exactly the height it needs.
 
 ## 0.9.8 - 2026-09-26
 > [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)

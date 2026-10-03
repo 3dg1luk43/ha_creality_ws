@@ -2469,30 +2469,20 @@ class KCFSCard extends HTMLElement {
     return 5;
   }
 
-  getLayoutOptions() {
-    // Count configured boxes for dynamic sizing
-    let boxCount = 0;
-    if (this._cfg) {
-      for (let box = 0; box < 4; box++) {
-        const hasBox = this._cfg[`box${box}_temp`] || this._cfg[`box${box}_humidity`] ||
-          [0, 1, 2, 3].some(s => this._cfg[`box${box}_slot${s}_filament`] || this._cfg[`box${box}_slot${s}_color`] || this._cfg[`box${box}_slot${s}_percent`]);
-        if (hasBox) boxCount++;
-      }
-    }
-
-    // Check for external filament
-    const hasExternal = this._cfg?.external_filament || this._cfg?.external_color || this._cfg?.external_percent;
-    const externalRows = hasExternal ? 1 : 0;
-
-    // Add extra space when more than 2 rows
-    const totalRows = boxCount + externalRows;
-    const extraPadding = totalRows > 2 ? 1 : 0;
-
-    const minRows = this._cfg?.view_mode === "compact" ? Math.max(1, totalRows + extraPadding) : 5;
-
+  /**
+   * Sections-view sizing: let the grid size the cell to the card.
+   *
+   * `getLayoutOptions` (deprecated) reserved a fixed number of rows, five for
+   * the full view, and the card forces `height: auto` so its content is not
+   * clipped (#71) -- together that drew the card over whatever sat below it,
+   * by 176 px for a one-box CFS at phone width (R23). `rows: "auto"` makes the
+   * reserved height the card's own.
+   */
+  getGridOptions() {
     return {
-      grid_rows: minRows,
-      grid_min_rows: minRows,
+      columns: 12,
+      rows: "auto",
+      min_columns: 6,
     };
   }
 }
