@@ -322,4 +322,8 @@ DEFAULT_POLLING_RATE = 0  # Real-time
 MR_PORT = 7125
 MR_POLL_INTERVAL = 30
 MR_POLL_TIMEOUT = 5
-MR_QUERY_PARAMS = "objects=temperature_fan%20chamber_fan"
+# Moonraker reads every GET query key as an object name (its `_object_parser`),
+# so the object goes in as the key. `objects=...` asked for an object called
+# "objects", got nothing back, and the K2 Base chamber target never arrived
+# (R41). Checked against Moonraker's source, not on a K2 Base.
+MR_QUERY_PARAMS = "temperature_fan%20chamber_fan=target,temperature"

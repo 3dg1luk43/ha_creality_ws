@@ -276,3 +276,18 @@ def test_another_printer_is_settled_once_both_fields_are_known():
         assert coord._is_k2_base is False
 
     asyncio.run(run())
+
+
+def test_the_moonraker_query_names_the_chamber_fan_as_moonraker_reads_it():
+    """Moonraker's `_object_parser` makes every GET query key an object name.
+    `objects=temperature_fan%20chamber_fan` asked for an object called
+    "objects", so the K2 Base chamber target never arrived (R41)."""
+    from urllib.parse import parse_qsl
+
+    from custom_components.ha_creality_ws.const import MR_QUERY_PARAMS
+
+    excluded = {"_", "token", "access_token", "connection_id"}
+    objects = {k: v for k, v in parse_qsl(MR_QUERY_PARAMS, keep_blank_values=True) if k not in excluded}
+    assert "temperature_fan chamber_fan" in objects
+    assert "objects" not in objects
+    assert "target" in objects["temperature_fan chamber_fan"].split(",")
