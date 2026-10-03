@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The print preview arrived late, or not at all, when a print started**: the preview picture only changed when something happened to ask for it, so dashboards kept showing the previous print's picture for up to five minutes, and the "started" notification often went out without one. A new print now replaces the picture straight away and its first notification carries it.
 - **Upgrading from a version that installed the cards under `/local/` left broken dashboard resources behind**: the old entries were rewritten into addresses that do not exist, which every dashboard then failed to load. They are now removed; the correct entries were already added separately.
 - **The CFS card's external spool read "Generic PLA PLA"** ([#115](https://github.com/3dg1luk43/ha_creality_ws/issues/115)): the material type was added after a name that already included it. A colour sensor reporting "unknown" also turned a spool grey instead of using the colour the printer had stored for it.
+- **Home Assistant started up to 15 seconds later for every printer that was switched off**: setup waited for the printer's first message before carrying on, even though the entities do not need it. It no longer waits, so an offline printer sets up at once and shows as unavailable until it answers.
 
 ## 0.9.8 - 2026-09-26
 > [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)

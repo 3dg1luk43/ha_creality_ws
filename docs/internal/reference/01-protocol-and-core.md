@@ -358,7 +358,7 @@ Consumers: `KEntity._get_cached_device_info` / `device_info` (`entity.py:43-55`,
 1. Core version gate -> `ConfigEntryError` with translation key `unsupported_ha_version` (`:188-208`).
 2. `_migrate_go2rtc_settings` (`:211`, `:102-161`): power-switch enabled flag, go2rtc url/port moved from data to options, removal of the 0.9.0 `localhost:11984` defaults.
 3. Effective power switch = option entity only when the enabled flag is set (`:216-218`); build `KCoordinator` (`:223-225`).
-4. `async_start()` and, unless the switch says off, wait up to **15 s** for the first frame (`:227-234`). Neither call raises, so the `ConfigEntryNotReady` branch (`:235-237`) is unreachable: an offline printer always sets up and shows unavailable.
+4. `async_start()`, then `entry.async_on_unload(coord.async_stop)` at once, so a later failure in setup cannot leave the client running (R31). No wait here since R31: the entities come from the capability cache and late discovery; the only wait (15 s, once) is in the re-cache block, when there is something to learn. Before R31 every setup with the printer unreachable sat 15 s (measured on the test box: 15.0 s, now 0.27 s). An offline printer still always sets up and shows unavailable; `ConfigEntryNotReady` is only for `async_start` itself raising.
 5. Version, `_last_ip`, capability cache (section 6.2).
 6. `hass.data[DOMAIN][entry_id] = coord` (`:412`).
 7. Card registration (`:417-421`, section 10), non-fatal.
@@ -377,7 +377,7 @@ Writers of `entry.data` after setup, each of which therefore reloads the entry: 
 
 ### 7.3 Unload, removal, device removal
 
-- `async_unload_entry` (`__init__.py:1056-1070`): stops the client first, then unloads platforms, then pops `hass.data` only on success. Static paths and Lovelace resources stay.
+- `async_unload_entry`: unloads the platforms first; only when that succeeds does it stop the client and pop `hass.data` (R31; before, a failed unload left entities on a stopped client). `entry.async_on_unload(coord.async_stop)` also covers a setup that fails after the client started. Static paths and Lovelace resources stay.
 - `async_remove_entry` (`:1011-1053`): sends the dismiss sentinel for `_live`, `_soon`, `_alert` tags to every mobile target (the only teardown that clears phones).
 - `async_remove_config_entry_device` (`:1073-1112`): strips every `_cached_*` key and `_device_info_cached` and returns True. The data write reloads the entry, which re-caches and re-creates the same device.
 
@@ -439,7 +439,7 @@ Targets resolve through `_coordinators_for_devices` (`:508-540`), device registr
 | force-connect power-off sleep | 10 s | `ws_client.py:212` |
 | `send_set_retry` reconnect wait | 6 s | `ws_client.py:509` |
 | interval check | 5 s | `__init__.py:454` |
-| setup waits | first connect 15 s; re-cache 10 + 6 + 5 + 2 s | `__init__.py:232`, `:285-304` |
+| setup waits | none normally; re-cache only: first connect 15 s, then fields 6 + 5 + 2 s (R31) | `__init__.py` re-cache block |
 | `ensure_connected` wait | 10 s | `coordinator.py:344` |
 | `GCODE_INFO_RETRY_SECS` / `GCODE_INFO_MAX_ATTEMPTS` | 30 s / 3 | `const.py:89-90` |
 | `MR_PORT` / `MR_POLL_INTERVAL` / `MR_POLL_TIMEOUT` | 7125 / 30 s / 5 s | `const.py:318-320` |

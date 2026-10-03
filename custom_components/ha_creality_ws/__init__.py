@@ -286,15 +286,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     try:
         await coord.async_start()
-        # If printer is OFF, we intentionally don't wait for connectivity.
-        if not coord.power_is_off():
-            # Initial grace period is ~5 retries (~15-20s). Wait enough to cover it.
-            ok = await coord.wait_first_connect(timeout=15.0)
-            if not ok:
-                _LOGGER.warning("Initial connect not confirmed; will retry in background")
     except Exception as exc:
         await coord.async_stop()
         raise ConfigEntryNotReady(str(exc)) from exc
+    # Registered at once, so a setup that fails further down does not leave
+    # the client task running with no entry behind it (R31).
+    entry.async_on_unload(coord.async_stop)
+    # No wait here. The entities come from the capability cache and fill in
+    # as telemetry arrives (late discovery covers anything gated on it). An
+    # unconditional 15 s wait for a printer that was switched off held up
+    # Home Assistant's startup by that much per printer (R31); the cache block
+    # below still waits when it actually has something to learn.
 
     # Get current integration version
     current_version = await _get_integration_version(hass)
@@ -340,9 +342,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "Caching device info for %s (cached_version=%s, current_version=%s)",
             host, cached_version, current_version
         )
-        # Wait a bit longer to ensure we get model info
+        # The one wait at setup, and only when there is something to learn:
+        # first setup, an integration upgrade, or a moved printer.
         if not coord.power_is_off():
-            ok = await coord.wait_first_connect(timeout=10.0)
+            ok = await coord.wait_first_connect(timeout=15.0)
+            if not ok:
+                _LOGGER.warning("Initial connect not confirmed; will retry in background")
             # After first connect, wait briefly for model fields to appear to reduce flakiness
             if ok:
                 # Wait for basic fields to confirm model and capabilities
@@ -983,11 +988,12 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     coord: KCoordinator = hass.data[DOMAIN][entry.entry_id]
-    await coord.async_stop()
-
+    # Platforms first: if one refuses to unload, the entry stays loaded, and
+    # it must not be left with its client already stopped (R31).
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
     if unload_ok:
+        await coord.async_stop()
         hass.data[DOMAIN].pop(entry.entry_id)
 
     # The Lovelace resources and the static paths are deliberately left in
