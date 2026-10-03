@@ -1394,6 +1394,46 @@ def test_a_finished_print_is_not_announced_as_stopped_as_well():
     assert _events(payloads) == []
 
 
+def test_the_progress_reset_after_a_finished_print_starts_nothing():
+    """R10. After the completion the printer keeps the file name, sits in state
+    0 and, a while later, resets the progress to 0: "processing", busy by the
+    dashboard's reckoning. Taking that for a reprint re-armed every latch,
+    fired print_started for a print that never began and pushed a "0%
+    Starting" live card that stayed up while the file stayed selected."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(50))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    _frame(coord, hass, **_printing(100, printLeftTime=0))
+    hass.events.clear()
+
+    payloads = []
+    for _ in range(3):
+        hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+        payloads.extend(_frame(coord, hass, **_stopped_as_reported()))
+
+    assert _live(payloads) == [], "a card was stood up for a print that never started"
+    assert [e for e, _ in hass.events if e.endswith("print_started")] == []
+    assert coord._notified_completed is True
+
+
+def test_reprinting_the_same_file_after_a_finished_print_is_a_new_job():
+    """The other half: once the reprint actually runs, everything re-arms."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(50))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    _frame(coord, hass, **_printing(100, printLeftTime=0))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    _frame(coord, hass, **_stopped_as_reported())
+    hass.events.clear()
+
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    payloads = _frame(coord, hass, **_printing(1, printJobTime=5))
+
+    assert len(_live(payloads)) == 1, "the reprint got no live card"
+    assert [e for e, _ in hass.events if e.endswith("print_started")]
+    assert coord._notified_completed is False
+
+
 # --------------------------------------------------------------------------- #
 # Applying a settings change
 # --------------------------------------------------------------------------- #

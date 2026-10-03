@@ -56,6 +56,7 @@ from .notification_rules import (
     is_mobile_target,
     notify_service_slug,
     is_new_job_cycle,
+    REARM_JOB_STATES,
     render_user_template,
     TEMPLATE_FIELDS,
     notify_tag_base,
@@ -1023,15 +1024,6 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # keep publishing it raw, but a notification body should not.
         job = display_filename(fname) or fname
 
-        # 0) Started. Deliberately not tied to the frame the file name changes
-        # on: telemetry arrives incrementally, so that frame usually still holds
-        # the previous job's 100%, and firing there would announce a print
-        # beginning at 100%. Waiting for real progress means the event lands on
-        # the first frame that actually describes the new job.
-        if not self._notified_started and prog_val < 100:
-            self._notified_started = True
-            self._fire_print_event(BUS_EVENT_PRINT_STARTED, d, job)
-
         # 1) Completion
 
         # Progress falling back below 100% means a new job cycle started, even if
@@ -1045,7 +1037,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # 100 sent the completion notification twice for every print, once per
         # crossing. A drop that stays within the jitter band is only a new cycle
         # if the job clock restarted too.
-        if is_new_job_cycle(
+        if state in REARM_JOB_STATES and is_new_job_cycle(
             prog_val,
             job_restarted,
             ended_at_completion=self._notified_completed,
@@ -1056,6 +1048,17 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Same predicate, so the card and the completion notification can
             # never disagree about where one job ends and the next begins.
             self._reset_for_new_job(prog_val)
+
+        # 0) Started. Deliberately not tied to the frame the file name changes
+        # on: telemetry arrives incrementally, so that frame usually still holds
+        # the previous job's 100%, and firing there would announce a print
+        # beginning at 100%. Waiting for real progress means the event lands on
+        # the first frame that actually describes the new job. After the
+        # re-arm above, so a reprint of the same file is announced on the frame
+        # that re-arms it rather than the one after.
+        if not self._notified_started and prog_val < 100:
+            self._notified_started = True
+            self._fire_print_event(BUS_EVENT_PRINT_STARTED, d, job)
 
         # Before the one-shot events below: on the frame a print finishes this
         # ends the activity, and the completion banner then arrives on its own

@@ -407,7 +407,7 @@ Verified by reading the code end to end and by driving `_check_notifications` wi
 | Defect | Where |
 |---|---|
 | iOS receives Android's stringified payload: no Live Activity (issue #125), no local-push live handling, noisy refreshes, Stop without authentication | `coordinator.py:2240-2244`, section 8.2 |
-| A completed print whose progress later resets to 0 in `state` 0 stands up a phantom card and fires `print_started` | `coordinator.py:993-1009`, `976-978` |
+| FIXED (R10): a completed print whose progress later resets to 0 in `state` 0 stood up a phantom card and fired `print_started`. The `is_new_job_cycle` re-arm now also requires `REARM_JOB_STATES` (printing, paused, self-testing), and the started event is checked after the re-arm so a same-file reprint is announced on the frame that re-arms it | `coordinator.py` `_check_notifications` |
 | A `state` 4 stop that also resets `printJobTime` is announced twice and fires `print_started` | `coordinator.py:938-946`, `993-1003`, `1035-1045` |
 | A sticky error code or `materialStatus` fires an alert at every new print | `coordinator.py:953-954`, `1049`, `1070` |
 | Dismiss-then-banner order is not guaranteed (non-blocking service call) | `coordinator.py:2111-2115`, `2245` |

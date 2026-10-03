@@ -208,7 +208,9 @@ def test_reprinting_the_same_file_notifies_again(monkeypatch):
     assert len(sent) == 1
 
     # Same file printed again: progress drops, then climbs back to 100.
-    coord.data = {"printFileName": "job.gcode", "printProgress": 3}
+    # `state: 1`: a reprint is a running job, and only a running job re-arms
+    # (R10: the idle "processing" a finished print is left in must not).
+    coord.data = {"printFileName": "job.gcode", "printProgress": 3, "state": 1}
     _run(coord._check_notifications({}))
     assert coord._notified_completed is False
 
@@ -231,7 +233,7 @@ def test_a_genuine_zero_percent_frame_re_arms_completion(monkeypatch):
     assert coord._notified_completed is True
 
     # Reprint starts: printProgress resets, dProgress still holds the old 100.
-    coord.data = {"printFileName": "job.gcode", "printProgress": 0, "dProgress": 100}
+    coord.data = {"printFileName": "job.gcode", "printProgress": 0, "dProgress": 100, "state": 1}
     _run(coord._check_notifications({}))
     assert coord._notified_completed is False, "a real 0% must re-arm completion"
 
@@ -276,7 +278,7 @@ def test_a_new_job_does_not_notify_off_the_previous_jobs_progress(monkeypatch):
     assert sent == [], "a new job must not inherit the old job's completion"
 
     # Real progress arrives, then the job genuinely finishes.
-    coord.data = {"printFileName": "job_b.gcode", "printProgress": 4}
+    coord.data = {"printFileName": "job_b.gcode", "printProgress": 4, "state": 1}
     _run(coord._check_notifications({}))
     coord.data = {"printFileName": "job_b.gcode", "printProgress": 100}
     _run(coord._check_notifications({}))
@@ -320,7 +322,7 @@ def test_reprint_after_a_stale_startup_completion_notifies(monkeypatch):
     assert sent == []
     assert coord._notified_completed is True
 
-    coord.data = {"printFileName": "demo.gcode", "printProgress": 7}
+    coord.data = {"printFileName": "demo.gcode", "printProgress": 7, "state": 1}
     _run(coord._check_notifications({}))
     assert coord._notified_completed is False
 
@@ -374,7 +376,7 @@ def test_a_restarted_job_clock_re_arms_completion(monkeypatch):
     coord.data = {"printFileName": "job.gcode", "printProgress": 100, "printJobTime": 1200}
     _run(coord._check_notifications({}))  # baseline: already complete
 
-    coord.data = {"printFileName": "job.gcode", "printProgress": 95, "printJobTime": 4}
+    coord.data = {"printFileName": "job.gcode", "printProgress": 95, "printJobTime": 4, "state": 1}
     _run(coord._check_notifications({}))
     assert coord._notified_completed is False, "a restarted job clock is a new cycle"
 
@@ -400,6 +402,7 @@ def test_reprinting_the_same_file_notifies_again_with_a_job_clock(monkeypatch):
             "printFileName": "job.gcode",
             "printProgress": progress,
             "printJobTime": job_time,
+            "state": 1,
         }
         _run(coord._check_notifications({}))
 

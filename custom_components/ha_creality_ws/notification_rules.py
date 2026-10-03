@@ -578,6 +578,14 @@ def _milestone_of(progress: Any) -> int:
 # actually printing.
 RUNNING_JOB_STATES = frozenset({"printing", "paused"})
 
+# What may re-arm the once-per-job latches after a job ended. A finished print
+# is left as state 0 with its file name and, a while later, the progress reset
+# to 0 -- "processing", busy by the dashboard's reckoning -- and re-arming on it
+# announced a print that never started and stood a "0% Starting" live card up
+# under it, for as long as the file stayed selected. A real reprint of the same
+# file is unmistakable a moment later: it self-tests or prints.
+REARM_JOB_STATES = RUNNING_JOB_STATES | {"self-testing"}
+
 # States that say nothing about the job: the WebSocket is down, or the power
 # switch is off. A print cannot be declared stopped from a frame that only
 # means "we cannot see the printer".
