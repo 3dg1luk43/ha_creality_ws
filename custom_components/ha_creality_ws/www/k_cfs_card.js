@@ -2748,9 +2748,13 @@ class KCFSCardEditor extends HTMLElement {
 defineOnce(EDITOR_TAG, KCFSCardEditor);
 
 window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "k-cfs-card",
-  name: "Creality CFS Card",
-  preview: true,
-  description: "A card to control the Creality Filament System (CFS)"
-});
+// Once per page, like the element itself: a second copy of this module (two
+// resource entries with different ?v=) listed the card twice in the picker.
+if (!window.customCards.some((card) => card.type === "k-cfs-card")) {
+  window.customCards.push({
+    type: "k-cfs-card",
+    name: "Creality CFS Card",
+    preview: true,
+    description: "A card to control the Creality Filament System (CFS)"
+  });
+}

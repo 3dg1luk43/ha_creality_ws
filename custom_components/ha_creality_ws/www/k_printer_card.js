@@ -2117,10 +2117,14 @@ defineOnce(EDITOR_TAG, KPrinterCardEditor);
 
 try {
   window.customCards = window.customCards || [];
-  window.customCards.push({
-    type: CARD_TAG,
-    name: "Creality Printer Card",
-    description: "Standalone card for Creality K-Series printers",
-    preview: true,
-  });
+  // Once per page, like the element itself: a second copy of this module (two
+  // resource entries with different ?v=) listed the card twice in the picker.
+  if (!window.customCards.some((card) => card.type === CARD_TAG)) {
+    window.customCards.push({
+      type: CARD_TAG,
+      name: "Creality Printer Card",
+      description: "Standalone card for Creality K-Series printers",
+      preview: true,
+    });
+  }
 } catch (_) { }

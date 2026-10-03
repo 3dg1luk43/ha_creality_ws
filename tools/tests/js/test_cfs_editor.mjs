@@ -102,6 +102,23 @@ test("a value that contains another placeholder is not substituted again", () =>
   );
 });
 
+// --------------------------------------------------------------------------- //
+// The card picker (R28)
+// --------------------------------------------------------------------------- //
+
+const PRINTER_PATH = resolve(HERE, "../../../custom_components/ha_creality_ws/www/k_printer_card.js");
+
+for (const [path, type] of [[CARD_PATH, "k-cfs-card"], [PRINTER_PATH, "k-printer-card"]]) {
+  test(`a second copy of the module does not list ${type} twice`, () => {
+    // Two resource entries with different ?v= load the module twice into one
+    // page, which shares one window.customCards.
+    const customCards = [];
+    const { reload } = loadCardModule(path, { customCards });
+    reload();
+    assert.equal(customCards.filter((c) => c.type === type).length, 1);
+  });
+}
+
 const run = async () => {
   let failed = 0;
   for (const [name, fn] of tests) {
