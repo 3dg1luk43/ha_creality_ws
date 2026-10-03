@@ -350,7 +350,7 @@ Changes confined to `NOTIFY_ONLY_OPTION_KEYS` (`const.py:204-219`) are applied i
 
 ### 10.4 Option migration on every setup (`_migrate_go2rtc_settings`, `__init__.py:102-161`)
 
-Runs at `__init__.py:211` (and again after caching, `:368`, `:410`): back-fills `power_switch_enabled`, moves `go2rtc_url`/`go2rtc_port` from `data` to `options`, and **removes** `go2rtc_url`/`go2rtc_port` when they equal `localhost`/11984 (`:135-144`).
+Runs at `__init__.py:211` (and again after caching, `:368`, `:410`): back-fills `power_switch_enabled` and moves `go2rtc_url`/`go2rtc_port` from `data` to `options`. It used to also **remove** `localhost`/11984 at every setup, which defeated the camera's stand-alone go2rtc support on a Core install; removed for R18 (`test_option_migrations.py`).
 
 ---
 
@@ -362,7 +362,7 @@ All registered from `async_setup_entry` (not `async_setup`), each guarded by `ha
 
 | Field | Type | Default |
 |---|---|---|
-| `include_sensitive_data` | bool | `false` (accepted and ignored) |
+| `include_sensitive_data` | bool | `false` (turns redaction off since R9) |
 
 Since R9/R30 both this action and the standard download come from `diagnostics.py`. `printer_diagnostics` builds, per printer: entry (options, cache), connection (WebSocket stats, power, `http_urls_accessed`), printer (pause flags, camera type in use and detected, `ModelDetection` flags), notifications (targets, per-target platform as a list, live card state), the full telemetry, and every entity's registry id, state and attributes. `async_get_config_entry_diagnostics` returns it through `async_redact_data(TO_REDACT)`. The action (`SupportsResponse.OPTIONAL`) collects every printer under `printers`, adds `web_ui_urls` from a crawl of the printer's web root (action only), redacts unless `include_sensitive_data`, logs the result at WARNING between the CREALITY DIAGNOSTIC DATA markers, posts the persistent notification and returns it. `TO_REDACT` covers addresses, hostnames, MAC, notify targets, titles, unique ids, access tokens and every camera/preview attribute that carries the address (checked against a real K1C's camera attributes on the test box); entity ids are kept. Before R9 the action returned nothing, logged everything unredacted including the camera's access token, and ignored `include_sensitive_data`, while every doc said to copy its response.
 

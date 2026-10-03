@@ -51,8 +51,6 @@ from .const import (
     CONF_POWER_SWITCH_ENABLED,
     CONF_GO2RTC_URL,
     CONF_GO2RTC_PORT,
-    DEFAULT_GO2RTC_URL,
-    DEFAULT_GO2RTC_PORT,
 )
 from .coordinator import KCoordinator
 from .frontend import CrealityCardRegistration
@@ -120,16 +118,12 @@ def _migrate_go2rtc_settings(hass: HomeAssistant, entry: ConfigEntry) -> None:
             needs_update = True
             _LOGGER.info("Migrated go2rtc_url from entry.data to options")
     
-    # Clean up "bad defaults" introduced in 0.9.0
-    # If users have localhost:11984 set as custom config, remove it to restore 0.8.0 behavior (auto-discovery)
-    elif current_options.get(CONF_GO2RTC_URL) == DEFAULT_GO2RTC_URL:
-        # Check port too
-        current_port = current_options.get(CONF_GO2RTC_PORT)
-        if current_port == DEFAULT_GO2RTC_PORT:
-            _LOGGER.info("Cleaning up default go2rtc settings (restoring auto-discovery)")
-            current_options.pop(CONF_GO2RTC_URL)
-            current_options.pop(CONF_GO2RTC_PORT)
-            needs_update = True
+    # No longer strips a stored localhost:11984 (the 0.9.0 "bad default").
+    # The camera already tells Home Assistant's own go2rtc from a stand-alone
+    # one on that pair (it checks whether HA's go2rtc is loaded), and the
+    # strip ran first, at every setup: a Core install whose own go2rtc sits on
+    # the default pair lost the setting before the camera could read it, and
+    # failed with "go2rtc component not loaded" (R18).
 
     # Migrate go2rtc_port if missing or in data
     if not current_options.get(CONF_GO2RTC_PORT):
