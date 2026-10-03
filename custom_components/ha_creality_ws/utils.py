@@ -436,6 +436,19 @@ class ModelDetection:
             return can
         return "K by Creality"
 
+    def display_model(self) -> tuple[str, str | None]:
+        """The model name and model id for the device page (R80).
+
+        The K2s and the Ender 3 V3 KE report a board code as `model` ("F012"),
+        which the device page showed as the model. The name now comes from the
+        code, and the code is the model id. `resolved_model` stays as it is: the
+        model sensor shows it, and automations may compare against it.
+        """
+        name = self.canonical_model()
+        if name and self.model and self.model != name:
+            return name, str(self.model)
+        return self.resolved_model(), None
+
 
 # ---------- CFS filament helpers ----------
 

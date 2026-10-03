@@ -1,0 +1,119 @@
+{
+  "_about": "What real printers report about themselves, copied from issue logs, diagnostics and the maintainer's K1C (R48). Identity and capability fields only; hostnames are anonymised to their pattern, values otherwise as captured, types included (#50's K1 sends numbers as strings). `expect` is what the printer is, not what the integration happens to say: change it only with evidence. test_real_printers.py checks detection against it, and the simulator's profiles against the same identities.",
+  "printers": [
+    {
+      "id": "k1-1.3.3.46",
+      "source": "#106 log",
+      "frame": {
+        "model": "K1",
+        "modelVersion": "printer hw ver:;printer sw ver:;DWIN hw ver:CR4CU220812S11;DWIN sw ver:1.3.3.46;",
+        "hostname": "K1-0000",
+        "video": 1,
+        "lightSw": 1,
+        "boxTemp": 24
+      },
+      "expect": {"name": "K1", "model_id": null, "flag": "is_k1_base", "camera": "mjpeg", "simulator": "k1"}
+    },
+    {
+      "id": "k1-2.3.5.34",
+      "source": "#50 log",
+      "frame": {
+        "model": "K1",
+        "modelVersion": "printer hw ver:;printer sw ver:;DWIN hw ver:CR4CU220812S11;DWIN sw ver:2.3.5.34;",
+        "hostname": "K1-0000",
+        "webrtcSupport": 0,
+        "video": 1,
+        "cfsConnect": 1,
+        "lightSw": 1,
+        "nozzleTemp": "8.520000",
+        "bedTemp0": "17.630000",
+        "boxTemp": 18
+      },
+      "expect": {"name": "K1", "model_id": null, "flag": "is_k1_base", "camera": "mjpeg"}
+    },
+    {
+      "id": "k1c-1.3.5.22",
+      "source": "the maintainer's K1C after the 2025 firmware (#46)",
+      "frame": {
+        "model": "K1C",
+        "modelVersion": "printer hw ver:;printer sw ver:;DWIN hw ver:CR4CU220812S11;DWIN sw ver:1.3.5.22;",
+        "hostname": "K1C-0000",
+        "webrtcSupport": 1,
+        "video": 1
+      },
+      "expect": {"name": "K1C", "model_id": null, "flag": "is_k1c", "camera": "webrtc", "simulator": "k1c-1.3.5"}
+    },
+    {
+      "id": "k2pro-1.1.0.94",
+      "source": "#45 log",
+      "frame": {
+        "model": "F012",
+        "modelVersion": "printer hw ver:;printer sw ver:;DWIN hw ver:CR0CN200400C10;DWIN sw ver:1.1.0.94;",
+        "hostname": "K2Pro-0000",
+        "webrtcSupport": 1,
+        "video": 1,
+        "cfsConnect": 1,
+        "lightSw": 1,
+        "boxTemp": 24,
+        "maxBoxTemp": 60,
+        "targetBoxTemp": 0
+      },
+      "expect": {"name": "K2 Pro", "model_id": "F012", "flag": "is_k2_pro", "camera": "webrtc"}
+    },
+    {
+      "id": "k2pro-1.1.6.7",
+      "source": "#124 diagnostics",
+      "frame": {
+        "model": "F012",
+        "modelVersion": "printer hw ver:;printer sw ver:;DWIN hw ver:CR0CN200400C10;DWIN sw ver:1.1.6.7;",
+        "hostname": "K2Pro-0000",
+        "webrtcSupport": 1,
+        "video": 1,
+        "cfsConnect": 1,
+        "lightSw": 1,
+        "boxTemp": 28,
+        "maxBoxTemp": 60,
+        "targetBoxTemp": 0
+      },
+      "expect": {"name": "K2 Pro", "model_id": "F012", "flag": "is_k2_pro", "camera": "webrtc", "simulator": "k2pro"}
+    },
+    {
+      "id": "k2plus-1.1.3.13",
+      "source": "#8 log (model, modelVersion); #40 and #76 (webrtcSupport, video)",
+      "frame": {
+        "model": "F008",
+        "modelVersion": "printer hw ver:;printer sw ver:;DWIN hw ver:CR0CN240110C10;DWIN sw ver:1.1.3.13;",
+        "hostname": "K2Plus-0000",
+        "webrtcSupport": 1,
+        "video": 1
+      },
+      "expect": {"name": "K2 Plus", "model_id": "F008", "flag": "is_k2_plus", "camera": "webrtc", "simulator": "k2plus"}
+    },
+    {
+      "id": "k2-1.1.0.94",
+      "source": "#66 log",
+      "frame": {
+        "model": "F021",
+        "modelVersion": "printer hw ver:;printer sw ver:;DWIN hw ver:CR0CN200400C10;DWIN sw ver:1.1.0.94;",
+        "hostname": "K2",
+        "webrtcSupport": 1,
+        "video": 1,
+        "cfsConnect": 1,
+        "lightSw": 1,
+        "boxTemp": 27,
+        "maxBoxTemp": 60
+      },
+      "expect": {"name": "K2", "model_id": "F021", "flag": "is_k2_base", "camera": "webrtc", "simulator": "k2"}
+    },
+    {
+      "id": "e3v3ke-1.1.0.17",
+      "source": "#46 diagnostics (the cached identity)",
+      "frame": {
+        "model": "F005",
+        "modelVersion": "printer hw ver:;printer sw ver:;DWIN hw ver:F005;DWIN sw ver:V1.1.0.17;",
+        "hostname": "Ender3V3KE-0000"
+      },
+      "expect": {"name": "Ender 3 V3 KE", "model_id": "F005", "flag": "is_ender_v3_ke", "camera": "mjpeg_optional", "simulator": "e3v3ke"}
+    }
+  ]
+}

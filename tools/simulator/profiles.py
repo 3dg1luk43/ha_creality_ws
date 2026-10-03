@@ -70,7 +70,11 @@ def dwin_model_version(hw: str, sw: str) -> str:
 
 
 def board_model_version(board: str, sw: str) -> str:
-    """The K2/Ender/Hi form, with the board code the integration detects."""
+    """A guess, for the models no capture exists for (Ender 3 V3, V3 Plus, Hi).
+
+    The K2s and the Ender 3 V3 KE send the DWIN form instead, with the board
+    code in `model` (tools/tests/fixtures/printers.json).
+    """
     return f"printer hw ver:{board};printer sw ver:{sw};DWIN hw ver:;DWIN sw ver:;"
 
 
@@ -196,7 +200,7 @@ PROFILES: dict[str, Profile] = {
         key="k2",
         title="K2 (Base): chamber target via Moonraker",
         model="F021",
-        model_version=board_model_version("F021", "1.1.2.10"),
+        model_version=dwin_model_version("CR0CN200400C10", "1.1.0.94"),
         max_nozzle=350,
         max_bed=110,
         box_sensor=True,
@@ -205,17 +209,18 @@ PROFILES: dict[str, Profile] = {
         box_target_ws_zero=True,
         moonraker=True,
         camera="webrtc",
+        webrtc_support=True,
         cfs=True,
         self_test_at_print_start=True,
         stop_style="state0",
         gcode_listing="v2",
-        notes="No capture exists; shapes follow #52/#124 and the integration.",
+        notes="Identity from #66; the rest follows #52/#124 and the integration.",
     ),
     "k2pro": Profile(
         key="k2pro",
         title="K2 Pro",
         model="F012",
-        model_version=board_model_version("F012", "1.1.2.10"),
+        model_version=dwin_model_version("CR0CN200400C10", "1.1.6.7"),
         max_nozzle=350,
         max_bed=110,
         box_sensor=True,
@@ -223,6 +228,7 @@ PROFILES: dict[str, Profile] = {
         max_box=60,
         led_pin="LED",
         camera="webrtc",
+        webrtc_support=True,
         cfs=True,
         self_test_at_print_start=True,
         stop_style="state0",
@@ -232,7 +238,7 @@ PROFILES: dict[str, Profile] = {
         key="k2plus",
         title="K2 Plus",
         model="F008",
-        model_version=board_model_version("F008", "1.1.2.10"),
+        model_version=dwin_model_version("CR0CN240110C10", "1.1.3.13"),
         max_nozzle=350,
         max_bed=120,
         box_sensor=True,
@@ -240,6 +246,7 @@ PROFILES: dict[str, Profile] = {
         max_box=60,
         led_pin="LED",
         camera="webrtc",
+        webrtc_support=True,
         cfs=True,
         self_test_at_print_start=True,
         stop_style="state0",
@@ -258,7 +265,7 @@ PROFILES: dict[str, Profile] = {
         key="e3v3ke",
         title="Ender-3 V3 KE",
         model="F005",
-        model_version=board_model_version("F005", "1.1.0"),
+        model_version=dwin_model_version("F005", "V1.1.0.17"),
         light=False,
         camera="mjpeg",
         cfs_capable=False,

@@ -4,7 +4,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity #type: ig
 
 from .const import DOMAIN, MFR, MODEL
 from .coordinator import send_command
-from .utils import parse_model_version
+from .utils import ModelDetection, parse_model_version
 
 
 class KEntity(CoordinatorEntity):
@@ -106,11 +106,13 @@ class KEntity(CoordinatorEntity):
         cached_info = self._get_cached_device_info()
         if cached_info and cached_info.get("model"):
             hw_ver, sw_ver = parse_model_version(cached_info.get("modelVersion"))
+            model, model_id = ModelDetection(cached_info).display_model()
             return DeviceInfo(
                 identifiers={(DOMAIN, self._host)},
                 manufacturer=MFR,
-                model=cached_info.get("model"),
-                name=cached_info.get("hostname") or f"{cached_info.get('model')} (Creality)",
+                model=model,
+                model_id=model_id,
+                name=cached_info.get("hostname") or f"{model} (Creality)",
                 configuration_url=f"http://{self._host}/",
                 hw_version=hw_ver,
                 sw_version=sw_ver,
@@ -118,7 +120,7 @@ class KEntity(CoordinatorEntity):
         
         # Fallback to current telemetry (for backwards compatibility)
         d = self.coordinator.data or {}
-        model = d.get("model") or MODEL
+        model, model_id = ModelDetection(d).display_model() if d.get("model") else (MODEL, None)
         hostname = d.get("hostname")
 
         # Clean firmware/hardware versions
@@ -128,6 +130,7 @@ class KEntity(CoordinatorEntity):
             identifiers={(DOMAIN, self._host)},
             manufacturer=MFR,
             model=model,
+            model_id=model_id,
             name=hostname or f"{model} (Creality)",
             configuration_url=f"http://{self._host}/",
             hw_version=hw_ver,

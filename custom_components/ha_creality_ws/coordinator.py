@@ -500,9 +500,10 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _detect_k2_base(self, payload: Mapping[str, Any]) -> None:
         """Latch whether this is a K2 Base, from what has arrived so far.
 
-        Read across frames, not from this one alone: the board code is often
-        only in modelVersion, and a frame with just `model` latched False for
-        good (R41). A match decides at once; a miss only once both are known.
+        Read across frames, not from this one alone: the detector takes the
+        board code from either field, and a frame carrying only one of them
+        latched False for good (R41). A match decides at once; a miss only once
+        both are known.
         """
         if self._is_k2_base is not None or not (
             payload.get("model") or payload.get("modelVersion")

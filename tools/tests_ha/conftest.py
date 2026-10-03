@@ -67,12 +67,14 @@ class FakeClient:
     """Stands in for ws_client.KClient: no socket, frames on demand.
 
     `online` (class-wide, set before setup) decides whether a started client
-    delivers its first frame; `start_error` makes `start` raise.
+    delivers its first frame; `start_error` makes `start` raise; `overrides`
+    is laid over the K1C frame, to be another printer.
     """
 
     instances: list["FakeClient"] = []
     online = True
     start_error: Exception | None = None
+    overrides: dict[str, Any] = {}
 
     def __init__(self, host: str, on_message):
         self._host = host
@@ -82,7 +84,7 @@ class FakeClient:
         self.sent: list[dict[str, Any]] = []
         self.started = 0
         self.stopped = 0
-        self.frame = dict(K1C_FRAME)
+        self.frame = {**K1C_FRAME, **FakeClient.overrides}
         self.msg_count = 0
         self.reconnect_count = 0
         self.last_error = None
@@ -157,6 +159,7 @@ def fake_printer():
     FakeClient.instances.clear()
     FakeClient.online = True
     FakeClient.start_error = None
+    FakeClient.overrides = {}
     with (
         patch("custom_components.ha_creality_ws.coordinator.KClient", FakeClient),
         patch("custom_components.ha_creality_ws.config_flow._probe_tcp", return_value=True),

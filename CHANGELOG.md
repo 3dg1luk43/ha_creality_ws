@@ -80,6 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Print Status, Filament Status and Print Control list their possible states**, so an automation's state trigger offers them in a drop-down instead of a text field.
 - **Diagnostic entities are grouped as diagnostics**: Print Control, the maximum temperatures and the Reconnect button now sit with the other diagnostic entities, out of the main controls.
 - **The print head position sensors start disabled on new installs.** They change many times a second while printing and fill the history database for anyone who never looks at them. Existing installs keep them as they are; enable them on the device page if you want them.
+- **K2 and Ender 3 V3 KE devices show their model name.** The device page said `F012` for a K2 Pro, `F008` for a K2 Plus; it now says K2 Pro or K2 Plus, with that code as the model ID. The Model sensor still reports the code, as before.
 - **"Enable debug logging" now includes the WebSocket and go2rtc libraries**, which is where a dropped connection or a camera stream failure shows its cause.
 
 ### Internal

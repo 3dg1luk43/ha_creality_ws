@@ -67,6 +67,22 @@ async def test_setup_creates_the_device_and_its_entities(hass: HomeAssistant, fa
     assert float(hass.states.get(nozzle.entity_id).state) == 24.5
 
 
+async def test_a_k2_pro_device_is_named_by_its_model(hass: HomeAssistant, fake_printer) -> None:
+    """A K2 Pro reports its board code as the model; the device page showed
+    "F012" (R80). The model sensor keeps the reported value."""
+    fake_printer.overrides = {
+        "model": "F012",
+        "modelVersion": "printer hw ver:;printer sw ver:;DWIN hw ver:CR0CN200400C10;DWIN sw ver:1.1.6.7;",
+        "hostname": "K2Pro-0000",
+        "webrtcSupport": 1,
+    }
+    entry = await _add(hass)
+    [device] = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
+    assert (device.model, device.model_id) == ("K2 Pro", "F012")
+    model_sensor = next(e for e in _entities(hass, entry) if e.unique_id == f"{HOST}-model_info")
+    assert hass.states.get(model_sensor.entity_id).state == "F012"
+
+
 async def test_unload_stops_the_client_and_reload_starts_it_again(hass: HomeAssistant, fake_printer) -> None:
     entry = await _add(hass)
     client = fake_printer.instances[-1]
