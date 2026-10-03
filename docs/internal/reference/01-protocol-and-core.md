@@ -74,7 +74,7 @@ All anchors are `file:line` against `custom_components/ha_creality_ws/` unless a
 | Line | Symbol |
 |---|---|
 | 84 | `PLATFORMS = [sensor, camera, button, number, fan, light, image]` |
-| 88 | `_get_integration_version` (reads manifest.json in the executor) |
+| 78 | `_get_integration_version` (`async_get_integration(...).version` since R37) |
 | 102 | `_migrate_go2rtc_settings` |
 | 163 | `_core_version` |
 | 181 | `async_setup_entry` |
@@ -96,7 +96,7 @@ There is no `async_setup`, no `diagnostics.py`, no repairs, and no `runtime_data
 
 - URL: `WS_URL_TEMPLATE = "ws://{host}:9999"` (`const.py`). Since R16 the connect loop resolves the host with `loop.getaddrinfo(family=AF_INET)` (still preferring IPv4, falling back to the host as given) and `get_url()` returns the unresolved URL. Before, `socket.gethostbyname` ran on the event loop at every connect attempt and in `get_url()`, so a `.local` name could stall Home Assistant for seconds per retry. `test_no_blocking_calls.py` now flags `socket.gethostbyname` / `socket.getaddrinfo(`.
 - Handshake: `websockets.connect(url, ping_interval=None, subprotocols=["wsslicer"])` (`ws_client.py:223-227`). Library keepalive pings are disabled on purpose; liveness is app-level (section 2.4). `max_size=WS_MAX_MESSAGE_BYTES` (16 MiB) since R15: the G-code listing reply is ~150 KiB per 200 files, and the library's 1 MiB default closed the connection with 1009 on a printer holding more than ~1300 files. Everything else is the library default (`open_timeout=10`, `close_timeout=10` with websockets 15).
-- `manifest.json:12-15` declares `websockets>=10.4` and `go2rtc-client>=0.1.0` (the latter is for `camera.py`).
+- `manifest.json` declares `websockets>=10.4` and `go2rtc-client>=0.1.0` (the latter is for `camera.py`), `integration_type: device`, and `loggers` `websockets` + `go2rtc_client` so HA's debug-logging toggle covers them (R37).
 
 ### 1.2 Inbound frames (`ws_client.py:242-288`)
 

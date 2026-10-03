@@ -2,7 +2,6 @@ from __future__ import annotations
 import logging
 import asyncio
 import json
-import os
 from datetime import timedelta
 from collections.abc import Callable
 from typing import Any
@@ -76,17 +75,16 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 # Import integration version from manifest
 
 async def _get_integration_version(hass: HomeAssistant) -> str:
-    """Get current integration version from manifest.json"""
-    try:
-        manifest_path = os.path.join(os.path.dirname(__file__), "manifest.json")
-        # Use Home Assistant's async file operations
-        content = await hass.async_add_executor_job(
-            lambda: open(manifest_path, "r", encoding="utf-8").read()
-        )
+    """The integration's version, as Home Assistant loaded it (R37).
 
-        manifest = json.loads(content)
-        return manifest.get("version", "0.0.0")
-    except Exception:
+    From the loader's cached manifest rather than reading manifest.json again
+    in an executor job at every setup.
+    """
+    from homeassistant.loader import async_get_integration  # pylint: disable=import-outside-toplevel
+
+    try:
+        return str((await async_get_integration(hass, DOMAIN)).version or "0.0.0")
+    except Exception:  # pylint: disable=broad-except
         return "0.0.0"
 
 def _migrate_go2rtc_settings(hass: HomeAssistant, entry: ConfigEntry) -> None:

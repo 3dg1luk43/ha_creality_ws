@@ -23,3 +23,18 @@ def test_manifest_declares_local_push():
     data = json.loads(manifest_path.read_text())
     assert data.get("iot_class") == "local_push"
 
+
+
+def test_manifest_describes_one_device_per_entry_and_its_libraries():
+    """One printer per entry is a device integration, and `loggers` names the
+    libraries whose logging "Enable debug logging" should switch on: the
+    integration's own package is included without being listed (R37)."""
+    import json
+    from pathlib import Path
+
+    manifest = json.loads(
+        (Path(__file__).resolve().parents[2] / "custom_components/ha_creality_ws/manifest.json")
+        .read_text(encoding="utf-8")
+    )
+    assert manifest["integration_type"] == "device"
+    assert set(manifest["loggers"]) == {"websockets", "go2rtc_client"}
