@@ -182,3 +182,43 @@ def test_a_mac_in_decoded_zeroconf_properties_is_found():
 def test_raw_bytes_properties_still_work():
     info = SimpleNamespace(ip_addresses=["10.0.0.2"], properties={b"mac": b"aa:bb:cc:dd:ee:ff"})
     assert extract_info_from_zeroconf(info)[1] == "AA:BB:CC:DD:EE:FF"
+
+
+# --------------------------------------------------------------------------- #
+# Removing a device (R35)
+# --------------------------------------------------------------------------- #
+
+
+def _remove_device(identifiers):
+    import asyncio
+
+    entry = SimpleNamespace(
+        entry_id="e1", data={"host": NEW, "_cached_mac": "AA:BB", "_device_info_cached": True}
+    )
+    updates = []
+    hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_update_entry=lambda e, **kw: updates.append(kw))
+    )
+    device = SimpleNamespace(id="d1", identifiers=set(identifiers))
+    loop = asyncio.new_event_loop()
+    try:
+        allowed = loop.run_until_complete(
+            integration.async_remove_config_entry_device(hass, entry, device)
+        )
+    finally:
+        loop.close()
+    return allowed, updates
+
+
+def test_the_printers_current_device_is_not_removed():
+    """It came straight back, without its customisations, and the cached MAC
+    that rediscovery follows a new address by was wiped on the way."""
+    allowed, updates = _remove_device({(DOMAIN, NEW)})
+    assert allowed is False
+    assert updates == []
+
+
+def test_a_device_left_at_an_old_address_can_be_removed():
+    allowed, updates = _remove_device({(DOMAIN, OLD)})
+    assert allowed is True
+    assert updates == []

@@ -58,7 +58,7 @@ Written by `async_setup_entry` and read by the platform gates. Not user-editable
 
 Capability flags come from `ModelDetection` (`utils.py:191-319`): `has_chamber_control = is_k2_family` (`:300`), `has_chamber_sensor` for K1 / K1C / K1 Max / K2 family and not K1 SE / Ender V3 (`:306-308`), `has_light = not (K1 SE or Ender V3 family)` (`:313`), `supports_webrtc = webrtcSupport == 1` (`:215`).
 
-`async_remove_config_entry_device` drops every `_cached_*` key and `_device_info_cached`, including `_cached_mac` (`__init__.py:1073-1112`).
+`async_remove_config_entry_device` refuses the printer's current device and leaves the cache alone (R35); before, it dropped every `_cached_*` key, `_cached_mac` included.
 
 ---
 
@@ -346,7 +346,7 @@ A menu (`async_step_init`, `:347-371`) with four pages. Each page validates, fol
 | `camera` | `camera_mode` (select `auto`, `mjpeg`, `webrtc`, `webrtc_direct`, `custom`, translation_key `camera_mode`); `go2rtc_url`, `go2rtc_port`, `go2rtc_rtsp_port` shown for `webrtc`, `auto`, and custom go2rtc schemes; `custom_camera_url` for `custom` | `auto` replaced by `_detect_camera_type()` (`:310-345`); custom URL needs scheme `http`/`https`/`rtsp`/`rtmp`/`srt` and a hostname, else `invalid_camera_url`; go2rtc keys default to `localhost`/11984, kept only for webrtc or a go2rtc custom source and dropped otherwise; RTSP `0` removes the key | `:373-529` |
 | `notifications` | `notify_targets` (multi-select of `notify.*` services and notify entities, custom values allowed); sections `events` (`notify_live`, `notify_completed`, `notify_error`, `notify_minutes_to_end`, `minutes_to_end_value` 1-60), `extras` (`notify_actions`, `notify_preview_image`, `notify_camera_snapshot`, `notify_tap_path`), `text` (six `notify_template_*`) | templates checked against `TEMPLATE_FIELDS`, error `unknown_placeholder`; `None` never persisted; sections flattened (`:209-224`) | `:560-728` |
 | `power` | `power_switch_enabled` (bool), `power_switch` (entity: `switch`, `input_boolean`, `light`) | enabled without an entity stores `None` | `:746-788` |
-| `connection` | `host` (**entry.data**), `polling_rate` (0-60 s) | no connectivity or uniqueness check; since R4 the reload moves the device, entities and `unique_id` to the new host (section 10.2a) | `:790-811` |
+| `connection` | `host` (**entry.data**), `polling_rate` (0-60 s) | a changed host must answer on 9999 and not be another entry's (`_new_host_error`: `cannot_connect`, `host_in_use`, form keeps the typed value; R35); since R4 the reload moves the device, entities and `unique_id` to the new host (section 10.2a) | `:790-811` |
 
 Changes confined to `NOTIFY_ONLY_OPTION_KEYS` (`const.py:204-219`) are applied in place; anything else reloads the entry, retried three times on `OperationNotAllowed` (`__init__.py:971-1010`).
 

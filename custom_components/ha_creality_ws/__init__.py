@@ -45,6 +45,7 @@ from homeassistant.components.persistent_notification import (  # type: ignore[i
 )
 
 from .const import (
+    CONF_HOST,
     MINIMUM_HA_VERSION,
     DOMAIN, 
     STALE_AFTER_SECS, 
@@ -1047,42 +1048,22 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_remove_config_entry_device(hass: HomeAssistant, entry: ConfigEntry, device) -> bool:
-    """Remove a device from the device registry when requested by the user.
+    """Allow removing a device only once this printer no longer uses it (R35).
 
-    Returning True allows Home Assistant to remove the device and any associated
-    entities for this config entry. We don't keep any external resources tied
-    to the device (streams, files, etc.), so no extra cleanup is required here.
+    That is a device left at an old address, such as one an earlier version
+    doubled when the printer moved (#39). The printer's current device would
+    come straight back: removing it used to be allowed and to wipe the cached
+    model and MAC address, which reloaded the entry and re-created the device
+    without its customisations, and lost the MAC that rediscovery uses to
+    follow the printer to a new address. Removing the printer is done by
+    deleting its entry.
     """
-    try:
-        _LOGGER.info(
-            "ha_creality_ws: request to remove device %s for entry %s",
-            getattr(device, 'id', device),
-            entry.entry_id,
-        )
-
-        # If this device has our identifier (DOMAIN, host), clear cached data
-        # so that re-creating the device starts from a clean slate.
-        host: str | None = None
-        for ident in getattr(device, 'identifiers', set()):
-            if isinstance(ident, tuple) and len(ident) == 2 and ident[0] == DOMAIN:
-                host = ident[1]
-                break
-
-        if host:
-            # Drop all cached_* fields from entry.data
-            new_data = dict(entry.data)
-            removed_keys = []
-            for k in list(new_data.keys()):
-                if k.startswith("_cached_") or k == "_device_info_cached":
-                    removed_keys.append(k)
-                    new_data.pop(k, None)
-            if removed_keys:
-                hass.config_entries.async_update_entry(entry, data=new_data)
-                _LOGGER.info(
-                    "ha_creality_ws: cleared cached data on device removal for host=%s: %s",
-                    host,
-                    ", ".join(sorted(removed_keys)),
-                )
-    except Exception:
-        _LOGGER.exception("ha_creality_ws: cleanup during device removal failed")
-    return True
+    current = (DOMAIN, entry.data.get(CONF_HOST))
+    in_use = current in getattr(device, "identifiers", set())
+    _LOGGER.info(
+        "ha_creality_ws: request to remove device %s for entry %s: %s",
+        getattr(device, "id", device),
+        entry.entry_id,
+        "refused, it is the printer's current device" if in_use else "allowed",
+    )
+    return not in_use

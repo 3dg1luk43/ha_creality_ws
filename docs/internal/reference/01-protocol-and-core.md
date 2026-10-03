@@ -373,13 +373,13 @@ Since R31 `coord.async_stop` is registered with `entry.async_on_unload` right af
 
 `options_update_listener` first asks `notifications_only_change(entry.options)`: the set of keys that differ from the options the coordinator was built from must be non-empty and inside `NOTIFY_ONLY_OPTION_KEYS` (`const.py:204-219`). Then `apply_notification_options` applies in place and resyncs the live card. Anything else (including a change to `entry.data` only, since HA fires update listeners for data changes too) calls `notify_options_changed` and reloads, retrying `OperationNotAllowed` 3 times 0.5 s apart.
 
-Writers of `entry.data` after setup, each of which therefore reloads the entry: the options flow host field (`config_flow.py:795-802`, `:301-303`), the zeroconf MAC branch (`config_flow.py:156-162`, which also schedules its own reload, so two reloads), and `async_remove_config_entry_device` (`__init__.py:1095-1104`).
+Writers of `entry.data` after setup, each of which therefore reloads the entry: the options flow host field (one update with the options; checked for reachability and for another entry's address since R35) and the zeroconf rediscovery branch (one reload since R25). `async_remove_config_entry_device` no longer writes `data` (R35).
 
 ### 7.3 Unload, removal, device removal
 
 - `async_unload_entry`: unloads the platforms first; only when that succeeds does it stop the client and pop `hass.data` (R31; before, a failed unload left entities on a stopped client). `entry.async_on_unload(coord.async_stop)` also covers a setup that fails after the client started. Static paths and Lovelace resources stay.
 - `async_remove_entry` (`:1011-1053`): sends the dismiss sentinel for `_live`, `_soon`, `_alert` tags to every mobile target (the only teardown that clears phones).
-- `async_remove_config_entry_device` (`:1073-1112`): strips every `_cached_*` key and `_device_info_cached` and returns True. The data write reloads the entry, which re-caches and re-creates the same device.
+- `async_remove_config_entry_device`: since R35 refuses the device whose identifier is `(DOMAIN, entry.data[host])` (the printer's current device, which would come straight back) and allows any other, such as one an earlier version left at an old address. It used to strip every `_cached_*` key, `_cached_mac` included, and return True, so the reload re-created the same device without its customisations.
 
 ---
 

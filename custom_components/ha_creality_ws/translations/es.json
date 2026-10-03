@@ -230,7 +230,9 @@
     },
     "error": {
       "invalid_camera_url": "Introduce una URL completa incluyendo el esquema, p. ej. http://192.168.1.50:8080/?action=stream o rtsp://192.168.1.50:554/stream.",
-      "unknown_placeholder": "Ese no es un marcador de posición que esta integración pueda rellenar. Consulta la lista que aparece en la descripción de arriba y comprueba que esté bien escrito."
+      "unknown_placeholder": "Ese no es un marcador de posición que esta integración pueda rellenar. Consulta la lista que aparece en la descripción de arriba y comprueba que esté bien escrito.",
+      "cannot_connect": "No se ha podido conectar con la impresora en esta dirección. Comprueba la dirección IP y que la impresora esté encendida.",
+      "host_in_use": "Otra impresora de esta integración ya está configurada en esta dirección."
     }
   },
   "entity": {

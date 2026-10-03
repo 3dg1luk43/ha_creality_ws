@@ -756,19 +756,45 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             data_schema=vol.Schema(schema_dict),
         )
 
+    async def _new_host_error(self, host: str) -> str | None:
+        """Why `host` cannot be this printer's new address, if it cannot (R35).
+
+        Checked the way the user step checks a new printer. Without it, an
+        address another entry already uses moved this printer's device onto
+        that one's, and a typo was saved without a word and left the printer
+        unavailable.
+        """
+        for other in self.hass.config_entries.async_entries(DOMAIN):
+            if other.entry_id != self.config_entry.entry_id and host in (
+                other.unique_id,
+                other.data.get(CONF_HOST),
+            ):
+                return "host_in_use"
+        if not await _probe_tcp(host, WS_PORT):
+            return "cannot_connect"
+        return None
+
     async def async_step_connection(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Connection (IP) and performance (polling) settings."""
         self._ensure_working()
         assert self._working is not None
+        errors: dict[str, str] = {}
+        host_shown = self._working_host or ""
         if user_input is not None:
             new_host = str(user_input.get(CONF_HOST) or "").strip()
-            if new_host:
-                self._working_host = new_host
-            self._working[CONF_POLLING_RATE] = user_input.get(CONF_POLLING_RATE, DEFAULT_POLLING_RATE)
-            return await self._saved()
+            if new_host and new_host != self.config_entry.data.get(CONF_HOST):
+                error = await self._new_host_error(new_host)
+                if error:
+                    errors[CONF_HOST] = error
+                    host_shown = new_host
+            if not errors:
+                if new_host:
+                    self._working_host = new_host
+                self._working[CONF_POLLING_RATE] = user_input.get(CONF_POLLING_RATE, DEFAULT_POLLING_RATE)
+                return await self._saved()
 
         schema_dict: dict[str, Any] = {
-            vol.Optional(CONF_HOST, default=self._working_host or ""): selector.TextSelector(
+            vol.Optional(CONF_HOST, default=host_shown): selector.TextSelector(
                 selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT, autocomplete="off")
             ),
             vol.Optional(
@@ -778,4 +804,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 selector.NumberSelectorConfig(min=0, max=60, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="sec")
             ),
         }
-        return self.async_show_form(step_id="connection", data_schema=vol.Schema(schema_dict))
+        return self.async_show_form(
+            step_id="connection", data_schema=vol.Schema(schema_dict), errors=errors
+        )
