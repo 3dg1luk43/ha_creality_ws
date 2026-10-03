@@ -1258,7 +1258,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     or self._t(
                         "filament_runout",
                         device=self._notify_title(),
-                        state=self._job_state(),
+                        state=self._state_label(self._job_state()),
                     ),
                     kind=ALERT_RUNOUT,
                 )
@@ -1290,14 +1290,14 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             if 0 < left_min <= target_min and not self._notified_minutes_to_end:
                 if self._notify_minutes_to_end and deliver:
+                    # Rounded up: 40 seconds left said "0 minutes" (R33).
+                    minutes = math.ceil(left_min)
                     await self._notify_event(
-                        self._custom_message(
-                            "finishing_soon", minutes=int(left_min)
-                        )
+                        self._custom_message("finishing_soon", minutes=minutes)
                         or self._t(
                             "finishing_soon",
                             device=self._notify_title(),
-                            minutes=int(left_min),
+                            minutes=minutes,
                         ),
                         kind=EVENT_SOON,
                     )
@@ -1907,12 +1907,26 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             for key, value in (raw or {}).items()
             if key.startswith(prefix)
         }
+        # The print status sensor's state names, for a job state inside a
+        # sentence: the bare slug put English into every language (R33).
+        status_prefix = f"component.{DOMAIN}.entity.sensor.print_status.state."
+        try:
+            entity_raw = await async_get_translations(self.hass, language, "entity", {DOMAIN})
+        except Exception:  # pylint: disable=broad-except
+            entity_raw = {}
+        for key, value in (entity_raw or {}).items():
+            if key.startswith(status_prefix):
+                self._notify_strings[f"print_status.{key[len(status_prefix):]}"] = value
         if not self._notify_strings:
             _LOGGER.error(
                 "No notification strings available for language %s; "
                 "notifications are disabled until this is fixed",
                 language,
             )
+
+    def _state_label(self, state: str) -> str:
+        """A job state as the print status sensor names it, in the server's language."""
+        return (self._notify_strings or {}).get(f"print_status.{state}") or state
 
     def _t(self, key: str, /, **values: Any) -> str:
         """Resolve one translated notification string.

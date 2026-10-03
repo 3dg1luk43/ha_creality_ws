@@ -187,6 +187,33 @@ def test_minutes_to_end_reads_the_real_telemetry_field(monkeypatch):
     assert sent == [_STRINGS["finishing_soon"].format(device="1.2.3.4", minutes=2)]
 
 
+def test_the_last_minute_is_not_announced_as_zero_minutes(monkeypatch):
+    """40 seconds left was truncated to "0 minutes" (R33)."""
+    coord, sent = _coordinator(monkeypatch)
+    coord.data = {"printFileName": "job.gcode", "printProgress": 10, "printLeftTime": 3600}
+    _run(coord._check_notifications({}))
+    coord.data = {"printFileName": "job.gcode", "printProgress": 99, "printLeftTime": 40}
+    _run(coord._check_notifications({}))
+    assert sent == [_STRINGS["finishing_soon"].format(device="1.2.3.4", minutes=1)]
+
+
+def test_a_runout_names_the_print_state_in_words(monkeypatch):
+    """The bare slug ("printing") went into every language (R33)."""
+    coord, sent = _coordinator(monkeypatch)
+    frame = {"printFileName": "job.gcode", "printProgress": 40, "state": 1, "materialStatus": 0}
+    coord.data = dict(frame)
+    _run(coord._check_notifications({}))
+    coord.data = {**frame, "materialStatus": 1}
+    _run(coord._check_notifications({}))
+    status = json.loads(
+        (Path(__file__).resolve().parents[2] / "custom_components/ha_creality_ws/strings.json")
+        .read_text(encoding="utf-8")
+    )["entity"]["sensor"]["print_status"]["state"]
+    assert sent == [
+        _STRINGS["filament_runout"].format(device="1.2.3.4", state=status["printing"])
+    ]
+
+
 def test_minutes_to_end_already_inside_window_at_startup_is_silent(monkeypatch):
     coord, sent = _coordinator(monkeypatch)
     coord.data = {"printFileName": "job.gcode", "printProgress": 97, "printLeftTime": 120}

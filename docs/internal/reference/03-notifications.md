@@ -331,7 +331,7 @@ The integration's own `activity` key is read by none of the three (tests use it 
 - Durations and filament length use translated templates with pre-formatted numbers (`notification_rules.py:178-241`).
 - File names are basenamed for bodies only (`notification_rules.py:160-175`, `coordinator.py:969`).
 - Custom templates: one option per notification (`const.py:171-190`, mapping at `183-190`), allowed placeholders per notification (`notification_rules.py:253-290`), `[optional]` segments and `[[`/`]]` escapes (`notification_rules.py:296-387`). Unknown placeholders are refused by the options flow (`config_flow.py:588-603`) and fall back to the shipped text at run time with one warning per template (`coordinator.py:1784-1813`). Values come from one frame (`coordinator.py:1719-1770`).
-- `{state}` in `filament_runout` and in templates is the raw state slug (`coordinator.py:1077`, `1760`), not a translated word.
+- `{state}` in the built-in `filament_runout` is the print status sensor's state name in the server language (`_state_label`, which also loads `entity.sensor.print_status.state.*`; R33). In custom templates it stays the raw slug, as the README documents it. `finishing_soon` rounds the minutes up (40 s left is "1 min", not "0 minutes") and uses "min", since `str.format` has no plurals.
 
 ---
 

@@ -55,7 +55,7 @@
     "completed_detailed": "{device} ha terminado. Filamento consumido: {filament}.",
     "error": "Error de {device} - {key} [{code}]",
     "filament_runout": "{device} se ha quedado sin filamento. Estado de la impresión: {state}. Cambia el filamento.",
-    "finishing_soon": "{device} terminará en {minutes} minutos.",
+    "finishing_soon": "{device} terminará en {minutes} min.",
     "cfs_info_title": "Solicitud de información del CFS",
     "cfs_info_sent": "Se ha solicitado la información del CFS a {printers}.",
     "cfs_info_failed": "No se ha podido contactar con {printers}.",
