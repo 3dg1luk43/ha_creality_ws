@@ -17,9 +17,12 @@ import logging
 
 from urllib.parse import urlparse
 
-from aiohttp import ClientError, web  # type: ignore[assignment]
+from aiohttp import ClientError, ClientTimeout  # type: ignore[assignment]
 from homeassistant.core import HomeAssistant, callback  # type: ignore[assignment]
-from homeassistant.helpers.aiohttp_client import async_get_clientsession  # type: ignore[assignment]
+from homeassistant.helpers.aiohttp_client import (  # type: ignore[assignment]
+    async_aiohttp_proxy_web,
+    async_get_clientsession,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -84,6 +87,15 @@ class _BaseCamera(KEntity, Camera):
         Camera.__init__(self)
         self._last_frame: bytes | None = None
 
+    def _printer_unreachable(self) -> bool:
+        """Switched off, or silent long enough to count as gone.
+
+        Asking for a picture then only dials a dark printer: every dashboard
+        refresh waited out a timeout and, for go2rtc, logged a WARNING (seen in
+        the #121 log). The last frame is the answer instead (R38).
+        """
+        return self.coordinator.power_is_off() or not self.coordinator.available
+
     async def _fallback_image(self) -> bytes:
         """Return a fallback image when the camera is unavailable.
         
@@ -144,7 +156,37 @@ class CrealityMjpegCamera(_BaseCamera):
         self._last_snapshot_ts: float = 0.0
         self._snapshot_min_interval: float = 1.0  # seconds
         self._snapshot_lock = asyncio.Lock()
+        # mjpg-streamer serves one frame at ?action=snapshot; None until tried.
+        self._snapshot_endpoint_works: bool | None = None
         _LOGGER.debug("ha_creality_ws: MJPEG camera initialized with URL: %s", url)
+
+    def _snapshot_url(self) -> str | None:
+        """The single-frame endpoint beside this stream, if it has the usual one."""
+        if self._snapshot_endpoint_works is False or "action=stream" not in self._url:
+            return None
+        return self._url.replace("action=stream", "action=snapshot")
+
+    async def _grab_single_snapshot(self, timeout: float = 3.0) -> bytes | None:
+        """One JPEG from the snapshot endpoint, rather than opening the stream (R38).
+
+        Remembered when it does not work, so a printer without one costs one
+        extra request, once.
+        """
+        url = self._snapshot_url()
+        if url is None:
+            return None
+        session = async_get_clientsession(self.hass)
+        try:
+            async with session.get(url, timeout=ClientTimeout(total=timeout)) as resp:
+                data = await resp.read() if resp.status == 200 else b""
+        except (ClientError, asyncio.TimeoutError):
+            # Not remembered: a timeout says more about the printer than the endpoint.
+            return None
+        works = self._is_valid_jpeg(data)
+        if self._snapshot_endpoint_works is None:
+            self._snapshot_endpoint_works = works
+            _LOGGER.debug("ha_creality_ws: MJPEG snapshot endpoint %s", "works" if works else "not available")
+        return data if works else None
 
     def _is_valid_jpeg(self, data: bytes) -> bool:
         """Validate JPEG image data.
@@ -174,7 +216,7 @@ class CrealityMjpegCamera(_BaseCamera):
         """
         session = async_get_clientsession(self.hass)
         try:
-            async with session.get(self._url, timeout=timeout) as resp:
+            async with session.get(self._url, timeout=ClientTimeout(total=timeout)) as resp:
                 if resp.status != 200:
                     return None
                 buf = bytearray()
@@ -192,7 +234,9 @@ class CrealityMjpegCamera(_BaseCamera):
                     j = buf.find(b"\xff\xd9", tail_start)  # EOI
                     if j != -1:
                         return bytes(buf[: j + 2])
-        except (asyncio.CancelledError, ClientError, asyncio.TimeoutError):
+        # CancelledError is not caught: swallowing it kept a cancelled request
+        # running and broke the caller's timeout (R38).
+        except (ClientError, asyncio.TimeoutError):
             return None
         except Exception:  # pragma: no cover - defensive
             _LOGGER.exception("ha_creality_ws: unexpected error grabbing MJPEG snapshot")
@@ -231,15 +275,17 @@ class CrealityMjpegCamera(_BaseCamera):
         if self._last_frame and (now - self._last_snapshot_ts) < self._snapshot_min_interval:
             return self._last_frame
 
-        # Only try grabbing a fresh frame when the printer is powered
-        if not self.coordinator.power_is_off():
+        # Only try grabbing a fresh frame when the printer can answer
+        if not self._printer_unreachable():
             async with self._snapshot_lock:
                 # Check throttle again inside the lock
                 now = asyncio.get_running_loop().time()
                 if self._last_frame and (now - self._last_snapshot_ts) < self._snapshot_min_interval:
                     return self._last_frame
                 try:
-                    frame = await self._grab_snapshot_from_mjpeg(timeout=5.0)
+                    frame = await self._grab_single_snapshot() or await self._grab_snapshot_from_mjpeg(
+                        timeout=5.0
+                    )
                 except Exception:  # pragma: no cover - defensive
                     _LOGGER.exception("ha_creality_ws: unexpected error while fetching MJPEG snapshot")
                     frame = None
@@ -265,55 +311,17 @@ class CrealityMjpegCamera(_BaseCamera):
         return frame
 
     async def handle_async_mjpeg_stream(self, request):
-        """Handle live MJPEG streaming requests.
-        
-        This method provides live MJPEG streaming by proxying the printer's
-        MJPEG stream directly to the client. It handles connection errors
-        gracefully and provides appropriate HTTP status codes.
-        
-        Args:
-            request: aiohttp request object
-            
-        Returns:
-            web.Response: HTTP response with MJPEG stream or error
+        """Proxy the printer's MJPEG stream to the browser.
+
+        Through Home Assistant's own proxy (R38). The hand-rolled one opened
+        the upstream with no timeout at all, so a printer that stopped sending
+        held the request, and its connection, open for good; it also swallowed
+        the cancellation of a viewer who left. The helper gives up after 10
+        seconds without data, stops at shutdown and answers 502/504 when the
+        printer cannot be reached.
         """
         session = async_get_clientsession(self.hass)
-        try:
-            upstream = await session.get(self._url, timeout=None)
-        except ClientError:
-            _LOGGER.warning("ha_creality_ws: upstream MJPEG connection failed to %s", self._url)
-            return web.Response(status=502, text="Upstream camera connection failed")
-        except Exception:
-            _LOGGER.exception("ha_creality_ws: unexpected error opening upstream MJPEG %s", self._url)
-            return web.Response(status=502, text="Upstream camera error")
-
-        try:
-            if upstream.status != 200:
-                txt = await upstream.text(errors="ignore")
-                _LOGGER.warning("ha_creality_ws: upstream MJPEG returned status=%s text=%s", upstream.status, txt[:200])
-                return web.Response(status=upstream.status, text=txt)
-
-            ctype = upstream.headers.get("Content-Type", "multipart/x-mixed-replace;boundary=frame")
-            resp = web.StreamResponse(status=200, headers={"Content-Type": ctype})
-            await resp.prepare(request)
-
-            try:
-                async for chunk in upstream.content.iter_chunked(8192):
-                    await resp.write(chunk)
-            except (ClientError, ConnectionResetError, asyncio.CancelledError):
-                pass
-            except Exception:
-                _LOGGER.exception("ha_creality_ws: error while streaming MJPEG from %s", self._url)
-            finally:
-                await upstream.release()
-            return resp
-        except Exception:
-            _LOGGER.exception("ha_creality_ws: unexpected error handling MJPEG stream from %s", self._url)
-            try:
-                await upstream.release()
-            except Exception:
-                pass
-            return web.Response(status=502, text="Upstream camera error")
+        return await async_aiohttp_proxy_web(self.hass, request, session.get(self._url))
 
 
 class CrealityWebRTCCamera(_BaseCamera):
@@ -726,6 +734,10 @@ class CrealityWebRTCCamera(_BaseCamera):
         # Direct-signaling cameras have no go2rtc snapshot endpoint; the live
         # WebRTC stream is the deliverable. Serve a best-effort fallback frame.
         if not self._uses_go2rtc_webrtc_bridge():
+            return await self._fallback_image()
+
+        # go2rtc would dial the printer and time out on every refresh (R38).
+        if self._printer_unreachable():
             return await self._fallback_image()
 
         # Ensure stream is configured and client is initialized

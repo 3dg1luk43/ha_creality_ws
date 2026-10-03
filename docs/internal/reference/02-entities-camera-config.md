@@ -221,8 +221,8 @@ Both classes use unique_id `<host>-camera` and translation_key `printer_camera` 
 
 ### 7.1 `CrealityMjpegCamera` (`camera.py:119-316`)
 
-* Still image: opens the MJPEG URL and cuts the first `FFD8..FFD9` frame (`:162-200`), 5 s timeout, 1 s throttle and a lock (`:229-250`). Skipped while `power_is_off()` (`:235`).
-* Live: proxies the upstream multipart stream chunk by chunk with `timeout=None` (`:267-316`).
+* Still image (R38): first mjpg-streamer's `?action=snapshot` beside an `?action=stream` URL (3 s; whether it works is remembered after the first answer), else the first `FFD8..FFD9` frame cut from the stream (5 s). 1 s throttle and a lock. Skipped, returning the last frame, while `_printer_unreachable()` (switched off or coordinator unavailable). `CancelledError` propagates.
+* Live: `async_aiohttp_proxy_web` (Home Assistant's helper: 10 s per read, stops at shutdown, 502/504 on connect failure) since R38; it was a hand-rolled proxy with `timeout=None` that swallowed cancellation. Checked on the test box through a custom URL pointing at the mock's `:8000/stream.mjpeg`.
 * No `supported_features`, no `stream_source`.
 
 ### 7.2 `CrealityWebRTCCamera` (`camera.py:319-1422`)

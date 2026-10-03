@@ -171,6 +171,15 @@ aiohttp_client_mod = types.ModuleType("homeassistant.helpers.aiohttp_client")
 def async_get_clientsession(hass):
     return None
 setattr(aiohttp_client_mod, "async_get_clientsession", async_get_clientsession)
+
+
+async def async_aiohttp_proxy_web(hass, request, web_coro, buffer_size=102400, timeout=10):
+    """Home Assistant's MJPEG proxy; tests that exercise it patch in their own."""
+    web_coro.close()
+    return None
+
+
+setattr(aiohttp_client_mod, "async_aiohttp_proxy_web", async_aiohttp_proxy_web)
 sys.modules["homeassistant.helpers.aiohttp_client"] = aiohttp_client_mod
 setattr(helpers_mod, "aiohttp_client", aiohttp_client_mod)
 
