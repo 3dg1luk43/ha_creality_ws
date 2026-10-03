@@ -1006,8 +1006,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if getattr(self, "_last_filename", None) != fname:
             self._last_filename = fname
             self._notified_minutes_to_end = False
-            self._notified_filament_runout = False
-            self._last_error_code = 0
+            # Baselined to what the printer reports now, exactly as priming
+            # does, not cleared. A fault that outlives the job before it is not
+            # news: a Hi stuck on error 116 for two days alerted, with a
+            # snapshot, at the start of every print (#125). One that appears,
+            # or clears and comes back, during this job still alerts.
+            self._notified_filament_runout = self._runout_reported(d)
+            self._last_error_code = self._error_code(d)
             # Baseline completion off the progress we can actually see, exactly
             # as _prime_notification_state does. Telemetry arrives incrementally,
             # so the frame that first carries the new file name usually still
@@ -1119,11 +1124,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # 3) Filament runout (materialStatus == 1). Shares the error toggle,
         # being an error-like state the user wants to hear about together.
-        try:
-            mat_status = d.get("materialStatus")
-            is_runout = mat_status is not None and int(mat_status) == 1
-        except (ValueError, TypeError):
-            is_runout = False
+        is_runout = self._runout_reported(d)
 
         if is_runout and not self._notified_filament_runout:
             if self._notify_error and deliver:
@@ -1626,6 +1627,14 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return int((d.get("err") or {}).get("errcode", 0))
         except (AttributeError, ValueError, TypeError):
             return 0
+
+    @staticmethod
+    def _runout_reported(d: dict[str, Any]) -> bool:
+        try:
+            mat_status = d.get("materialStatus")
+            return mat_status is not None and int(mat_status) == 1
+        except (ValueError, TypeError):
+            return False
 
     def _notify_action_ids(self) -> dict[str, str]:
         """Action ids for this printer, namespaced by config entry."""

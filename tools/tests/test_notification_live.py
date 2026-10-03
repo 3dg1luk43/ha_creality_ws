@@ -482,14 +482,16 @@ def test_a_stale_error_code_does_not_pin_the_card_to_error():
     one the printer never clears -- which would freeze the card for a whole
     print and stop every later progress push."""
     coord, hass = _coordinator()
+    # The print is under way when the fault appears (a fault already present
+    # when a job's file first shows up is that job's baseline, R12).
+    assert len(_live(_frame(coord, hass, **_printing(10)))) == 1
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
     frame = _printing(20, err={"errcode": 521, "key": 1})
     payloads = _frame(coord, hass, **frame)
 
     # The alert still fires, once, off the code *changing*.
     alerts = [p for p in payloads if p["data"]["tag"].endswith("_alert")]
     assert len(alerts) == 1
-    # ...and the card still tracks the print.
-    assert len(_live(payloads)) == 1
 
     coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
     later = _live(_frame(coord, hass, **_printing(40, err={"errcode": 521, "key": 1})))
@@ -1121,6 +1123,8 @@ def test_a_recovered_printer_has_its_alert_taken_away():
     """A lock screen still reading "filament runout" after the user reloaded is
     actively misleading, and nothing else shares that tag to supersede it."""
     coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(39))
+    coord.hass.loop.advance(1)
     _frame(coord, hass, **_printing(40, materialStatus=1))
     assert coord._alert_showing is True
 
@@ -1135,6 +1139,8 @@ def test_one_condition_resolving_does_not_dismiss_the_others_alert():
     """Errors and runouts share a tag, so clearing on the first to resolve
     would take away an alert that is still true."""
     coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(39))
+    coord.hass.loop.advance(1)
     _frame(coord, hass, **_printing(40, materialStatus=1, err={"errcode": 521, "key": 1}))
     coord.hass.loop.advance(1)
 
@@ -1453,6 +1459,56 @@ def test_a_stop_reported_with_its_clock_reset_is_announced_once():
     assert len(stopped) == 1, f"stop announced {len(stopped)} times"
     assert started == []
     assert len(_events(payloads)) == 1
+
+
+def _alerts(payloads):
+    return [p for p in payloads if p["data"]["tag"].endswith("_alert")]
+
+
+STUCK = {"err": {"errcode": 500, "key": 116}}
+
+
+def test_an_error_the_printer_never_clears_alerts_once_not_every_print():
+    """R12, #125 finding 3. A Hi reported error 116 [500] for two days, through
+    every print. Each new file reset the baseline to "no error", so every print
+    start alerted (with a snapshot) and fired print_error again."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(19))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    first = _frame(coord, hass, **_printing(20, **STUCK))
+    assert len(_alerts(first)) == 1
+    hass.events.clear()
+
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    second = _frame(coord, hass, **_printing(1, printFileName="/usr/data/printer_data/gcodes/next.gcode", printJobTime=5, **STUCK))
+    assert _alerts(second) == []
+    assert [e for e, _ in hass.events if e.endswith("print_error")] == []
+
+
+def test_an_error_that_appears_during_the_next_print_still_alerts():
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(19))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    _frame(coord, hass, **_printing(20, **STUCK))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    _frame(coord, hass, **_printing(1, printFileName="/usr/data/printer_data/gcodes/next.gcode", printJobTime=5, **STUCK))
+    # It clears, then a different fault arrives mid-print.
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    _frame(coord, hass, **_printing(5, printFileName="/usr/data/printer_data/gcodes/next.gcode", printJobTime=50))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    fresh = _frame(coord, hass, **_printing(6, printFileName="/usr/data/printer_data/gcodes/next.gcode", printJobTime=60, err={"errcode": 521, "key": 1}))
+    assert len(_alerts(fresh)) == 1
+
+
+def test_a_runout_flag_left_set_does_not_alert_at_the_next_print():
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(19))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    first = _frame(coord, hass, **_printing(20, materialStatus=1))
+    assert len(_alerts(first)) == 1
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    second = _frame(coord, hass, **_printing(1, printFileName="/usr/data/printer_data/gcodes/next.gcode", printJobTime=5, materialStatus=1))
+    assert _alerts(second) == []
 
 
 # --------------------------------------------------------------------------- #
