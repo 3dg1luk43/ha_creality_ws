@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Printers with a large library of files kept dropping the connection**: the list of files the printer sends when a print starts was cut off at 1 MB, about 1300 files, and the connection was closed and reopened instead, three times for every new print. Lists up to 16 MB are accepted now.
 - **Reloading the integration cut off anyone watching a K2 or WebRTC camera** ([#88](https://github.com/3dg1luk43/ha_creality_ws/issues/88)): go2rtc describes a stream that is being watched differently from one that is idle, the integration took that for a wrong setup, and deleted and recreated the stream under the viewers. A stream that is already serving the printer is now left alone.
 - **A go2rtc server you run yourself on the default address was forgotten at every restart**: on a Home Assistant install without its own go2rtc, a camera pointed at `localhost:11984` lost that setting each time the integration started, and the camera failed with "go2rtc component not loaded". The setting is now kept.
+- **The CFS card said "Saved" when the printer never received the change**: if the printer could not be reached, the material change was dropped but the action still reported success, so the card showed "Saved". It now reports the failure, and the card says the save failed. With several printers selected, the reachable ones are still updated.
 
 ## 0.9.8 - 2026-09-26
 > [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)

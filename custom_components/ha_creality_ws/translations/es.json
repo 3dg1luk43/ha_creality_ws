@@ -59,6 +59,9 @@
   "exceptions": {
     "unsupported_ha_version": {
       "message": "Esta versión de la integración Creality WebSocket necesita Home Assistant {minimum} o posterior, pero este sistema ejecuta la versión {running}. Actualiza Home Assistant o instala en su lugar la versión 0.9.7 de la integración."
+    },
+    "cfs_material_write_failed": {
+      "message": "No se ha cambiado el material del CFS en {printers}: {error}"
     }
   },
   "selector": {

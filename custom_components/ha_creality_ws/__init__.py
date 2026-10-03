@@ -11,7 +11,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry, OperationNotAllowed # type: ignore[import]
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback # type: ignore[import]
-from homeassistant.exceptions import ConfigEntryNotReady  # type: ignore[import]
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError  # type: ignore[import]
 try:
     from homeassistant.exceptions import ConfigEntryError  # type: ignore[import]
     _CONFIG_ENTRY_ERROR_TRANSLATES = True
@@ -709,12 +709,14 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
                     "material while the printer is busy."
                 )
 
+        failed: list[tuple[str, Exception]] = []
         for coord in targets:
             host = coord.client.host
             try:
                 _LOGGER.debug("Sending modifyMaterial to %s: %s", host, payload)
                 await coord.client.send_set_retry(modifyMaterial=payload)
             except Exception as exc:
+                failed.append((host, exc))
                 _LOGGER.error("Failed to set CFS material for %s: %s", host, exc)
                 pn_async_create(
                     hass,
@@ -738,6 +740,20 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
                 notification_id=f"cfs_material_update_{host}",
             )
             hass.async_create_task(_log_material_echo(coord, payload))
+
+        # After every target has been tried: one unreachable printer must not
+        # stop the others being written, but the caller has to learn that a
+        # write failed. Returning normally made the CFS card report "Saved"
+        # for a change that never reached the printer (R19).
+        if failed:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="cfs_material_write_failed",
+                translation_placeholders={
+                    "printers": ", ".join(host for host, _ in failed),
+                    "error": str(failed[0][1]),
+                },
+            )
 
     async def _log_material_echo(coord: KCoordinator, payload: dict[str, Any]) -> None:
         """Log what the printer actually stored after a material write.

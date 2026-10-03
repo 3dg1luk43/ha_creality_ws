@@ -101,7 +101,13 @@ def _load_integration():
     state.set_attr(core, "ServiceCall", ServiceCall)
 
     class HomeAssistantError(Exception):
-        pass
+        # Home Assistant's takes the translation keywords; a bare Exception
+        # would turn a translated raise into a TypeError.
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args)
+            self.translation_domain = kwargs.get("translation_domain")
+            self.translation_key = kwargs.get("translation_key")
+            self.translation_placeholders = kwargs.get("translation_placeholders")
 
     class ServiceValidationError(HomeAssistantError):
         pass
@@ -492,8 +498,10 @@ def test_an_inverted_temperature_range_raises(integration):
 
 
 @requires_voluptuous
-def test_a_printer_failure_notifies_and_does_not_raise(integration):
-    """One unreachable printer must not abort the whole service call."""
+def test_a_printer_failure_still_writes_the_others_then_raises(integration):
+    """One unreachable printer must not stop the others being written, but the
+    caller has to learn of the failure. Returning normally made the CFS card
+    report "Saved" for a write that never reached the printer (R19)."""
     _module, notifications, _ = integration
     notifications.clear()
     good = FakeCoordinator("reachable", IDLE)
@@ -502,9 +510,13 @@ def test_a_printer_failure_notifies_and_does_not_raise(integration):
         integration, {"e1": bad, "e2": good}, {"d1": _device("e1"), "d2": _device("e2")}
     )
     _register(integration, hass)
-    _call_service(integration, hass, services, {
-        "device_id": ["d1", "d2"], "box_id": 1, "slot_id": 0, "type": "PLA",
-    })
+    error_cls = sys.modules["homeassistant.exceptions"].HomeAssistantError
+    with pytest.raises(error_cls) as raised:
+        _call_service(integration, hass, services, {
+            "device_id": ["d1", "d2"], "box_id": 1, "slot_id": 0, "type": "PLA",
+        })
+    assert raised.value.translation_key == "cfs_material_write_failed"
+    assert raised.value.translation_placeholders["printers"] == "unreachable"
     assert good.client.sent, "the reachable printer must still be written"
     titles = [n.get("title") for n in notifications]
     assert any("Failed" in str(t) for t in titles), titles
@@ -522,9 +534,11 @@ def test_each_printer_gets_its_own_notification_id(integration):
         integration, {"e1": bad, "e2": good}, {"d1": _device("e1"), "d2": _device("e2")}
     )
     _register(integration, hass)
-    _call_service(integration, hass, services, {
-        "device_id": ["d1", "d2"], "box_id": 1, "slot_id": 0, "type": "PLA",
-    })
+    # One write failed, so the call raises (R19), after notifying both.
+    with pytest.raises(sys.modules["homeassistant.exceptions"].HomeAssistantError):
+        _call_service(integration, hass, services, {
+            "device_id": ["d1", "d2"], "box_id": 1, "slot_id": 0, "type": "PLA",
+        })
     ids = [n.get("notification_id") for n in notifications]
     assert len(ids) == len(set(ids)), f"notification ids collide: {ids}"
     assert "cfs_material_error_unreachable" in ids, ids
@@ -543,7 +557,8 @@ def test_a_successful_retry_dismisses_the_earlier_failure(integration):
     _register(integration, hass)
     call = {"device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA"}
 
-    _call_service(integration, hass, services, call)
+    with pytest.raises(sys.modules["homeassistant.exceptions"].HomeAssistantError):
+        _call_service(integration, hass, services, call)
     assert any("Failed" in str(n.get("title")) for n in notifications)
     assert notifications.dismissed == [], "nothing to dismiss yet"
 
