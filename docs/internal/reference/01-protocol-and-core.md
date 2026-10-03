@@ -234,7 +234,7 @@ The cumulative `_state` (`:55`) is never cleared for the lifetime of the `KClien
 5. `_recompute_paused_from_telemetry` (`:712`, `:468-474`), which can itself call `async_update_listeners` on a change.
 6. `job_state = _job_state()` once (`:715`), `derive_activity_state` with the current power/availability/paused flag (`:446-466`).
 7. `_flush_pending(job_state)` inside try/except (`:718-721`, section 3.6).
-8. `await _check_notifications(payload)` (`:724`), **not** inside a try/except. An exception here aborts the rest of the frame, including the listener update; `ws_client.py:285-286` logs it.
+8. `await _check_notifications(payload)` inside try/except since R14. Before, an exception here aborted the rest of the frame, including the listener update, so entities froze on stale values while still available.
 9. `await _maybe_request_gcode_info()` (`:729`), deliberately above the throttle.
 10. Moonraker poll on a K2 Base every `MR_POLL_INTERVAL` (30 s), as an HA task (`:732-736`, section 3.5).
 11. Throttle: if `polling_rate > 0` and the job is busy, skip `async_update_listeners` unless `polling_rate` seconds passed since the last update (`:740-746`). Default `polling_rate = 0` (`const.py:315`) means every frame updates every entity.

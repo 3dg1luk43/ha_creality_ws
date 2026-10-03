@@ -778,7 +778,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.exception("flush_pending failed")
 
         # --- Notifications ---
-        await self._check_notifications(payload)
+        # Guarded like the queue above. An exception here used to skip the
+        # rest of the frame, the entity update included, on every frame it
+        # recurred: entities froze on stale values while still "available".
+        try:
+            await self._check_notifications(payload)
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("Notification check failed")
 
         # --- Sliced G-code metadata ---
         # Must stay above the throttle below, which returns early while printing

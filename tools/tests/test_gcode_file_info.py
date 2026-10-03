@@ -536,3 +536,22 @@ def test_a_failed_static_add_lets_a_later_pass_retry_the_estimates():
     for cb in connected:
         cb()
     assert _estimate_names(added) == ESTIMATE_KEYS
+
+
+# --- the frame path keeps going ------------------------------------------- #
+
+
+def test_a_failing_notification_check_does_not_freeze_the_entities(coord, monkeypatch):
+    """R14. `_check_notifications` ran unguarded, so an exception in it skipped
+    the rest of the frame, including the listener update, on every frame it
+    recurred: the entities sat on stale values while still showing available."""
+    updates = []
+    monkeypatch.setattr(coord, "async_update_listeners", lambda: updates.append(1))
+
+    async def _boom(_payload):
+        raise RuntimeError("a notification bug")
+
+    monkeypatch.setattr(coord, "_check_notifications", _boom)
+    _feed(coord, {"nozzleTemp": 210})
+    assert updates == [1]
+    assert coord.data["nozzleTemp"] == 210
