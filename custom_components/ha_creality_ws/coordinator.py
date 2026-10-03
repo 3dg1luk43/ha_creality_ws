@@ -13,6 +13,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send  # type: igno
 from homeassistant.helpers import entity_registry as er  # type: ignore[import]
 from homeassistant.helpers.translation import async_get_translations  # type: ignore[import]
 from homeassistant.util import slugify  # type: ignore[import]
+from homeassistant.exceptions import HomeAssistantError  # type: ignore[import]
 from .ws_client import KClient
 from .utils import (
     BUSY_PRINT_STATES,
@@ -2281,7 +2282,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if title:
                     entity_data["title"] = title
                 await self.hass.services.async_call(
-                    "notify", "send_message", entity_data
+                    "notify", "send_message", entity_data, blocking=True
                 )
                 return
 
@@ -2322,7 +2323,18 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 else:
                     service_data["data"] = stringify_data(data)
                     _warn_on_unsendable(service_data["data"], target)
-            await self.hass.services.async_call(domain, service, service_data)
+            # Blocking, so the call has finished when this returns. Without it
+            # core only schedules a task and returns: a dismissal and the
+            # banner meant to replace it went out concurrently on the same tag,
+            # a slow dismissal could take the banner down with it, and no
+            # failure ever reached the except below. Safe here: every caller
+            # runs this in its own task, off the WebSocket receive loop.
+            await self.hass.services.async_call(
+                domain, service, service_data, blocking=True
+            )
+        except HomeAssistantError as err:
+            # Rejected by the notify platform: one line, not a traceback.
+            _LOGGER.warning("Notification to %s was refused: %s", target, err)
         except Exception:  # pylint: disable=broad-except
             # One unreachable phone must not starve the others.
             _LOGGER.exception("Failed to send notification to %s", target)

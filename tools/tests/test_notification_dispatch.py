@@ -228,6 +228,60 @@ def test_an_unidentified_target_gets_the_android_safe_strings():
     assert sent["data"]["live_update"] == "true"
 
 
+def test_the_dismissal_lands_before_the_banner_that_replaces_it():
+    """R13. Core's async_call without blocking=True only schedules the call and
+    returns, so the dismissal and the banner on the same tag were in flight at
+    once; a dismissal slower than the banner arrived second and took the banner
+    down with it. Modelled the way core behaves, with a slow relay for the
+    dismissal: non-blocking calls run as their own tasks, blocking ones are
+    awaited."""
+    coord, hass = _coordinator(["notify.mobile_app_pixel"])
+    arrived: list[str] = []
+
+    async def _relay(service_data):
+        slow = service_data["message"] == CLEAR_NOTIFICATION_MARKER
+        await asyncio.sleep(0.05 if slow else 0.01)
+        arrived.append("clear" if slow else "banner")
+
+    async def _core_like_call(domain, service, data, blocking=False, **_kw):
+        if blocking:
+            await _relay(data)
+        else:
+            asyncio.get_running_loop().create_task(_relay(data))
+
+    hass.services.async_call = _core_like_call
+    coord._replace_card_with(
+        {"title": "K1C", "message": "Finished", "data": {"tag": "ha_creality_ws_x_live"}},
+        kind="completed",
+    )
+
+    async def _settle():
+        await asyncio.gather(*hass.tasks)
+        await asyncio.sleep(0.1)
+
+    _run(_settle())
+    assert arrived == ["clear", "banner"]
+
+
+def test_a_refused_notification_is_one_warning_not_a_traceback(caplog):
+    """With the call blocking, the platform's refusal now reaches us."""
+    import logging
+
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, hass = _coordinator(["notify.mobile_app_pixel"])
+
+    async def _refuse(*_a, **_kw):
+        raise HomeAssistantError("rate limit exceeded")
+
+    hass.services.async_call = _refuse
+    with caplog.at_level(logging.WARNING):
+        coord._notify_dispatch(RICH)
+        _run(asyncio.gather(*hass.tasks))
+    assert "was refused: rate limit exceeded" in caplog.text
+    assert "Traceback" not in caplog.text
+
+
 def test_a_notify_entity_routes_to_send_message_without_data():
     """`notify.send_message` is the only service for entity targets and its
     schema has no `data` field, so extras have to be dropped rather than sent."""
