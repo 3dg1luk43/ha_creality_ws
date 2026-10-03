@@ -235,3 +235,44 @@ def test_power_switch_logic():
 
 def teardown_module(_module):
     restore_stubs(__name__)
+
+
+# --------------------------------------------------------------------------- #
+# R41
+# --------------------------------------------------------------------------- #
+
+
+def test_a_refresh_request_returns_the_pushed_telemetry():
+    """`homeassistant.update_entity` on any entity failed with
+    NotImplementedError: there was no update method to call."""
+    async def run():
+        coord = KCoordinator(HassStub(), host="dummy")
+        coord.data = {"nozzleTemp": 210}
+        assert await coord._async_update_data() == {"nozzleTemp": 210}
+
+    asyncio.run(run())
+
+
+def test_the_k2_base_is_recognised_when_its_board_code_comes_later():
+    """A frame with only `model` latched "not a K2 Base" for good, so the
+    chamber target was never read from Moonraker."""
+    async def run():
+        coord = KCoordinator(HassStub(), host="dummy")
+        coord._detect_k2_base({"model": "K2"})
+        coord.data = {"model": "K2"}
+        assert coord._is_k2_base is None
+        coord._detect_k2_base({"modelVersion": "printer hw ver:F021;printer sw ver:1.1.0;"})
+        assert coord._is_k2_base is True
+
+    asyncio.run(run())
+
+
+def test_another_printer_is_settled_once_both_fields_are_known():
+    async def run():
+        coord = KCoordinator(HassStub(), host="dummy")
+        coord._detect_k2_base({"model": "K1C"})
+        coord.data = {"model": "K1C"}
+        coord._detect_k2_base({"modelVersion": "DWIN sw ver:1.3.5.22;"})
+        assert coord._is_k2_base is False
+
+    asyncio.run(run())

@@ -497,6 +497,32 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return await self.client.wait_first_connect(timeout=10.0)
         return True
         
+    def _detect_k2_base(self, payload: Mapping[str, Any]) -> None:
+        """Latch whether this is a K2 Base, from what has arrived so far.
+
+        Read across frames, not from this one alone: the board code is often
+        only in modelVersion, and a frame with just `model` latched False for
+        good (R41). A match decides at once; a miss only once both are known.
+        """
+        if self._is_k2_base is not None or not (
+            payload.get("model") or payload.get("modelVersion")
+        ):
+            return
+        seen = {**(self.data or {}), **payload}
+        if ModelDetection(seen).is_k2_base:
+            self._is_k2_base = True
+        elif seen.get("model") and seen.get("modelVersion"):
+            self._is_k2_base = False
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        """What a refresh request returns: the telemetry already pushed.
+
+        The printer pushes everything, so there is nothing to fetch. Without
+        this, `homeassistant.update_entity` on any of the entities (and every
+        automation or card that calls it) failed with NotImplementedError (R41).
+        """
+        return self.data if self.data is not None else {}
+
     async def async_stop(self) -> None:
         """Stop the WebSocket connection."""
         await self.client.stop()
@@ -876,10 +902,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # frame that carried neither left a real K2 Base without the suppression
         # and without the Moonraker poll -- the only source of its targetBoxTemp --
         # so the chamber target snapped back to 0 after every set.
-        if self._is_k2_base is None and (
-            payload.get("model") or payload.get("modelVersion")
-        ):
-            self._is_k2_base = ModelDetection(payload).is_k2_base
+        self._detect_k2_base(payload)
              
         if (payload.get("targetBoxTemp") == 0) and self._is_k2_base:
             payload.pop("targetBoxTemp")
