@@ -72,7 +72,7 @@ Rules:
 
 ## Development setup
 
-Python 3.11 or 3.13; CI runs the suite on both.
+Python 3.13 or 3.14; CI runs the suite on both (3.14 is what Home Assistant runs). `tools/requirements.txt` installs the test suite and the printer simulator; `tools/requirements-test.txt` is the test suite alone, as CI installs it.
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/ha_creality_ws.git

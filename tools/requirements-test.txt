@@ -1,0 +1,8 @@
+# The test suite, as CI installs it (tests.yml, release.yml). Pinned so a new
+# release of one of these cannot turn the suite red overnight; bump on purpose.
+pytest==9.1.1
+# test_cfs_material_service.py executes the service schema; Home Assistant
+# brings voluptuous itself.
+voluptuous==0.16.0
+# test_issue_validator_workflow.py reads the workflow it tests.
+PyYAML==6.0.3

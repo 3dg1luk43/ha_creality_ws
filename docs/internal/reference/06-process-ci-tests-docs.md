@@ -24,7 +24,7 @@ All JS actions are pinned by SHA. `hassfest` is deliberately unpinned (`@master`
 
 | File | Trigger | What it does | Permissions | Gaps |
 |---|---|---|---|---|
-| `tests.yml` | push to any branch, `pull_request`, nightly 02:15 UTC, dispatch | `pip install pytest voluptuous pyyaml`, `python -m pytest` on 3.11 and 3.13, with node 20 for the card harnesses | `contents: read` | No 3.14 (what HA runs). Node 20 is EOL (2026-04-30). Deps unpinned, `tools/requirements.txt` unused. No `timeout-minutes`. Same-repo PRs run twice (push + PR). |
+| `tests.yml` | push to any branch, `pull_request`, nightly 02:15 UTC, dispatch | `pip install -r tools/requirements-test.txt` (pinned), `python -m pytest` on 3.13 and 3.14, with node 22 for the card harnesses (R49) | `contents: read` | Same-repo PRs run twice (push + PR). |
 | `hassfest.yml` | push (all refs incl. tags), PR, nightly, dispatch | `home-assistant/actions/hassfest@master` | `contents: read` | None material. |
 | `validate.yaml` | push, PR, nightly, dispatch | `hacs/action@1ebf01c` (main, 2026-06-08), category integration | `{}` | `.yaml` extension where every other file is `.yml`. |
 | `release.yml` | tag push `v*`, dispatch (`tag` input) | Job `preflight` runs `tools/release_check.sh [--tag]` on 3.13. Job `draft` (tag push only) cuts the CHANGELOG section into notes and runs `gh release create --draft --verify-tag`. `--prerelease` is added if the tag contains `-`. A release that already exists is left alone. | `contents: read`, `draft` job `contents: write` | No check that the tag commit is on `origin/main`. `v*` also matches the junk tags. A release created in the UI is verified only after it is public. |
@@ -278,7 +278,7 @@ Pyright is not useful until a real `homeassistant` package is installed.
 | `tools/h264_timing.py` | yes | clip timestamp maths, split out for testing | tested via the simulator tests |
 | `webrtc_test_server.sh` | yes, **repo root** | starts/stops the simulator as k2plus with a one-year print | writes `.webrtc_test_server.{pid,log}` to the root; tooling is meant to live in `tools/` |
 | `tools/release_check.sh` | yes | release preflight (section 2.2) | also what CI runs |
-| `tools/requirements.txt` | yes | simulator plus test deps | lists `pytest-asyncio`, which no test uses, but not `pytest` itself; CI ignores the file |
+| `tools/requirements.txt` | yes | local work: `-r requirements-test.txt` plus the simulator's runtime (R49) | `requirements-test.txt` is what CI installs, pinned |
 | `tools/test_files/` | **no (ignored)** | `deploy_to_ha.sh`, a 137 MB HA log (2025-11-09), K1C WS captures, a HAR, go2rtc OpenAPI, Go WebRTC clients, `internal_docs/` | `deploy_to_ha.sh:17-18` holds the production HA URL and a **plaintext long-lived token**. It was never committed: `git log --all -S` finds nothing. |
 | `backups/` | no (ignored) | 215 snapshot directories, 75 MB, written by `deploy_to_ha.sh` | inside the work tree |
 

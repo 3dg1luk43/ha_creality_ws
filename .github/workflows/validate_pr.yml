@@ -21,13 +21,14 @@ jobs:
   check-completeness:
     name: Check PR Description
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Comments and labels the PR (issues API) and closes it when template is absent (pulls API).
     permissions:
       issues: write
       pull-requests: write
     steps:
       - name: Validate PR template completeness
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -141,13 +142,14 @@ jobs:
   check-issue-link:
     name: Check Linked Accepted Issue
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Reads PR files/issues and may comment on and close the PR.
     permissions:
       issues: write
       pull-requests: write
     steps:
       - name: Verify PR is linked to an accepted issue
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
