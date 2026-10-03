@@ -759,6 +759,10 @@ class KCFSCard extends HTMLElement {
         50% { opacity: 0.7; transform: scale(1.1); }
       }
 
+      @media (prefers-reduced-motion: reduce) {
+        .status-badge { animation: none; }
+      }
+
       /* === COMPACT MODE === */
       .compact-mode {
         padding: 14px;
@@ -876,14 +880,16 @@ class KCFSCard extends HTMLElement {
         gap: 2px;
       }
 
-      .env-mini .temp {
-        color: #ffb74d;
+      /* The hue says warm, dry or damp; the theme's text colour carries the
+         contrast. The bare #ffb74d was 1.73:1 on a light theme (R42). */
+      .env-mini .temp, .env-temp {
+        color: color-mix(in srgb, #ffb74d 45%, var(--primary-text-color));
         font-weight: 600;
       }
 
-      .env-mini .hum {
+      .env-mini .hum, .env-hum {
+        color: color-mix(in srgb, var(--hum-color, #64b5f6) 45%, var(--primary-text-color));
         font-weight: 600;
-        /* Cor aplicada dinamicamente via inline style */
       }
 
       /* === EXTERNAL SECTION === */
@@ -1550,7 +1556,7 @@ class KCFSCard extends HTMLElement {
     const env = [];
     if (box?.temp && box.temp !== "-") env.push(`<span class="env-temp">${esc(box.temp)}</span>`);
     if (box?.humidity && box.humidity !== "-") {
-      env.push(`<span class="env-hum" style="color: ${KCFSCard._sanitizeColor(box.humidityColor)}">${esc(box.humidity)}</span>`);
+      env.push(`<span class="env-hum" style="--hum-color: ${KCFSCard._sanitizeColor(box.humidityColor)}">${esc(box.humidity)}</span>`);
     }
 
     return `
@@ -1598,7 +1604,7 @@ class KCFSCard extends HTMLElement {
 
       if (tempStr || humStr) {
         const tempHtml = tempStr ? `<span class="env-temp">${esc(tempStr)}</span>` : '';
-        const humHtml = humStr ? `<span class="env-hum" style="color: ${KCFSCard._sanitizeColor(selectedBox.humidityColor)}">${esc(humStr)}</span>` : '';
+        const humHtml = humStr ? `<span class="env-hum" style="--hum-color: ${KCFSCard._sanitizeColor(selectedBox.humidityColor)}">${esc(humStr)}</span>` : '';
         const separator = tempStr && humStr ? ' <span style="color: var(--divider-color)">•</span> ' : '';
         envInfo = `<div class="env-info">${tempHtml}${separator}${humHtml}</div>`;
       }
@@ -1709,7 +1715,7 @@ class KCFSCard extends HTMLElement {
       envHtml = `
         <div class="env-mini">
           ${tempStr ? `<div class="temp">${esc(tempStr)}</div>` : ''}
-          ${humStr ? `<div class="hum" style="color: ${KCFSCard._sanitizeColor(box.humidityColor)}">${esc(humStr)}</div>` : ''}
+          ${humStr ? `<div class="hum" style="--hum-color: ${KCFSCard._sanitizeColor(box.humidityColor)}">${esc(humStr)}</div>` : ''}
         </div>
       `;
     }
@@ -2012,6 +2018,9 @@ class KCFSCard extends HTMLElement {
 
     const toast = document.createElement("div");
     toast.className = "cfs-toast";
+    // Announced by screen readers without taking focus (R42).
+    toast.setAttribute("role", "status");
+    toast.setAttribute("aria-live", "polite");
     toast.textContent = message;
     this._root.appendChild(toast);
     this._toastEl = toast;
@@ -2076,11 +2085,14 @@ class KCFSCard extends HTMLElement {
     dialog.setAttribute("aria-modal", "true");
     dialog.setAttribute("aria-label", this._t("dialog_edit_title"));
     dialog.tabIndex = -1;
-    overlay.appendChild(dialog);
 
+    // Back to whatever opened the dialog afterwards, so a keyboard user is not
+    // dropped at the top of the page (R42).
+    const opener = this._root.activeElement || null;
     const close = () => {
       overlay.removeEventListener("keydown", onKeyDown);
       if (overlay.remove) overlay.remove();
+      if (opener && opener.focus) opener.focus();
     };
     const onKeyDown = (ev) => {
       if (ev.key === "Escape" || ev.key === "Esc") {
@@ -2088,6 +2100,26 @@ class KCFSCard extends HTMLElement {
         close();
       }
     };
+    // Tab stays inside the dialog: it is modal, and focus wandering to the
+    // card behind it left a keyboard user editing an invisible page (R42).
+    // Sentinels rather than counting fields, because ha-form keeps its inputs
+    // in its own shadow root where the dialog cannot see which one has focus.
+    const sentinel = (onFocus) => {
+      const el = document.createElement("span");
+      el.tabIndex = 0;
+      el.className = "focus-sentinel";
+      el.addEventListener("focus", onFocus);
+      return el;
+    };
+    const before = sentinel(() => {
+      const buttons = Array.from(dialog.querySelectorAll("button")).filter((btn) => !btn.disabled);
+      const last = buttons[buttons.length - 1];
+      if (last && last.focus) last.focus();
+    });
+    const after = sentinel(() => dialog.focus && dialog.focus());
+    overlay.appendChild(before);
+    overlay.appendChild(dialog);
+    overlay.appendChild(after);
     overlay.addEventListener("keydown", onKeyDown);
     overlay.addEventListener("click", (ev) => { if (ev.target === overlay) close(); });
 
@@ -2598,7 +2630,8 @@ class KCFSCardEditor extends HTMLElement {
     const style = `
       .editor-container { padding: 16px; }
       .tabs { display: flex; border-bottom: 1px solid var(--divider-color); margin-bottom: 16px; }
-      .tab { padding: 8px 16px; cursor: pointer; border-bottom: 2px solid transparent; }
+      .tab { padding: 8px 16px; cursor: pointer; border: none; border-bottom: 2px solid transparent; background: none; color: inherit; font: inherit; }
+      .tab:focus-visible { outline: 2px solid var(--primary-color); outline-offset: -2px; }
       .tab.active { border-bottom-color: var(--primary-color); color: var(--primary-color); }
       .tab-content { display: none; }
       .tab-content.active { display: block; }
@@ -2608,9 +2641,9 @@ class KCFSCardEditor extends HTMLElement {
     this._root.innerHTML = `
       <style>${style}</style>
       <div class="editor-container">
-        <div class="tabs">
-          <div class="tab active" data-tab="entities" id="tab-entities"></div>
-          <div class="tab" data-tab="theme" id="tab-theme"></div>
+        <div class="tabs" role="tablist">
+          <button type="button" class="tab active" role="tab" aria-selected="true" data-tab="entities" id="tab-entities"></button>
+          <button type="button" class="tab" role="tab" aria-selected="false" data-tab="theme" id="tab-theme"></button>
         </div>
         <div class="tab-content active" id="entities-tab">
           <ha-form id="form"></ha-form>
@@ -2644,9 +2677,13 @@ class KCFSCardEditor extends HTMLElement {
     const contents = this._root.querySelectorAll(".tab-content");
     tabs.forEach((tab) => {
       tab.onclick = () => {
-        tabs.forEach((t) => t.classList.remove("active"));
+        tabs.forEach((t) => {
+          t.classList.remove("active");
+          t.setAttribute("aria-selected", "false");
+        });
         contents.forEach((c) => c.classList.remove("active"));
         tab.classList.add("active");
+        tab.setAttribute("aria-selected", "true");
         this._root.getElementById(`${tab.dataset.tab}-tab`).classList.add("active");
       };
     });

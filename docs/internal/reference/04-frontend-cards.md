@@ -263,7 +263,7 @@ No `getGridOptions`/`getLayoutOptions`: in a sections view the card gets HA's de
 
 `--primary-text-color`, `--secondary-text-color`, `--card-background-color`, `--primary-color`, `--error-color`, `--success-color` (fallback `#4caf50`), `--info-color` (fallback `#2196f3`). Hard-coded: paused colour `#fc6d09` (`:316`), the chip defaults above, pill background `rgba(127,127,127,.12)` and border `rgba(255,255,255,0.08)` (invisible on light themes), unknown chip `rgba(128,128,128,.14)`.
 
-Chips are `<button>` with `title` only (accessible name from `title`), and `.chip` sets `outline:none` (`:596`) with no `:focus-visible` replacement.
+Chips are `<button>` with `title` and `aria-label`; `.chip` drops the outline for mouse clicks but `.chip:focus-visible` and `.title.click:focus-visible` draw a 2 px `--primary-color` ring (R42). Off-state icon colours default to `auto` (the theme's text colour) instead of `#000`, which was 2.26:1 on a dark theme.
 
 ### Entity resolution
 
@@ -373,11 +373,11 @@ Clicking a spool, bay or external row opens more-info for its entity (`:2436-244
 1. **Device resolution** (`_resolveDeviceId`, `:1830-1898`): every configured entity's `device_id` from `hass.entities`; ids not in it are asked through `config/entity_registry/get` in parallel. Fails closed: zero or more than one device, or any failed lookup, sets `_deviceIdError` (`toast_no_device` / `toast_multiple_devices`). Generation-guarded against a `setConfig` landing mid-await.
 2. **Busy lock** (`_statusEntityId` `:1936-1959`, `_isPrinterBusy` `:1970-1975`): the device's entity with platform `ha_creality_ws` and `translation_key` `print_status`; busy states `printing, paused, processing, self-testing` (`:213-218`, cross-checked against `utils.BUSY_PRINT_STATES` by `test_card_busy_states_match_the_integration`). Only a hit is memoised.
 3. **Edit button** (`_renderEditButton`, `:1710-1734`): real `<button>` with escaped `title`/`aria-label`; blocked states use `aria-disabled="true"` (not `disabled`) so a click can explain the block via toast. Hover-reveal only under `@media (hover: hover)` (`:1054-1066`); `:focus-visible` ring (`:1067-1071`).
-4. **Dialog** (`_showEditDialog`, `:2021-2072`): an `.edit-overlay` (`position: fixed; z-index: 100`) appended to the card's shadow root, `role="dialog"`, `aria-modal`, Escape and backdrop click close it. Focus goes to the dialog; there is no focus trap and focus is not restored on close. The body (`_renderEditForm`, `:2085-2232`) is an `ha-form` for type, name, vendor, min/max temp (150-300 / 150-350 C), pressure (0-1), bounds cross-checked against `services.yaml`, plus a hand-built colour row (native colour input + hex text). Multi-colour spools get a disabled colour row.
+4. **Dialog** (`_showEditDialog`, `:2021-2072`): an `.edit-overlay` (`position: fixed; z-index: 100`) appended to the card's shadow root, `role="dialog"`, `aria-modal`, Escape and backdrop click close it. Focus goes to the dialog; two `.focus-sentinel` spans around it keep Tab inside (past the end returns to the dialog, before the start goes to the last button), and closing returns focus to the element that opened it (R42). Sentinels, because `ha-form` hides its inputs in its own shadow root. The body (`_renderEditForm`, `:2085-2232`) is an `ha-form` for type, name, vendor, min/max temp (150-300 / 150-350 C), pressure (0-1), bounds cross-checked against `services.yaml`, plus a hand-built colour row (native colour input + hex text). Multi-colour spools get a disabled colour row.
 5. **Presets** (`_renderPresets`, `:2244-2329`; `ColourPresetsManager`, `:118-183`): 12 Creality standard colours plus user presets in localStorage `k-cfs-colour-presets`, one shared store per page (`sharedPresets`, `:194-198`), created lazily. Custom presets are deleted by right-click (`contextmenu`) only. `rename()` (`:156-163`) has no caller outside tests.
 6. **Save** (`_saveMaterial`, `:2335-2402`): validates type, temperature order and 6-digit hex; calls `ha_creality_ws.set_cfs_material` with `device_id, box_id, slot_id, type` and the optional `name, vendor, color, min_temp, max_temp, pressure, rfid`; then `ha_creality_ws.request_cfs_info`. Errors become toasts.
 
-Toasts (`_showToast`, `:1978-1995`): one at a time, 4 s, `position: absolute` at the bottom of the card host, `z-index: 110` (above the overlay, guarded by `test_a_toast_is_stacked_above_the_edit_overlay`), no `role="status"`/`aria-live`.
+Toasts (`_showToast`, `:1978-1995`): one at a time, 4 s, `position: absolute` at the bottom of the card host, `z-index: 110` (above the overlay, guarded by `test_a_toast_is_stacked_above_the_edit_overlay`), `role="status"` and `aria-live="polite"` (R42).
 
 ### Layout and sizing
 
@@ -501,3 +501,10 @@ Identical or near-identical in both files: the whole i18n block (section 3), `de
 2. README YAML example uses `light: switch.k1c_light`, `box: sensor.k1c_box_temperature`, `layer: sensor.k1c_working_layer`, `time_left: sensor.k1c_print_time_left`; the integration's roles are a `light.` entity, `chamber_temperature`, `current_layer` and `print_left_time` (`DEVICE_ROLE_ENTITIES`, `k_printer_card.js:74-88`).
 3. README YAML-mode resource block lists only `k_printer_card.js`; the CFS card is reachable in YAML mode only because `_init_resource` falls back to `add_extra_js_url`.
 4. `CrealityCardRegistration` docstrings (`frontend.py:213-217`, `:223-227`) describe serving one card and not touching resources; the code serves two cards and creates/updates resources.
+
+## Accessibility (R42, 2026-10-03)
+
+- **Contrast.** CFS temperature and humidity are `color-mix(in srgb, <hue> 45%, var(--primary-text-color))`. The humidity hue comes in through `--hum-color`, still through `_sanitizeColor`. Measured in Chromium on the test box: 5.1-7.0:1 on the default light theme, 8.3-11.4:1 on dark. It was 1.73:1 for the temperature on light.
+- **Editor tabs.** Both editors' tabs are `<button role="tab">` inside a `role="tablist"`, with `aria-selected` kept in step and a focus ring.
+- **Motion.** The CFS status pulse stops under `prefers-reduced-motion: reduce`.
+- **Tests.** `tools/tests/js/test_accessibility.mjs` covers all of the above.

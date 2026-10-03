@@ -65,6 +65,7 @@ test("every shipped default is a colour the editor can read", () => {
     assert.ok(sandbox.parseColor(value), `${key} default is unreadable: ${value}`);
   }
   assert.deepEqual(autos.sort(), [
+    "custom_icon_off", "light_icon_off", "power_icon_off",
     "progress_ring", "status_bg", "status_icon", "telemetry_icon", "telemetry_text",
   ], "the set of automatic fields moved");
 });
@@ -136,7 +137,7 @@ test("colours the new editor added default in without touching the old ones", ()
   // power_* and the custom off-state were never in an old config.
   const card = cardWith({ theme: { pause_bg: "rgba(252, 109, 9, 0.9)" } });
   assert.equal(card._cfg.theme.power_on_bg, "rgba(76, 175, 80, .90)");
-  assert.equal(card._cfg.theme.custom_icon_off, "#000");
+  assert.equal(card._cfg.theme.custom_icon_off, "auto");
   assert.equal(card._cfg.theme.pause_bg, "rgba(252, 109, 9, 0.9)");
 });
 

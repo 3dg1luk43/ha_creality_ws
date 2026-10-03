@@ -359,6 +359,11 @@ function computeColor(status) {
   return "var(--secondary-text-color)";
 }
 
+/** A theme colour, or `fallback` when it is unset or "auto". */
+function autoColour(value, fallback) {
+  return !value || value === "auto" ? fallback : value;
+}
+
 class KPrinterCard extends HTMLElement {
   static getStubConfig() {
     return {
@@ -387,7 +392,9 @@ class KPrinterCard extends HTMLElement {
         resume_icon: "#fff",
         stop_icon: "#fff",
         light_icon_on: "#000",
-        light_icon_off: "#000",
+        // "auto": the theme's text colour. A fixed black was 2.26:1 against the
+        // off-state grey on a dark theme (R42).
+        light_icon_off: "auto",
         // Status icon and progress circle
         status_icon: "auto", // auto, or specific color
         progress_ring: "auto", // auto, or specific color
@@ -401,13 +408,13 @@ class KPrinterCard extends HTMLElement {
         // Off-state colours for the custom button, used when it drives a
         // toggleable entity (switch/light/input_boolean).
         custom_off_bg: "rgba(150,150,150,.35)",
-        custom_icon_off: "#000",
+        custom_icon_off: "auto",
         // Power button. The chip CSS has always read these, but nothing ever
         // set them, so the button was the one chip the theme could not reach.
         power_on_bg: "rgba(76, 175, 80, .90)",
         power_off_bg: "rgba(150,150,150,.35)",
         power_icon_on: "#fff",
-        power_icon_off: "#000",
+        power_icon_off: "auto",
       },
       // Config for custom button
       custom_btn: "",
@@ -592,7 +599,7 @@ class KPrinterCard extends HTMLElement {
         --resume-icon: ${theme.resume_icon || '#fff'};
         --stop-icon: ${theme.stop_icon || '#fff'};
         --light-icon-on: ${theme.light_icon_on || '#000'};
-        --light-icon-off: ${theme.light_icon_off || '#000'};
+        --light-icon-off: ${autoColour(theme.light_icon_off, 'var(--primary-text-color)')};
         --status-bg: ${theme.status_bg === 'auto' ? 'radial-gradient(var(--card-background-color) 62%, transparent 0)' : (theme.status_bg || 'radial-gradient(var(--card-background-color) 62%, transparent 0)')};
         --telemetry-icon: ${theme.telemetry_icon === 'auto' ? 'var(--secondary-text-color)' : (theme.telemetry_icon || 'var(--secondary-text-color)')};
         --telemetry-text: ${theme.telemetry_text === 'auto' ? 'var(--primary-text-color)' : (theme.telemetry_text || 'var(--primary-text-color)')};
@@ -600,11 +607,11 @@ class KPrinterCard extends HTMLElement {
         --custom-on-bg: ${theme.custom_on_bg || theme.custom_bg || 'rgba(33, 150, 243, .90)'};
         --custom-off-bg: ${theme.custom_off_bg || 'rgba(150,150,150,.35)'};
         --custom-icon: ${theme.custom_icon || '#fff'};
-        --custom-icon-off: ${theme.custom_icon_off || '#000'};
+        --custom-icon-off: ${autoColour(theme.custom_icon_off, 'var(--primary-text-color)')};
         --power-on-bg: ${theme.power_on_bg || 'rgba(76, 175, 80, .90)'};
         --power-off-bg: ${theme.power_off_bg || 'rgba(150,150,150,.35)'};
         --power-icon-on: ${theme.power_icon_on || '#fff'};
-        --power-icon-off: ${theme.power_icon_off || '#000'};
+        --power-icon-off: ${autoColour(theme.power_icon_off, 'var(--primary-text-color)')};
       }
     `;
 
@@ -665,6 +672,11 @@ class KPrinterCard extends HTMLElement {
         font-size:.8rem; background:var(--chip-bg, rgba(128,128,128,.14));
         color:var(--chip-fg, var(--primary-text-color));
         cursor:pointer; user-select:none; border:none; outline:none;
+      }
+      /* The outline is removed for mouse clicks only: a keyboard user has to
+         see where focus is (R42). */
+      .chip:focus-visible, .title.click:focus-visible {
+        outline: 2px solid var(--primary-color); outline-offset: 2px;
       }
       .chip[hidden]{ display:none !important; }
       .chip:active { transform: translateY(1px); }
@@ -1214,7 +1226,7 @@ class KPrinterCard extends HTMLElement {
     uniqueOrder.forEach(key => {
       const btn = buttons[key];
       if (btn && !btn.hidden) {
-        chipsHtml += `<button class="chip ${btn.class}" id="${key}" title="${btn.title}"><ha-icon icon="${btn.icon}"></ha-icon></button>`;
+        chipsHtml += `<button class="chip ${btn.class}" id="${key}" title="${btn.title}" aria-label="${btn.title}"><ha-icon icon="${btn.icon}"></ha-icon></button>`;
       }
     });
 
@@ -1429,15 +1441,15 @@ const THEME_COLOR_GROUPS = [
       { key: "light_on_bg", alpha: true },
       { key: "light_icon_on" },
       { key: "light_off_bg", alpha: true },
-      { key: "light_icon_off" },
+      { key: "light_icon_off", auto: true, seed: "#000000" },
       { key: "power_on_bg", alpha: true },
       { key: "power_icon_on" },
       { key: "power_off_bg", alpha: true },
-      { key: "power_icon_off" },
+      { key: "power_icon_off", auto: true, seed: "#000000" },
       { key: "custom_bg", alpha: true },
       { key: "custom_icon" },
       { key: "custom_off_bg", alpha: true },
-      { key: "custom_icon_off" },
+      { key: "custom_icon_off", auto: true, seed: "#000000" },
     ],
   },
   {
@@ -1493,7 +1505,8 @@ const EDITOR_STYLE = `
   .editor-container { padding: 16px; max-width: 1200px; margin: 0 auto; }
   .editor-title { margin: 0 0 16px 0; font-size: 18px; color: var(--primary-text-color); }
   .tabs { display: flex; border-bottom: 1px solid var(--divider-color); margin-bottom: 16px; }
-  .tab { padding: 8px 16px; cursor: pointer; border-bottom: 2px solid transparent; }
+  .tab { padding: 8px 16px; cursor: pointer; border: none; border-bottom: 2px solid transparent; background: none; color: inherit; font: inherit; }
+  .tab:focus-visible { outline: 2px solid var(--primary-color); outline-offset: -2px; }
   .tab.active { border-bottom-color: var(--primary-color); color: var(--primary-color); }
   .tab-content { display: none; }
   .tab-content.active { display: block; }
@@ -1739,9 +1752,9 @@ class KPrinterCardEditor extends HTMLElement {
       <style>${EDITOR_STYLE}</style>
       <div class="editor-container">
         <h2 class="editor-title" id="editor-title"></h2>
-        <div class="tabs">
-          <div class="tab active" data-tab="entities" id="tab-entities"></div>
-          <div class="tab" data-tab="theme" id="tab-theme"></div>
+        <div class="tabs" role="tablist">
+          <button type="button" class="tab active" role="tab" aria-selected="true" data-tab="entities" id="tab-entities"></button>
+          <button type="button" class="tab" role="tab" aria-selected="false" data-tab="theme" id="tab-theme"></button>
         </div>
 
         <div class="tab-content active" id="entities-tab">
@@ -1825,6 +1838,7 @@ class KPrinterCardEditor extends HTMLElement {
   _selectTab(name) {
     for (const tab of this._root.querySelectorAll(".tab")) {
       tab.classList.toggle("active", tab.dataset.tab === name);
+      tab.setAttribute("aria-selected", String(tab.dataset.tab === name));
     }
     for (const content of this._root.querySelectorAll(".tab-content")) {
       content.classList.toggle("active", content.id === `${name}-tab`);

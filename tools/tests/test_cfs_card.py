@@ -69,7 +69,7 @@ def test_the_javascript_suites_are_discoverable():
         # The printer card runs in the same sandbox; see test_printer_card_editor.py.
         "test_printer_editor.mjs", "test_printer_telemetry.mjs",
         "test_printer_migration.mjs", "test_printer_render.mjs", "test_cfs_editor.mjs",
-        "test_card_language.mjs",
+        "test_card_language.mjs", "test_accessibility.mjs",
     ):
         assert expected in JS_SUITES, f"{expected} is missing from {JS_SUITES}"
 

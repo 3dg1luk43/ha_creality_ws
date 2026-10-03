@@ -233,7 +233,7 @@ test("cancel closes the dialog", async () => {
   const { card } = await setup();
   card._showEditDialog(SLOT);
   assert.equal(overlays(card).length, 1);
-  const form = overlays(card)[0].children[0].children[0];
+  const form = overlays(card)[0].children.find((c) => c.className === "edit-dialog").children[0];
   const cancel = form.children.find((c) => c.className === "dialog-actions")
     .children.find((b) => b.className === "dialog-btn secondary");
   cancel._listeners.click.forEach((fn) => fn({}));
