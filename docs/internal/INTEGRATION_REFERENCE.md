@@ -268,6 +268,7 @@ Source column points at the deep-dive section with the full scenario and fix.
 | R73 | M | On the test box every iOS live-card push is a Live Activity START, because no app registers an activity token; on a real phone the first START is followed by UPDATEs. Relevant to #125 part 2 (R70): if a START is lost or the stored token is stale, nothing recovers. | test box, core `live_activity/__init__.py` |
 | R74 | L | `close_done_issues.yml` is identical in ha_washdata, so the "owner comment is last" hazard (R8) exists there too. Outside this repo. | `/root/ha_washdata/.github/workflows/close_done_issues.yml` |
 | R75 | L | The test box's mock printer serves MJPEG on `:8000/stream.mjpeg` while the integration reads `:8080/?action=stream` (R48), so the MJPEG camera path is untested there. | `tools/creality_printer_test_server.py` |
+| R76 | L | Every save in the CFS card leaves two notifications in the bell: `set_cfs_material` posts "CFS material changed" and the card's follow-up `request_cfs_info` posts "CFS information request". The card already shows its own toast, and the action now raises on failure (R19), so the success notifications only duplicate it. Found while translating them (R33); behaviour kept, needs a decision: drop the success notifications, or keep them only for calls that do not come from the card. | `__init__.py` `request_cfs_info`, `set_cfs_material`; `k_cfs_card.js` save path |
 
 ## 8. Index of deep-dive files
 
