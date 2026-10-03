@@ -6,6 +6,8 @@ These tests import the *real* KClient (not the conftest stub) and patch
 from __future__ import annotations
 
 import asyncio
+import pytest
+import json
 import importlib
 import importlib.util
 import sys
@@ -355,6 +357,48 @@ def test_normal_loop_connects_when_power_on():
             "websockets.connect should have been called at least once "
             "during a normal loop iteration when power is ON"
         )
+
+    asyncio.run(run())
+
+
+def test_a_large_file_listing_is_received_not_a_disconnect():
+    """R15. The printer answers the G-code listing request with every file in
+    one frame, about 150 KiB per 200 files. Left at the websockets default of
+    1 MiB, a printer with a large library had the connection closed with code
+    1009 on each listing, and the coordinator asks three times per new file.
+    Driven against a real websockets server, so the library's own limit is
+    what is tested."""
+    real_websockets = pytest.importorskip("websockets")
+    if not hasattr(real_websockets, "serve"):
+        pytest.skip("the websockets package is stubbed in this environment")
+
+    async def run():
+        listing = [{"name": f"part_{i:05d}.gcode", "size": 123456} for i in range(50000)]
+        frame = json.dumps({"retGcodeFileInfo2": listing, "nozzleTemp": 210})
+        assert len(frame) > 2 * 2**20  # comfortably over the old 1 MiB default
+
+        async def handler(ws):
+            await ws.send(frame)
+            await ws.wait_closed()
+
+        received: list[dict] = []
+
+        async def _on_msg(payload):
+            received.append(payload)
+
+        async with real_websockets.serve(handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            client = KClient("127.0.0.1", _on_msg)
+            client._url = lambda: f"ws://127.0.0.1:{port}"
+            await client.start()
+            for _ in range(40):
+                if received:
+                    break
+                await asyncio.sleep(0.05)
+            await client.stop()
+
+        assert received, "the listing never arrived (closed with 1009)"
+        assert len(received[0]["retGcodeFileInfo2"]) == 50000
 
     asyncio.run(run())
 

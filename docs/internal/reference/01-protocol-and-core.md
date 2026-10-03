@@ -95,7 +95,7 @@ There is no `async_setup`, no `diagnostics.py`, no repairs, and no `runtime_data
 ### 1.1 Transport
 
 - URL: `WS_URL_TEMPLATE = "ws://{host}:9999"` (`const.py:20-23`), host resolved through `socket.gethostbyname` on every connect attempt (`ws_client.py:52`, `:176-180`, `:219`). `gethostbyname` is IPv4 only and blocks the event loop when `host` is a name rather than an IP.
-- Handshake: `websockets.connect(url, ping_interval=None, subprotocols=["wsslicer"])` (`ws_client.py:223-227`). Library keepalive pings are disabled on purpose; liveness is app-level (section 2.4). Everything else is the library default; with the websockets 15 in `.venv` that is `open_timeout=10`, `close_timeout=10`, `max_size=2**20` (1 MiB).
+- Handshake: `websockets.connect(url, ping_interval=None, subprotocols=["wsslicer"])` (`ws_client.py:223-227`). Library keepalive pings are disabled on purpose; liveness is app-level (section 2.4). `max_size=WS_MAX_MESSAGE_BYTES` (16 MiB) since R15: the G-code listing reply is ~150 KiB per 200 files, and the library's 1 MiB default closed the connection with 1009 on a printer holding more than ~1300 files. Everything else is the library default (`open_timeout=10`, `close_timeout=10` with websockets 15).
 - `manifest.json:12-15` declares `websockets>=10.4` and `go2rtc-client>=0.1.0` (the latter is for `camera.py`).
 
 ### 1.2 Inbound frames (`ws_client.py:242-288`)
@@ -432,7 +432,7 @@ Targets resolve through `_coordinators_for_devices` (`:508-540`), device registr
 | fixed retry without power switch | 60 s after 5 failures | `ws_client.py:188`, `:341-342` |
 | `STABLE_CONNECT_SECS` | 10 s | `ws_client.py:39` |
 | `HEARTBEAT_SECS` / `PROBE_ON_SILENCE_SECS` | 10 s / 10 s; dead at > 30 s silence | `const.py:52-53`, `ws_client.py:431` |
-| websockets `open_timeout` / `close_timeout` / `max_size` | 10 s / 10 s / 1 MiB (library defaults) | `ws_client.py:223-227` |
+| websockets `open_timeout` / `close_timeout` / `max_size` | 10 s / 10 s (library defaults) / 16 MiB (`WS_MAX_MESSAGE_BYTES`, R15) | `ws_client.py` |
 | GET cadences | ReqPrinterPara 5 s, reqPrintObjects 2 s, boxsInfo 300 s; tick 0.2 s; first after 2 s | `ws_client.py:33-35`, `:444`, `:493` |
 | force-connect power-off sleep | 10 s | `ws_client.py:212` |
 | `send_set_retry` reconnect wait | 6 s | `ws_client.py:509` |

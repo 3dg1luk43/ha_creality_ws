@@ -39,6 +39,11 @@ GET_BOXS_INFO_SEC = 300.0             # CFS box info (temp/humidity/filaments) e
 STABLE_CONNECT_SECS = 10.0
 # How often the switch is re-read while it says the printer is off.
 POWER_OFF_POLL_SECS = 10.0
+# Largest frame accepted. The G-code listing reply carries every file on the
+# printer, about 150 KiB per 200 files, and the library default of 1 MiB closed
+# the connection (code 1009) on any printer holding more than ~1300. Bounded
+# rather than unlimited: this is still a frame from the network.
+WS_MAX_MESSAGE_BYTES = 16 * 2**20
 
 
 
@@ -225,6 +230,7 @@ class KClient:
                     url,
                     ping_interval=None,
                     subprotocols=[WS_SUBPROTOCOL],
+                    max_size=WS_MAX_MESSAGE_BYTES,
                 ) as ws:
                     self._ws = ws
                     connected_this_attempt = True
