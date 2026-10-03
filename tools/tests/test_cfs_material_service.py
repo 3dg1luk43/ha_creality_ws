@@ -260,7 +260,7 @@ def _make_hass(integration, coordinators, devices=None):
         def has_service(self, _domain, name):
             return name in services
 
-        def async_register(self, _domain, name, handler, schema=None):
+        def async_register(self, _domain, name, handler, schema=None, **_kw):
             services[name] = (handler, schema)
 
     tasks = _SCHEDULED
@@ -661,3 +661,41 @@ def test_the_notification_is_in_the_server_language(integration):
     assert notifications[-1]["message"] == spanish["cfs_material_updated"].format(
         box="1", slot="1", printer="printer-a"
     )
+
+
+
+@requires_voluptuous
+def test_the_actions_exist_before_any_printer_is_set_up(integration):
+    """Registered by the first entry's setup, they were missing while that
+    entry failed to load (R34)."""
+    module, _, _ = integration
+    hass, services, _ = _make_hass(integration, {})
+    del hass.data[module.DOMAIN]
+    assert asyncio.run(module.async_setup(hass, {})) is True
+    assert set(services) == {"diagnostic_dump", "request_cfs_info", "set_cfs_material"}
+
+
+@requires_voluptuous
+def test_request_cfs_info_validates_its_input(integration):
+    """It had no schema, so a typo such as `devide_id` was silently ignored and
+    every printer was asked instead (R34)."""
+    module, _, _ = integration
+    hass, services, _ = _make_hass(integration, {})
+    _register(integration, hass)
+    _handler, schema = services["request_cfs_info"]
+    assert schema is not None
+    assert schema({"device_id": ["d"]}) == {"device_id": ["d"]}
+    with pytest.raises(Exception):
+        schema({"devide_id": ["d"]})
+
+
+@requires_voluptuous
+def test_an_action_called_with_no_printer_loaded_does_not_crash(integration):
+    module, notifications, _ = integration
+    hass, services, _ = _make_hass(integration, {})
+    del hass.data[module.DOMAIN]
+    _register(integration, hass)
+    notifications.clear()
+    handler, _schema = services["request_cfs_info"]
+    asyncio.run(handler(module.ServiceCall({})))
+    assert notifications == []

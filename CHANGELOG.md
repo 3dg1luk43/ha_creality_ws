@@ -53,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The CFS material action's errors and the CFS and diagnostic notifications were always in English**: they were written into the code instead of the translation files. They now follow Home Assistant's language, and a rejected value names the field in words, such as "The maximum temperature (200) must not be below the minimum temperature (240)".
 - **The filament runout notification put an English word into other languages, and "finishing soon" could say "0 minutes"**: the runout text included the print's state as the internal word ("printing"), and the reminder dropped the seconds, so 40 seconds left read as 0 minutes. The state now comes from the translations, and the reminder rounds up and says "min".
 - **The cards' names in the "add card" picker and the printer card's default title were always in English**: they now follow your language. New printer cards are no longer created with the name "3D Printer" written into them, and existing cards still named that show the title in your language.
+- **The integration's actions were missing while a printer failed to start, and the CFS refresh action took any input**: the actions were registered by the first printer's setup, so an automation calling one failed with "action not found". They are now registered when the integration loads. The CFS refresh action also ignored a misspelt field and refreshed every printer; it now rejects it.
 
 ### Changed
 

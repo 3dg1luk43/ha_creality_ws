@@ -70,6 +70,7 @@ from .utils import (
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[str] = ["sensor", "camera", "button", "number", "fan", "light", "image"]
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 # Import integration version from manifest
 
@@ -236,6 +237,18 @@ def _async_follow_host(hass: HomeAssistant, entry: ConfigEntry, host: str) -> No
         if other.entry_id != entry.entry_id
     ):
         hass.config_entries.async_update_entry(entry, unique_id=host)
+
+
+async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+    """Register the actions once, whatever happens to the entries (R34).
+
+    Registered from the first entry's setup, they did not exist while that
+    entry was failing to load, so an automation calling one failed with
+    "action not found" instead of saying which printer was the problem.
+    """
+    await _register_diagnostic_service(hass)
+    await _register_custom_services(hass)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -572,16 +585,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.debug("Legacy entity cleanup skipped: %s", exc)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    
-    # Asking the service registry, the same way _register_custom_services does,
-    # rather than keeping a flag: hass.data[DOMAIN] is keyed by entry id and a
-    # sentinel in there is indistinguishable from a coordinator.
-    if not hass.services.has_service(DOMAIN, "diagnostic_dump"):
-        await _register_diagnostic_service(hass)
 
-    # Register custom services
-    await _register_custom_services(hass)
-    
     _LOGGER.info("ha_creality_ws: setup complete")
     return True
 
@@ -640,7 +644,7 @@ def _coordinators_for_devices(
 
     return [
         coord
-        for entry_id, coord in hass.data[DOMAIN].items()
+        for entry_id, coord in hass.data.get(DOMAIN, {}).items()
         if isinstance(coord, KCoordinator)
         and (not target_entry_ids or entry_id in target_entry_ids)
     ]
@@ -867,7 +871,14 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
     )
 
     if not hass.services.has_service(DOMAIN, "request_cfs_info"):
-        hass.services.async_register(DOMAIN, "request_cfs_info", request_cfs_info)
+        hass.services.async_register(
+            DOMAIN,
+            "request_cfs_info",
+            request_cfs_info,
+            schema=vol.Schema(
+                {vol.Optional("device_id"): vol.Any(cv.string, [cv.string])}
+            ),
+        )
 
     if not hass.services.has_service(DOMAIN, "set_cfs_material"):
         hass.services.async_register(

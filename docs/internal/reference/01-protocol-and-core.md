@@ -365,7 +365,7 @@ Consumers: `KEntity._get_cached_device_info` / `device_info` (`entity.py:43-55`,
 8. `entry.async_on_unload` for: the options update listener (`:424`), the `mobile_app_notification_action` bus listener (`:430-437`), the 5 s interval (`:453-456`), the power-switch watcher (`:468-469`).
 9. Legacy entity removal (`:472-491`): `switch.<host>-light`, three fan-percentage numbers, `sensor.<host>-system`.
 10. `async_forward_entry_setups(entry, PLATFORMS)` (`:493`).
-11. Register `diagnostic_dump` and the two CFS services if not yet registered (`:498-502`).
+11. (Before R34: register the actions here. Since R34 `async_setup` registers all three once, before any entry is set up, with `CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)`; a failing entry no longer hides them.)
 
 Since R31 `coord.async_stop` is registered with `entry.async_on_unload` right after start, so a setup that raises later (for example `request_boxs_info` hitting `RuntimeError("WebSocket not connected")` after a drop) no longer leaves the `KClient` task running.
 
@@ -387,7 +387,7 @@ Writers of `entry.data` after setup, each of which therefore reloads the entry: 
 
 | Service | Schema | Behaviour |
 |---|---|---|
-| `request_cfs_info` | `device_id` optional (no voluptuous schema) | `boxsInfo` GET to the targeted printers (all when empty); persistent notification naming the printers asked and the ones not reached (translated `common.cfs_info_*`, R33). |
+| `request_cfs_info` | `device_id` optional (schema since R34: a string or a list; other keys rejected) | `boxsInfo` GET to the targeted printers (all when empty); persistent notification naming the printers asked and the ones not reached (translated `common.cfs_info_*`, R33). |
 | `set_cfs_material` | `__init__.py:715-740` | requires `device_id`; validates via `build_modify_material_payload`; refuses if any target is busy per `derive_activity_state`; sends `modifyMaterial`, then logs the echo 3 s later. Errors are `ServiceValidationError` with inline English. |
 | `diagnostic_dump` | `include_sensitive_data` (ignored) | builds a JSON blob per printer (options subset, cache, WS stats, telemetry, model and feature detection, CFS raw, every entity's state and attributes), crawls `https://` and `http://` of the printer root for same-host links, logs it at WARNING, posts a persistent notification. No response data, no redaction. |
 
