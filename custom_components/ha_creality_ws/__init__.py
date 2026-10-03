@@ -32,6 +32,7 @@ from homeassistant.helpers.event import (  # type: ignore[import]
 )
 import voluptuous as vol  # type: ignore[import]
 from homeassistant.helpers import config_validation as cv, entity_registry as er, device_registry as dr # type: ignore[import]
+from homeassistant.helpers.translation import async_get_translations  # type: ignore[import]
 from .notification_rules import (
     build_clear_payload,
     coerce_targets,
@@ -57,6 +58,7 @@ from .frontend import CrealityCardRegistration
 from .utils import (
     core_version_supported,
     BUSY_PRINT_STATES,
+    MaterialValueError,
     ModelDetection,
     build_modify_material_payload,
     derive_activity_state,
@@ -584,6 +586,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def _common_strings(hass: HomeAssistant) -> dict[str, str]:
+    """The integration's `common` strings in the server's language (R33).
+
+    Persistent notifications are composed here, so, like the phone
+    notifications, they can only use the server's language.
+    """
+    language = getattr(getattr(hass, "config", None), "language", None) or "en"
+    prefix = f"component.{DOMAIN}.common."
+    try:
+        raw = await async_get_translations(hass, language, "common", {DOMAIN})
+    except Exception:  # pylint: disable=broad-except
+        _LOGGER.exception("Could not load the integration's strings")
+        return {}
+    return {key[len(prefix):]: value for key, value in raw.items() if key.startswith(prefix)}
+
+
+def _fill(strings: dict[str, str], key: str, /, **values: str) -> str:
+    """One string with its placeholders filled; the key itself if it is missing."""
+    try:
+        return strings[key].format(**values)
+    except (KeyError, IndexError, ValueError):
+        _LOGGER.warning("String %r is missing or does not match its placeholders", key)
+        return key
+
+
 def _coordinators_for_devices(
     hass: HomeAssistant, device_ids: str | list[str] | None
 ) -> list[KCoordinator]:
@@ -630,23 +657,26 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
             _LOGGER.warning("No applicable printers found for CFS info request")
             return
 
-        success_count = 0
-        fail_count = 0
-        
+        asked: list[str] = []
+        failed: list[str] = []
         for coord in targets:
             try:
                 _LOGGER.info("Manually requesting CFS info for %s", coord.client.host)
                 await coord.client.request_boxs_info()
-                success_count += 1
+                asked.append(coord.client.host)
             except Exception as exc:
                 _LOGGER.error("Failed to request CFS info for %s: %s", coord.client.host, exc)
-                fail_count += 1
-        
-        # Notify user of results
+                failed.append(coord.client.host)
+
+        strings = await _common_strings(hass)
+        lines = [
+            _fill(strings, "cfs_info_sent", printers=", ".join(asked)) if asked else "",
+            _fill(strings, "cfs_info_failed", printers=", ".join(failed)) if failed else "",
+        ]
         pn_async_create(
             hass,
-            title="CFS Info Request",
-            message=f"Request sent to {success_count} printer(s).\nFailures: {fail_count}",
+            title=_fill(strings, "cfs_info_title"),
+            message="\n".join(line for line in lines if line),
             notification_id="cfs_request_result",
         )
 
@@ -665,14 +695,13 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
         requested = call.data.get("device_id")
         if not requested:
             raise ServiceValidationError(
-                "set_cfs_material requires a device_id; refusing to write to "
-                "every configured printer."
+                translation_domain=DOMAIN, translation_key="cfs_material_needs_device"
             )
 
         targets = _coordinators_for_devices(hass, requested)
         if not targets:
             raise ServiceValidationError(
-                "No Creality printer matched the selected device."
+                translation_domain=DOMAIN, translation_key="no_printer_matched"
             )
 
         box_id = call.data["box_id"]
@@ -691,9 +720,13 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
                 pressure=call.data.get("pressure"),
                 rfid=call.data.get("rfid"),
             )
-        except ValueError as exc:
+        except MaterialValueError as exc:
             # Bad input, not a printer failure -- surface it on the call itself.
-            raise ServiceValidationError(str(exc)) from exc
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key=exc.key,
+                translation_placeholders=exc.placeholders,
+            ) from exc
 
         # Check every target before writing to any of them, so a busy second
         # printer cannot leave the first one already modified.
@@ -714,23 +747,27 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
             )
             if state in BUSY_PRINT_STATES:
                 raise ServiceValidationError(
-                    f"{coord.client.host} is {state}; refusing to change CFS "
-                    "material while the printer is busy."
+                    translation_domain=DOMAIN,
+                    translation_key="cfs_material_printer_busy",
+                    translation_placeholders={"printer": coord.client.host},
                 )
 
-        failed: list[tuple[str, Exception]] = []
+        strings = await _common_strings(hass)
+        # 1-based, as the sensors name the slots (R28).
+        where = {"box": str(box_id), "slot": str(slot_id + 1)}
+        failed: list[str] = []
         for coord in targets:
             host = coord.client.host
             try:
                 _LOGGER.debug("Sending modifyMaterial to %s: %s", host, payload)
                 await coord.client.send_set_retry(modifyMaterial=payload)
             except Exception as exc:
-                failed.append((host, exc))
+                failed.append(host)
                 _LOGGER.error("Failed to set CFS material for %s: %s", host, exc)
                 pn_async_create(
                     hass,
-                    title="CFS Material Update Failed",
-                    message=f"Failed to update material on {host}: {exc}",
+                    title=_fill(strings, "cfs_material_failed_title"),
+                    message=_fill(strings, "cfs_material_failed", printer=host, **where),
                     # Per-host: device_id accepts a list, and a shared id would
                     # leave only the last printer's result visible.
                     notification_id=f"cfs_material_error_{host}",
@@ -742,11 +779,8 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
             pn_async_dismiss(hass, f"cfs_material_error_{host}")
             pn_async_create(
                 hass,
-                title="CFS Material Updated",
-                message=(
-                    # 1-based, as the sensors name the slots (R28).
-                    f"Box {box_id} slot {slot_id + 1} on {host} updated."
-                ),
+                title=_fill(strings, "cfs_material_updated_title"),
+                message=_fill(strings, "cfs_material_updated", printer=host, **where),
                 notification_id=f"cfs_material_update_{host}",
             )
             hass.async_create_task(_log_material_echo(coord, payload))
@@ -759,10 +793,7 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="cfs_material_write_failed",
-                translation_placeholders={
-                    "printers": ", ".join(host for host, _ in failed),
-                    "error": str(failed[0][1]),
-                },
+                translation_placeholders={"printers": ", ".join(failed)},
             )
 
     async def _log_material_echo(coord: KCoordinator, payload: dict[str, Any]) -> None:
@@ -873,11 +904,12 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
             "=== CREALITY DIAGNOSTIC DATA START ===\n%s\n=== CREALITY DIAGNOSTIC DATA END ===",
             json_output,
         )
+        strings = await _common_strings(hass)
         pn_async_create(
             hass,
-            title="Creality Diagnostic Data",
-            message=f"Diagnostic data collected for {len(data['printers'])} printer(s). Data size: {len(json_output)} bytes. Check the logs for the full JSON data.",
-            notification_id="creality_diagnostic_data"
+            title=_fill(strings, "diagnostic_title"),
+            message=_fill(strings, "diagnostic_collected", printers=str(len(data["printers"]))),
+            notification_id="creality_diagnostic_data",
         )
         return data
     

@@ -15,6 +15,7 @@ __all__ = [
     "build_spool_key",
     "derive_print_state",
     "BUSY_PRINT_STATES",
+    "MaterialValueError",
     "build_modify_material_payload",
     "normalize_material_color",
 ]
@@ -669,6 +670,20 @@ def derive_activity_state(
 _MATERIAL_COLOR_RE = re.compile(r"^#?[0-9a-fA-F]{6}$")
 
 
+class MaterialValueError(ValueError):
+    """A material field that cannot be written, named by its translation key.
+
+    The service turns it into a translated ServiceValidationError (R33); the
+    English text is only for logs and tests.
+    """
+
+    def __init__(self, key: str, **placeholders: Any) -> None:
+        self.key = key
+        self.placeholders = {name: str(value) for name, value in placeholders.items()}
+        detail = ", ".join(f"{name}={value}" for name, value in self.placeholders.items())
+        super().__init__(f"{key}: {detail}" if detail else key)
+
+
 def build_modify_material_payload(
     *,
     box_id: int,
@@ -699,7 +714,7 @@ def build_modify_material_payload(
         "type": str(material_type).strip(),
     }
     if not payload["type"]:
-        raise ValueError("material type must not be empty")
+        raise MaterialValueError("material_type_empty")
 
     for key, value in (("name", name), ("vendor", vendor)):
         if value is not None and str(value).strip():
@@ -720,20 +735,18 @@ def build_modify_material_payload(
             return None
         parsed = safe_float(value)
         if parsed is None:
-            raise ValueError(f"{name} must be a number, got {value!r}")
+            raise MaterialValueError("material_not_a_number", field=name, value=value)
         # nan compares False against everything, so the min/max ordering check
         # below cannot reject it, and json.dumps emits bare NaN/Infinity -- which
         # is not valid JSON and would reach the printer as a malformed payload.
         if not math.isfinite(parsed):
-            raise ValueError(f"{name} must be a finite number, got {value!r}")
+            raise MaterialValueError("material_not_a_number", field=name, value=value)
         return parsed
 
     low = _number("min_temp", min_temp)
     high = _number("max_temp", max_temp)
     if low is not None and high is not None and high < low:
-        raise ValueError(
-            f"max_temp ({high}) must not be below min_temp ({low})"
-        )
+        raise MaterialValueError("material_temp_order", high=f"{high:g}", low=f"{low:g}")
     if low is not None:
         payload["minTemp"] = low
     if high is not None:
@@ -742,7 +755,7 @@ def build_modify_material_payload(
     advance = _number("pressure", pressure)
     if advance is not None:
         if not 0.0 <= advance <= 1.0:
-            raise ValueError(f"pressure must be between 0 and 1, got {advance}")
+            raise MaterialValueError("material_pressure_range", value=f"{advance:g}")
         payload["pressure"] = advance
 
     # Pass an existing tag id straight through; never substitute a placeholder.
@@ -762,17 +775,13 @@ def normalize_material_color(value: Any) -> str:
     would otherwise be silently flattened.
     """
     if isinstance(value, (list, tuple)):
-        raise ValueError(
-            "colour must be a '#rrggbb' string, not an RGB list; "
-            "the color_rgb selector is not used for this field"
-        )
+        # Not the color_rgb selector's list: this field takes one hex string.
+        raise MaterialValueError("material_colour_list")
     text = str(value).strip()
     if re.search(r"[,;]", text):
-        raise ValueError(
-            f"cannot write a multi-colour value ({text!r}) as a single colour"
-        )
+        raise MaterialValueError("material_colour_multi", value=text)
     if not _MATERIAL_COLOR_RE.match(text):
-        raise ValueError(f"colour must be six hex digits, got {text!r}")
+        raise MaterialValueError("material_colour_invalid", value=text)
     return f"#{text.lstrip('#').lower()}"
 
 

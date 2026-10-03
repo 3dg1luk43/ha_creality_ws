@@ -387,7 +387,7 @@ Writers of `entry.data` after setup, each of which therefore reloads the entry: 
 
 | Service | Schema | Behaviour |
 |---|---|---|
-| `request_cfs_info` | `device_id` optional (no voluptuous schema) | `boxsInfo` GET to the targeted printers (all when empty); persistent notification with counts (inline English). |
+| `request_cfs_info` | `device_id` optional (no voluptuous schema) | `boxsInfo` GET to the targeted printers (all when empty); persistent notification naming the printers asked and the ones not reached (translated `common.cfs_info_*`, R33). |
 | `set_cfs_material` | `__init__.py:715-740` | requires `device_id`; validates via `build_modify_material_payload`; refuses if any target is busy per `derive_activity_state`; sends `modifyMaterial`, then logs the echo 3 s later. Errors are `ServiceValidationError` with inline English. |
 | `diagnostic_dump` | `include_sensitive_data` (ignored) | builds a JSON blob per printer (options subset, cache, WS stats, telemetry, model and feature detection, CFS raw, every entity's state and attributes), crawls `https://` and `http://` of the printer root for same-host links, logs it at WARNING, posts a persistent notification. No response data, no redaction. |
 

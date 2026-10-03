@@ -55,14 +55,53 @@
     "completed_detailed": "{device} ha terminado. Filamento consumido: {filament}.",
     "error": "Error de {device} - {key} [{code}]",
     "filament_runout": "{device} se ha quedado sin filamento. Estado de la impresión: {state}. Cambia el filamento.",
-    "finishing_soon": "{device} terminará en {minutes} minutos."
+    "finishing_soon": "{device} terminará en {minutes} minutos.",
+    "cfs_info_title": "Solicitud de información del CFS",
+    "cfs_info_sent": "Se ha solicitado la información del CFS a {printers}.",
+    "cfs_info_failed": "No se ha podido contactar con {printers}.",
+    "cfs_material_failed_title": "Material del CFS no cambiado",
+    "cfs_material_failed": "{printer} no está conectada, así que no se ha cambiado la ranura {slot} de la caja {box}.",
+    "cfs_material_updated_title": "Material del CFS cambiado",
+    "cfs_material_updated": "Se ha actualizado la ranura {slot} de la caja {box} en {printer}.",
+    "diagnostic_title": "Datos de diagnóstico de Creality",
+    "diagnostic_collected": "Se han recopilado los datos de diagnóstico (impresoras: {printers}). Están en la respuesta de esta acción y en el registro de Home Assistant."
   },
   "exceptions": {
     "unsupported_ha_version": {
       "message": "Esta versión de la integración Creality WebSocket necesita Home Assistant {minimum} o posterior, pero este sistema ejecuta la versión {running}. Actualiza Home Assistant o instala en su lugar la versión 0.9.7 de la integración."
     },
     "cfs_material_write_failed": {
-      "message": "No se ha cambiado el material del CFS en {printers}: {error}"
+      "message": "No se ha cambiado el material del CFS en {printers}: la impresora no está conectada."
+    },
+    "cfs_material_needs_device": {
+      "message": "Elige la impresora que quieres cambiar. Esta acción solo escribe en las impresoras que selecciones, nunca en todas."
+    },
+    "no_printer_matched": {
+      "message": "Ninguno de los dispositivos seleccionados es una impresora Creality configurada en esta integración."
+    },
+    "cfs_material_printer_busy": {
+      "message": "{printer} está en mitad de una impresión, así que no se ha cambiado su material del CFS. Vuelve a intentarlo cuando termine la impresión."
+    },
+    "material_type_empty": {
+      "message": "El tipo de material no puede estar vacío."
+    },
+    "material_not_a_number": {
+      "message": "{field} debe ser un número, no {value}."
+    },
+    "material_temp_order": {
+      "message": "La temperatura máxima ({high}) no puede ser inferior a la temperatura mínima ({low})."
+    },
+    "material_pressure_range": {
+      "message": "El avance de presión debe estar entre 0 y 1, no {value}."
+    },
+    "material_colour_list": {
+      "message": "El color debe ser un valor hexadecimal como #ff8800, no una lista de valores RGB."
+    },
+    "material_colour_multi": {
+      "message": "{value} contiene varios colores, y una ranura solo puede guardar uno."
+    },
+    "material_colour_invalid": {
+      "message": "El color debe tener seis dígitos hexadecimales, como #ff8800, no {value}."
     },
     "printer_not_connected": {
       "message": "La impresora no está conectada, así que no se ha enviado el comando. Comprueba que esté encendida y que se pueda acceder a ella, y vuelve a intentarlo."

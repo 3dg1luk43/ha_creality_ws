@@ -374,7 +374,7 @@ Since R9/R30 both this action and the standard download come from `diagnostics.p
 |---|---|---|
 | `device_id` | device selector, multiple | no (omitted = every printer) |
 
-Calls `client.request_boxs_info()` per target (`ws_client.py:498-500`), then always posts persistent notification `cfs_request_result` with the success/failure counts. Never raises.
+Calls `client.request_boxs_info()` per target (`ws_client.py:498-500`), then always posts persistent notification `cfs_request_result` naming the printers asked and the ones not reached. Never raises.
 
 ### 11.3 `set_cfs_material` (`__init__.py:574-670`, schema `:715-740`, registered `:745-751`)
 
@@ -392,12 +392,12 @@ Calls `client.request_boxs_info()` per target (`ws_client.py:498-500`), then alw
 
 Flow:
 
-1. Empty `device_id` -> `ServiceValidationError` (`:586-591`); no matching coordinator -> `ServiceValidationError` (`:593-597`). `_coordinators_for_devices` maps device ids to entries (`:508-540`).
-2. `build_modify_material_payload` (`utils.py:594-674`): `{"boxId", "id", "type"}` plus only the supplied fields, renamed `minTemp`/`maxTemp`; colour written as lowercase `#rrggbb`. `ValueError` -> `ServiceValidationError(str(exc))` (`:602-617`).
-3. Busy check on **all** targets first: `derive_activity_state` in `BUSY_PRINT_STATES = {printing, paused, processing, self-testing}` -> `ServiceValidationError` (`:623-640`, `utils.py:486`). An unreachable printer derives `unknown` and passes.
-4. Per target: `send_set_retry(modifyMaterial=payload)`. A failure is logged and posted as persistent notification `cfs_material_error_<host>`, and the remaining targets are still written; afterwards the call raises `HomeAssistantError` (`cfs_material_write_failed`, placeholders `printers`, `error`) if any target failed (R19), so the CFS card's save toast reports it. Before R19 the call returned success and the card said "Saved". Success dismisses that and posts `cfs_material_update_<host>` (`:659-669`), then schedules `_log_material_echo`, which re-requests `boxsInfo` and logs the round trip at DEBUG after 3 s (`:672-712`).
+1. Empty `device_id` -> `ServiceValidationError` `cfs_material_needs_device`; no matching coordinator -> `no_printer_matched`. `_coordinators_for_devices` maps device ids to entries (`:508-540`).
+2. `build_modify_material_payload` (`utils.py:594-674`): `{"boxId", "id", "type"}` plus only the supplied fields, renamed `minTemp`/`maxTemp`; colour written as lowercase `#rrggbb`. Rejections raise `MaterialValueError(key, **placeholders)`, a `ValueError` whose key (`material_*`) becomes the `ServiceValidationError` translation key (R33).
+3. Busy check on **all** targets first: `derive_activity_state` in `BUSY_PRINT_STATES = {printing, paused, processing, self-testing}` -> `ServiceValidationError` `cfs_material_printer_busy` (placeholder `printer`). An unreachable printer derives `unknown` and passes.
+4. Per target: `send_set_retry(modifyMaterial=payload)`. A failure is logged and posted as persistent notification `cfs_material_error_<host>`, and the remaining targets are still written; afterwards the call raises `HomeAssistantError` (`cfs_material_write_failed`, placeholder `printers`) if any target failed (R19), so the CFS card's save toast reports it. Before R19 the call returned success and the card said "Saved". Success dismisses that and posts `cfs_material_update_<host>` (`:659-669`), then schedules `_log_material_echo`, which re-requests `boxsInfo` and logs the round trip at DEBUG after 3 s (`:672-712`).
 
-Every `ServiceValidationError` message and persistent-notification title/body in this section is an inline English literal.
+Since R33 every error is a translation key and every notification title and body comes from `common` through `_common_strings`/`_fill` in the server's language; `tools/tests/test_inline_strings.py` fails on a literal in a user-facing raise or `pn_async_create`.
 
 ---
 

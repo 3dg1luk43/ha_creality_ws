@@ -55,14 +55,53 @@
     "completed_detailed": "{device} finished. {filament} consumed.",
     "error": "{device} error - {key} [{code}]",
     "filament_runout": "{device} filament ran out. Print is {state}. Change the filament.",
-    "finishing_soon": "{device} will finish in {minutes} minutes."
+    "finishing_soon": "{device} will finish in {minutes} minutes.",
+    "cfs_info_title": "CFS information request",
+    "cfs_info_sent": "Asked {printers} to report their CFS.",
+    "cfs_info_failed": "Could not reach {printers}.",
+    "cfs_material_failed_title": "CFS material not changed",
+    "cfs_material_failed": "{printer} is not connected, so box {box} slot {slot} was not changed.",
+    "cfs_material_updated_title": "CFS material changed",
+    "cfs_material_updated": "Box {box} slot {slot} on {printer} updated.",
+    "diagnostic_title": "Creality diagnostic data",
+    "diagnostic_collected": "Diagnostic data was collected (printers: {printers}). It is in this action's response and in the Home Assistant log."
   },
   "exceptions": {
     "unsupported_ha_version": {
       "message": "This version of the Creality WebSocket integration needs Home Assistant {minimum} or newer, but this system is running {running}. Update Home Assistant, or install integration version 0.9.7 instead."
     },
     "cfs_material_write_failed": {
-      "message": "The CFS material was not changed on {printers}: {error}"
+      "message": "The CFS material was not changed on {printers}: the printer is not connected."
+    },
+    "cfs_material_needs_device": {
+      "message": "Choose the printer to change. This action only writes to the printers you select, never to all of them."
+    },
+    "no_printer_matched": {
+      "message": "None of the selected devices is a Creality printer set up in this integration."
+    },
+    "cfs_material_printer_busy": {
+      "message": "{printer} is in the middle of a print, so its CFS material was not changed. Try again once the print is over."
+    },
+    "material_type_empty": {
+      "message": "The material type must not be empty."
+    },
+    "material_not_a_number": {
+      "message": "{field} must be a number, not {value}."
+    },
+    "material_temp_order": {
+      "message": "The maximum temperature ({high}) must not be below the minimum temperature ({low})."
+    },
+    "material_pressure_range": {
+      "message": "The pressure advance must be between 0 and 1, not {value}."
+    },
+    "material_colour_list": {
+      "message": "The colour must be a hex value such as #ff8800, not a list of RGB values."
+    },
+    "material_colour_multi": {
+      "message": "{value} holds several colours, and a slot can only store one."
+    },
+    "material_colour_invalid": {
+      "message": "The colour must be six hex digits such as #ff8800, not {value}."
     },
     "printer_not_connected": {
       "message": "The printer is not connected, so the command was not sent. Check that it is switched on and reachable, then try again."

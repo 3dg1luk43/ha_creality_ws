@@ -13,6 +13,7 @@ tests.yml), so in practice this only skips in a local venv without it.
 
 import asyncio
 import importlib.util
+import json
 import sys
 import types
 from pathlib import Path
@@ -386,10 +387,11 @@ def test_writing_is_refused_while_printing(integration):
     coord = FakeCoordinator(state=PRINTING)
     hass, services, _ = _make_hass(integration, {"e": coord}, {"d": _device("e")})
     _register(integration, hass)
-    with pytest.raises(ServiceValidationError, match="printing"):
+    with pytest.raises(ServiceValidationError) as err:
         _call_service(integration, hass, services, {
             "device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA",
         })
+    assert err.value.translation_key == "cfs_material_printer_busy"
     assert coord.client.sent == [], "nothing may reach the printer"
 
 
@@ -429,10 +431,11 @@ def test_a_stale_error_code_does_not_unlock_a_printing_printer(integration):
         integration, {"e1": coord}, {"d": _device("e1")},
     )
     _register(integration, hass)
-    with pytest.raises(ServiceValidationError, match="printing"):
+    with pytest.raises(ServiceValidationError) as err:
         _call_service(integration, hass, services, {
             "device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA",
         })
+    assert err.value.translation_key == "cfs_material_printer_busy"
     assert coord.client.sent == [], "nothing may reach a printing printer"
 
 
@@ -463,10 +466,11 @@ def test_an_unresolvable_device_raises(integration):
     module, _, ServiceValidationError = integration
     hass, services, _ = _make_hass(integration, {"e": FakeCoordinator(state=IDLE)}, {})
     _register(integration, hass)
-    with pytest.raises(ServiceValidationError, match="No Creality printer"):
+    with pytest.raises(ServiceValidationError) as err:
         _call_service(integration, hass, services, {
             "device_id": ["ghost"], "box_id": 1, "slot_id": 0, "type": "PLA",
         })
+    assert err.value.translation_key == "no_printer_matched"
 
 
 @requires_voluptuous
@@ -489,11 +493,14 @@ def test_an_inverted_temperature_range_raises(integration):
     coord = FakeCoordinator(state=IDLE)
     hass, services, _ = _make_hass(integration, {"e": coord}, {"d": _device("e")})
     _register(integration, hass)
-    with pytest.raises(ServiceValidationError, match="max_temp"):
+    with pytest.raises(ServiceValidationError) as err:
         _call_service(integration, hass, services, {
             "device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA",
             "min_temp": 240, "max_temp": 200,
         })
+    # Translated, with the values the user typed (R33).
+    assert err.value.translation_key == "material_temp_order"
+    assert err.value.translation_placeholders == {"high": "200", "low": "240"}
     assert coord.client.sent == []
 
 
@@ -518,9 +525,8 @@ def test_a_printer_failure_still_writes_the_others_then_raises(integration):
     assert raised.value.translation_key == "cfs_material_write_failed"
     assert raised.value.translation_placeholders["printers"] == "unreachable"
     assert good.client.sent, "the reachable printer must still be written"
-    titles = [n.get("title") for n in notifications]
-    assert any("Failed" in str(t) for t in titles), titles
-    assert any("Updated" in str(t) for t in titles), titles
+    ids = [n.get("notification_id") for n in notifications]
+    assert ids == ["cfs_material_error_unreachable", "cfs_material_update_reachable"], ids
 
 
 @requires_voluptuous
@@ -559,7 +565,7 @@ def test_a_successful_retry_dismisses_the_earlier_failure(integration):
 
     with pytest.raises(sys.modules["homeassistant.exceptions"].HomeAssistantError):
         _call_service(integration, hass, services, call)
-    assert any("Failed" in str(n.get("title")) for n in notifications)
+    assert any(n.get("notification_id") == "cfs_material_error_printer-a" for n in notifications)
     assert notifications.dismissed == [], "nothing to dismiss yet"
 
     # The printer comes back and the user retries.
@@ -582,7 +588,10 @@ def test_the_success_message_numbers_the_slot_as_the_sensors_do(integration):
     _call_service(integration, hass, services, {
         "device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA",
     })
-    message = next(n["message"] for n in notifications if "Updated" in str(n.get("title")))
+    message = next(
+        n["message"] for n in notifications
+        if n.get("notification_id") == "cfs_material_update_printer-a"
+    )
     assert "slot 1 " in message, message
 
 
@@ -631,3 +640,24 @@ def test_the_schema_rejects_out_of_range_and_missing_fields(integration):
     ):
         with pytest.raises(vol.Invalid):
             schema(bad)
+
+
+@requires_voluptuous
+def test_the_notification_is_in_the_server_language(integration):
+    """Typed into the code in English before (R33)."""
+    _module, notifications, _ = integration
+    notifications.clear()
+    coord = FakeCoordinator("printer-a", IDLE)
+    hass, services, _ = _make_hass(integration, {"e": coord}, {"d": _device("e")})
+    hass.config = types.SimpleNamespace(language="es")
+    _register(integration, hass)
+    _call_service(integration, hass, services, {
+        "device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA",
+    })
+    spanish = json.loads(
+        (ROOT / "custom_components/ha_creality_ws/translations/es.json").read_text(encoding="utf-8")
+    )["common"]
+    assert notifications[-1]["title"] == spanish["cfs_material_updated_title"]
+    assert notifications[-1]["message"] == spanish["cfs_material_updated"].format(
+        box="1", slot="1", printer="printer-a"
+    )
