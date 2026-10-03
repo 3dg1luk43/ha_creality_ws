@@ -16,6 +16,7 @@ cards (`www/k_printer_card.js`, `www/k_cfs_card.js`). Minimum HA 2026.7.0, so Py
 ```bash
 .venv/bin/python -m pytest                       # full suite, ~10 s, includes the node card suites
 .venv/bin/python -m pytest tools/tests/test_notification_live.py -k name -v
+python -m pytest tools/tests_ha                  # inside a real HA; Python 3.14 + tools/requirements-ha.txt
 node --check custom_components/ha_creality_ws/www/*.js
 python3 -m compileall -q custom_components/ha_creality_ws
 tools/release_check.sh                           # release preflight (what CI runs)
@@ -29,12 +30,13 @@ python3 tools/creality_printer_test_server.py --help   # simulated printer (tool
 
 ## What the tests can and cannot prove
 
-Home Assistant is **stubbed** in `tools/tests/conftest.py`; there is no real HA in any test.
-Setup, unload, reload, the config flow, the camera decision tree, MJPEG, light, image and number
-setters never run under test, and the `KClient` stub's `is_connected` is always False. Coverage
-is 61%. So for lifecycle, config-flow, camera or power-switch changes, a green suite is not
-evidence: verify on a real HA (`tools/test_files/deploy_to_ha.sh`, maintainer-local) or against
-the mock printer, and say which in the commit or report.
+Home Assistant is **stubbed** in `tools/tests/conftest.py`, and the `KClient` stub's
+`is_connected` is always False. `tools/tests_ha` runs the integration inside a real HA
+(pytest-homeassistant-custom-component, its own CI job) for entry setup, unload and reload, the
+config and options flows, the registries and the power switch; never run both suites in one
+process. The camera decision tree, MJPEG, image and number setters still run only stubbed. So for
+camera changes, or anything `tools/tests_ha` does not reach, a green suite is not evidence:
+verify on the test box (`tools/testbox`) or a real HA, and say which in the commit or report.
 
 - A new test is not done until its **name** appears in the output and it **fails with the fix
   reverted**. Tests here have repeatedly passed while proving nothing.

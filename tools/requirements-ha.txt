@@ -1,0 +1,14 @@
+# Tests against a real Home Assistant: python -m pytest tools/tests_ha
+# Python 3.14. Kept apart from requirements-test.txt, whose stubbed suite
+# (tools/tests) must not see the real homeassistant package.
+#
+# pytest-homeassistant-custom-component pins one Home Assistant release; this
+# one is homeassistant==2026.9.4. Move the pins below with it.
+pytest-homeassistant-custom-component==0.13.367
+# What Home Assistant's own integrations that this one loads require, from
+# their manifest.json files in that release: frontend, camera.
+home-assistant-frontend==20260826.7
+PyTurboJPEG==1.8.3
+# The integration's own requirements (manifest.json).
+websockets==15.0.1
+go2rtc-client==0.4.0

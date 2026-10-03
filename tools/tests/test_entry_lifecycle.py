@@ -84,11 +84,11 @@ def _setup_until_after_start(monkeypatch):
     entry = _entry()
     listeners = {}
 
-    def _listen_once(event, handler):
+    def _listen(event, handler):
         listeners[event] = handler
         return lambda: listeners.pop(event, None)
 
-    hass = SimpleNamespace(bus=SimpleNamespace(async_listen_once=_listen_once))
+    hass = SimpleNamespace(bus=SimpleNamespace(async_listen=_listen))
     with pytest.raises(Stop):
         asyncio.get_event_loop().run_until_complete(
             integration.async_setup_entry(hass, entry)

@@ -85,6 +85,13 @@ python -m pytest
 
 `pyproject.toml` points pytest at `tools/tests`. The card tests in `tools/tests/js/` are driven from pytest and need `node` on PATH; without it they are skipped, so install node before touching either card.
 
+`tools/tests` stubs Home Assistant. `tools/tests_ha` runs the integration inside a real one, for setup, reload, the config and options flows and the power switch. It needs Python 3.14 and its own environment, since the real `homeassistant` package must not meet the stubs:
+
+```bash
+pip install -r tools/requirements-ha.txt
+python -m pytest tools/tests_ha
+```
+
 ### No printer needed
 
 `tools/creality_printer_test_server.py` (the `tools/simulator/` package) simulates K1, K2, Ender 3 V3 and Hi printers on their real ports: WebSocket telemetry and commands on 9999, WebRTC on 8000, MJPEG on 8080, the print preview on 80 and Moonraker on 7125. A control UI at `http://<host>:8099/ui/` drives prints, faults, the CFS and power cuts. Run it without arguments for the full help, and see [tools/README.md](tools/README.md).

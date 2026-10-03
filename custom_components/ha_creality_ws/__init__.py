@@ -314,8 +314,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def _stop_client(_event) -> None:
         await coord.async_stop()
 
+    # async_listen, not async_listen_once: Home Assistant stops once anyway,
+    # and a one-time listener that has fired cannot be removed again, so an
+    # unload after the stop event logged an error.
     entry.async_on_unload(
-        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _stop_client)
+        hass.bus.async_listen(EVENT_HOMEASSISTANT_STOP, _stop_client)
     )
     # No wait here. The entities come from the capability cache and fill in
     # as telemetry arrives (late discovery covers anything gated on it). An

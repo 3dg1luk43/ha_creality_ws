@@ -92,6 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - an MJPEG camera on the real port, the print preview, and Moonraker for the K2 Base.
 
   The camera picture is a short loop stored with it, so nothing is encoded while it runs. It is what found the K2 Base chamber target never arriving.
+- **Tests inside a real Home Assistant** (`tools/tests_ha`, its own CI job). They cover setup, unload and reload, the config and options flows, a printer moving to a new address, and the power switch. Until now every test ran against a stub of Home Assistant.
 
 ## 0.9.8 - 2026-09-26
 > [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)
