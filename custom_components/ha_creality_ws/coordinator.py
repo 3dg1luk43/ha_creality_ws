@@ -11,6 +11,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator  # ty
 from homeassistant.helpers.aiohttp_client import async_get_clientsession  # type: ignore[import]
 from homeassistant.helpers.dispatcher import async_dispatcher_send  # type: ignore[import]
 from homeassistant.helpers import entity_registry as er  # type: ignore[import]
+from homeassistant.helpers import issue_registry as ir  # type: ignore[import]
 from homeassistant.helpers.translation import async_get_translations  # type: ignore[import]
 from homeassistant.util import slugify  # type: ignore[import]
 from homeassistant.exceptions import HomeAssistantError  # type: ignore[import]
@@ -68,6 +69,7 @@ from .notification_rules import (
 from .const import (
     DOMAIN,
     STALE_AFTER_SECS,
+    POWER_SWITCH_MISSING_GRACE_SECS,
     CLEAR_NOTIFICATION_MARKER,
     CONF_NOTIFY_ACTIONS,
     CONF_NOTIFY_CAMERA_SNAPSHOT,
@@ -185,6 +187,10 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # mode is forced or no camera has been set up yet.
         self.camera_type_in_use: str | None = None
         self._power_lock = asyncio.Lock()
+        # When the configured switch was first seen missing, and whether the
+        # repair issue for it is up (R24).
+        self._switch_missing_since: float | None = None
+        self._switch_missing_reported = False
         # Last boxsInfo shape seen, for discovery of a CFS box added later.
         self._cfs_shape: frozenset | None = None
         
@@ -377,12 +383,69 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
         st = self.hass.states.get(eid)
         if not st:
-            _LOGGER.debug("Power switch entity %s not found (assume OFF)", eid)
-            return True # FAIL-SAFE: Assume OFF if switch entity isn't ready
+            return self._switch_missing(eid)
+        if self._switch_missing_since is not None:
+            self._switch_found_again()
         is_off = str(st.state).lower() in ("off", "unavailable", "unknown")
         if is_off:
             _LOGGER.debug("Power switch %s is %s -> skipping connection", eid, st.state)
         return is_off
+
+    def _switch_missing(self, eid: str) -> bool:
+        """A configured switch that is not in the state machine.
+
+        Off at first: at startup the plug's own integration may simply not have
+        loaded yet. But a switch that stays missing has been renamed or deleted,
+        and treating it as off for good meant the printer never connected again,
+        with only a debug line to say why (R24). Past the grace period it counts
+        as no switch, and a repair issue names it.
+        """
+        now = time.monotonic()
+        if self._switch_missing_since is None:
+            self._switch_missing_since = now
+            _LOGGER.debug("Power switch entity %s not found (assume OFF for now)", eid)
+        if now - self._switch_missing_since < POWER_SWITCH_MISSING_GRACE_SECS:
+            return True
+        if not self._switch_missing_reported:
+            self._switch_missing_reported = True
+            _LOGGER.warning(
+                "Power switch %s does not exist; connecting as if no switch were "
+                "configured. Choose another one in the integration's options.",
+                eid,
+            )
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                self._missing_switch_issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key="missing_power_switch",
+                translation_placeholders={
+                    "entity_id": eid,
+                    "printer": self._notify_title(),
+                },
+            )
+        return False
+
+    def _switch_found_again(self) -> None:
+        self._switch_missing_since = None
+        if self._switch_missing_reported:
+            self._switch_missing_reported = False
+            ir.async_delete_issue(self.hass, DOMAIN, self._missing_switch_issue_id)
+
+    @property
+    def _missing_switch_issue_id(self) -> str:
+        return f"missing_power_switch_{self.entry_id or self.client._host}"
+
+    async def async_recheck_missing_switch(self) -> None:
+        """Re-decide power while the switch is missing.
+
+        No state-change event will ever arrive for an entity that does not
+        exist, and a client deferred at setup is not running to poll, so the
+        end of the grace period has to be noticed from the interval check.
+        """
+        if self._power_switch_entity and self._switch_missing_since is not None:
+            await self.async_handle_power_change()
 
     async def async_start(self) -> None:
         """Start the WebSocket connection."""

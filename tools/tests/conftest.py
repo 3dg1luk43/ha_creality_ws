@@ -231,6 +231,29 @@ entity_registry_mod.async_get = MagicMock(
 sys.modules["homeassistant.helpers.entity_registry"] = entity_registry_mod
 helpers_mod.entity_registry = entity_registry_mod
 
+# --- MOCK helpers.issue_registry ---
+# Records what was raised and withdrawn, so a test can assert on Repairs.
+issue_registry_mod = types.ModuleType("homeassistant.helpers.issue_registry")
+
+
+class IssueSeverity(enum.StrEnum):
+    CRITICAL = "critical"
+    ERROR = "error"
+    WARNING = "warning"
+
+
+issue_registry_mod.IssueSeverity = IssueSeverity
+issue_registry_mod.created = []
+issue_registry_mod.deleted = []
+issue_registry_mod.async_create_issue = (
+    lambda hass, domain, issue_id, **kw: issue_registry_mod.created.append((domain, issue_id, kw))
+)
+issue_registry_mod.async_delete_issue = (
+    lambda hass, domain, issue_id: issue_registry_mod.deleted.append((domain, issue_id))
+)
+sys.modules["homeassistant.helpers.issue_registry"] = issue_registry_mod
+helpers_mod.issue_registry = issue_registry_mod
+
 # --- MOCK util.dt ---
 # Home Assistant's timezone-aware clock helpers. The integration uses
 # dt_util.utcnow() rather than the naive, deprecated datetime.utcnow().

@@ -64,6 +64,12 @@
       "message": "No se ha cambiado el material del CFS en {printers}: {error}"
     }
   },
+  "issues": {
+    "missing_power_switch": {
+      "title": "No se encuentra el interruptor de encendido de {printer}",
+      "description": "El interruptor de encendido configurado para {printer}, `{entity_id}`, no existe, así que se ha cambiado de nombre o se ha eliminado. La integración se conecta a la impresora como si no se hubiera configurado ninguno. Para volver a usar uno, elígelo en Ajustes > Dispositivos y servicios > Creality WebSocket Integration > Configurar > Interruptor de encendido."
+    }
+  },
   "selector": {
     "camera_mode": {
       "options": {

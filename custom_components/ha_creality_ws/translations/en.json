@@ -64,6 +64,12 @@
       "message": "The CFS material was not changed on {printers}: {error}"
     }
   },
+  "issues": {
+    "missing_power_switch": {
+      "title": "Power switch for {printer} not found",
+      "description": "The power switch set for {printer}, `{entity_id}`, does not exist, so it was renamed or removed. The printer is connected to as if no power switch were set. To use one again, choose it under Settings > Devices & services > Creality WebSocket Integration > Configure > Power switch."
+    }
+  },
   "selector": {
     "camera_mode": {
       "options": {

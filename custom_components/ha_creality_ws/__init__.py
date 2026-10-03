@@ -518,6 +518,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # so a printer that goes silent mid-print would leave a card counting
         # down on the phone forever. Reuses this interval; no new timer.
         coord.notifier_tick()
+        # A configured switch that has gone missing never sends a state
+        # change; this is where the end of its grace period is noticed.
+        if coord._switch_missing_since is not None:  # pylint: disable=protected-access
+            hass.async_create_task(coord.async_recheck_missing_switch())
         # Listener updates are left to the coordinator, which throttles them.
     
     cancel_interval = async_track_time_interval(

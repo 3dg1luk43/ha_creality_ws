@@ -46,6 +46,10 @@ MODEL = "K"
 
 # ---- Health / reconnect / keepalive ----
 STALE_AFTER_SECS = 15
+# How long a configured power switch may be missing from the state machine
+# before it is treated as no switch. Long enough for the plug's own integration
+# to load after this one at startup.
+POWER_SWITCH_MISSING_GRACE_SECS = 120
 RETRY_MIN_BACKOFF = 1.0
 RETRY_MAX_BACKOFF = 300.0
 RETRY_BACKOFF_MULTIPLIER = 1.8

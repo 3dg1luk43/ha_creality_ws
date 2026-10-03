@@ -165,3 +165,67 @@ def test_a_repeated_state_report_is_not_an_edge():
         assert client.calls == []
 
     asyncio.run(run())
+
+
+# --- a switch that has gone missing (R24) ----------------------------------- #
+
+import homeassistant.helpers.issue_registry as ir  # noqa: E402  (conftest stub)
+
+import custom_components.ha_creality_ws.coordinator as coord_mod  # noqa: E402
+
+
+def _missing(monkeypatch):
+    coord, hass, client = _coordinator("on")
+    hass._states.pop(SWITCH)
+    clock = [1000.0]
+    monkeypatch.setattr(coord_mod.time, "monotonic", lambda: clock[0])
+    ir.created.clear()
+    ir.deleted.clear()
+    return coord, hass, client, clock
+
+
+def test_a_missing_switch_counts_as_off_while_integrations_load(monkeypatch):
+    coord, _, _, clock = _missing(monkeypatch)
+    assert coord.power_is_off() is True
+    clock[0] += 60
+    assert coord.power_is_off() is True
+    assert ir.created == []
+
+
+def test_a_switch_that_stays_missing_stops_blocking_the_printer(monkeypatch):
+    """R24. A renamed or deleted switch counted as off forever: the printer
+    never connected again, with only a debug line to say why."""
+    coord, _, _, clock = _missing(monkeypatch)
+    coord.power_is_off()
+    clock[0] += 121
+    assert coord.power_is_off() is False
+    assert coord.power_is_off() is False
+    assert len(ir.created) == 1, "the repair is raised once"
+    domain, issue_id, kw = ir.created[0]
+    assert kw["translation_key"] == "missing_power_switch"
+    assert kw["translation_placeholders"]["entity_id"] == SWITCH
+
+
+def test_the_repair_is_withdrawn_when_the_switch_comes_back(monkeypatch):
+    coord, hass, _, clock = _missing(monkeypatch)
+    coord.power_is_off()
+    clock[0] += 121
+    coord.power_is_off()
+    hass.set_switch("on")
+    assert coord.power_is_off() is False
+    assert len(ir.deleted) == 1
+
+
+def test_the_end_of_the_grace_period_starts_a_client_deferred_at_setup(monkeypatch):
+    """No state change ever arrives for an entity that does not exist, so the
+    interval check has to notice the grace period ending."""
+
+    async def run():
+        coord, _, client, clock = _missing(monkeypatch)
+        coord._last_power_off = coord._switch_reports_off()  # deferred at setup
+        assert coord._last_power_off is True
+        clock[0] += 121
+        await coord.async_recheck_missing_switch()
+        assert client.calls == ["start"]
+
+    asyncio.run(run())

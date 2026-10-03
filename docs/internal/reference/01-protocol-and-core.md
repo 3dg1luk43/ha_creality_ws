@@ -278,7 +278,7 @@ Only on a K2 Base. `GET http://<host>:7125/printer/objects/query?objects=tempera
 
 1. If the WebSocket is connected, **always False**, so a connected link outranks a switch that says off. This is availability semantics only; power *edges* use `_switch_reports_off()`, which is rules 2-4 without rule 1.
 2. No switch configured: False.
-3. Switch entity missing from the state machine: True (fail-safe, `:319-321`). A renamed or deleted switch therefore keeps the printer "off" forever: the client is never started at setup (`:329-332`) and every entity is unavailable, with only a debug line.
+3. Switch entity missing from the state machine: True for `POWER_SWITCH_MISSING_GRACE_SECS` (120 s, the plug's integration may load after this one), then False with a WARNING and a Repairs issue `missing_power_switch_<entry_id>` (`translation_key` `missing_power_switch`), withdrawn when the entity reappears (R24). `async_recheck_missing_switch`, run from the 5 s interval check while the switch is missing, applies the resulting on edge, since no state event arrives for a missing entity and a client deferred at setup is not polling. Before R24 a renamed or deleted switch kept the printer "off" forever.
 4. Otherwise True for `off`, `unavailable`, `unknown`.
 
 ### 4.3 Power-switch edge handling (`coordinator.py:381-407`, wired at `__init__.py:458-469`)

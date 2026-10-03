@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A CFS unit that showed up later got no sensors until a restart**: a second CFS chained on while Home Assistant was running, or a CFS that reported after the external spool holder at startup, was never given entities. A change in the set of boxes now triggers the same discovery a first report does.
 - **Typing in the CFS card's editor lost the cursor after every character**: each change rebuilt the editor, so a title had to be typed one letter at a time, and changing the display mode jumped back to the first tab. The editor is now built once and keeps its focus and tab.
 - **In a sections dashboard the CFS card covered the card below it**: the card asked for a fixed height and then drew past it, by about 170 pixels for one CFS on a phone. It now takes exactly the height it needs.
+- **A renamed or deleted power switch kept the printer offline for good**: the integration treated a power switch it could not find as "off" and never connected again, with nothing in the log at the normal level. A switch that is still missing two minutes after startup is now ignored, the printer connects, and a repair in Settings > Repairs names the switch so you can choose another one.
 
 ## 0.9.8 - 2026-09-26
 > [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)
