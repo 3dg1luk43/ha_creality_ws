@@ -399,11 +399,11 @@ No `connectedCallback`/`disconnectedCallback` on the card. Nothing global is sub
 
 `k_cfs_card.js:2524-2695`.
 
-- `setConfig` and `connectedCallback` both call `_render()`, which replaces the whole shadow tree, recreates both `ha-form`s and resets the active tab to Entities (`:2540-2583`). Because HA echoes every `config-changed` as `setConfig`, this happens on every keystroke (T4).
+- Built once since R22 (`_refresh` -> `_build` the first time, then `_setFormData`, which reassigns `data` only when the JSON of the config differs from what the forms show). `_edited` updates the shown data before dispatching, so Lovelace's echoed `setConfig` is a no-op. A late language load relabels (`_applyLabels`: tab text, new `computeLabel` functions, theme schema). Before R22 every `setConfig` replaced the shadow tree, so every keystroke lost focus and the tab reset to Entities. Pinned by `tools/tests/js/test_cfs_editor.mjs`.
 - `config-changed` is dispatched synchronously on every `value-changed`, no debounce (`:2688-2694`), with the full 62-key config.
 - Entities form: 52 fields (`name` + 51 entity selectors, all `domain: sensor`, no integration filter), labels via `label_*` keys with `{box}`/`{slot}` placeholders (1-based for display) (`:2598-2655`). Unknown names fall back to the raw key.
 - "Theme" tab holds `view_mode` (select: full/compact/box) and `show_type_in_mini` (`:2657-2686`). The tab name says Theme; there is no theming.
-- `set hass` updates `hass` on the entities form only (`:2534-2538`); the theme form keeps whatever `hass` it had at the last rebuild.
+- `set hass` updates `hass` on both forms (R22).
 
 ---
 

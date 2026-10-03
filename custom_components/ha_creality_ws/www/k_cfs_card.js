@@ -2533,24 +2533,51 @@ class KCFSCardEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (this._form) this._form.hass = hass;
-    _requestI18n(this, hass, () => { if (this._root) this._render(); });
+    _requestI18n(this, hass, () => this._refresh(true));
+    this._refresh();
   }
 
   setConfig(config) {
     this._cfg = { ...KCFSCard.getStubConfig(), ...KCFSCard._migrateConfig(config) };
-    this._render();
+    this._refresh();
   }
 
   connectedCallback() {
-    this._render();
+    this._refresh();
   }
 
-  _render() {
+  /**
+   * Build once, then only update.
+   *
+   * Lovelace answers every config-changed with a fresh setConfig. Rebuilding
+   * the editor's DOM on each one, as this did, lost the focused field after
+   * every keystroke and jumped back to the first tab (R22). Data is only
+   * reassigned when it really differs from what the forms already show.
+   */
+  _refresh(relabel = false) {
+    if (!this._cfg) return;
     if (!this._root) {
       this._root = this.attachShadow({ mode: "open" });
     }
+    if (!this._form) {
+      this._build();
+      relabel = true;
+    }
+    this._form.hass = this._hass;
+    this._themeForm.hass = this._hass;
+    if (relabel) this._applyLabels();
+    this._setFormData();
+  }
 
+  _setFormData() {
+    const key = JSON.stringify(this._cfg);
+    if (key === this._shownKey) return;
+    this._shownKey = key;
+    this._form.data = this._cfg;
+    this._themeForm.data = this._cfg;
+  }
+
+  _build() {
     const style = `
       .editor-container { padding: 16px; }
       .tabs { display: flex; border-bottom: 1px solid var(--divider-color); margin-bottom: 16px; }
@@ -2565,8 +2592,8 @@ class KCFSCardEditor extends HTMLElement {
       <style>${style}</style>
       <div class="editor-container">
         <div class="tabs">
-          <div class="tab active" data-tab="entities">${this._t("tab_entities")}</div>
-          <div class="tab" data-tab="theme">${this._t("tab_theme")}</div>
+          <div class="tab active" data-tab="entities" id="tab-entities"></div>
+          <div class="tab" data-tab="theme" id="tab-theme"></div>
         </div>
         <div class="tab-content active" id="entities-tab">
           <ha-form id="form"></ha-form>
@@ -2580,6 +2607,19 @@ class KCFSCardEditor extends HTMLElement {
     this._setupTabs();
     this._setupEntitiesForm();
     this._setupThemeForm();
+  }
+
+  /** Everything that reads a translation, so a late language load relabels. */
+  _applyLabels() {
+    this._root.getElementById("tab-entities").textContent = this._t("tab_entities");
+    this._root.getElementById("tab-theme").textContent = this._t("tab_theme");
+    // New function objects, so ha-form re-renders its labels.
+    this._form.computeLabel = (s) => this._entityLabel(s);
+    this._themeForm.schema = this._themeSchema();
+    this._themeForm.computeLabel = (s) => ({
+      view_mode: this._t("schema_view_mode"),
+      show_type_in_mini: this._t("schema_show_type_in_mini"),
+    }[s.name] || s.name);
   }
 
   _setupTabs() {
@@ -2597,8 +2637,6 @@ class KCFSCardEditor extends HTMLElement {
 
   _setupEntitiesForm() {
     this._form = this._root.getElementById("form");
-    this._form.hass = this._hass;
-    this._form.data = this._cfg;
     const schema = [
       { name: "name", selector: { text: {} } },
       { name: "external_filament", selector: { entity: { domain: "sensor" } } },
@@ -2617,7 +2655,15 @@ class KCFSCardEditor extends HTMLElement {
     }
 
     this._form.schema = schema;
-    this._form.computeLabel = (s) => {
+    // Assigned unconditionally: ha-form leaves computeHelper undefined until
+    // someone sets it, so guarding on it meant this never ran. Harmless here
+    // only because ha-form's own default is "no helper" either way.
+    this._form.computeHelper = () => "";
+
+    this._form.addEventListener("value-changed", (ev) => this._edited(ev.detail.value));
+  }
+
+  _entityLabel(s) {
       if (s.name === "name") return this._t("label_card_title");
       if (s.name === "external_filament") return this._t("label_external_filament");
       if (s.name === "external_color") return this._t("label_external_color");
@@ -2642,23 +2688,22 @@ class KCFSCardEditor extends HTMLElement {
       }
 
       return s.name;
-    };
-    // Assigned unconditionally: ha-form leaves computeHelper undefined until
-    // someone sets it, so guarding on it meant this never ran. Harmless here
-    // only because ha-form's own default is "no helper" either way.
-    this._form.computeHelper = () => "";
-
-    this._form.addEventListener("value-changed", (ev) => {
-      this._cfg = { ...this._cfg, ...ev.detail.value };
-      this._dispatchConfigChange();
-    });
   }
 
   _setupThemeForm() {
-    const themeForm = this._root.getElementById("theme-form");
-    themeForm.hass = this._hass;
-    themeForm.data = this._cfg;
-    themeForm.schema = [
+    this._themeForm = this._root.getElementById("theme-form");
+    this._themeForm.addEventListener("value-changed", (ev) => this._edited(ev.detail.value));
+  }
+
+  /** One edit: show it, then tell Lovelace, whose echo is then a no-op. */
+  _edited(value) {
+    this._cfg = { ...this._cfg, ...value };
+    this._setFormData();
+    this._dispatchConfigChange();
+  }
+
+  _themeSchema() {
+    return [
       {
         name: "view_mode",
         selector: {
@@ -2674,15 +2719,6 @@ class KCFSCardEditor extends HTMLElement {
       },
       { name: "show_type_in_mini", selector: { boolean: {} } },
     ];
-    themeForm.computeLabel = (s) => ({
-      view_mode: this._t("schema_view_mode"),
-      show_type_in_mini: this._t("schema_show_type_in_mini"),
-    }[s.name] || s.name);
-
-    themeForm.addEventListener("value-changed", (ev) => {
-      this._cfg = { ...this._cfg, ...ev.detail.value };
-      this._dispatchConfigChange();
-    });
   }
 
   _dispatchConfigChange() {
