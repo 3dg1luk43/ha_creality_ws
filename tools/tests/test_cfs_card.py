@@ -70,6 +70,7 @@ def test_the_javascript_suites_are_discoverable():
         "test_printer_editor.mjs", "test_printer_telemetry.mjs",
         "test_printer_migration.mjs", "test_printer_render.mjs", "test_cfs_editor.mjs",
         "test_card_language.mjs", "test_accessibility.mjs", "test_config_defaults.mjs",
+        "test_printer_actions.mjs",
     ):
         assert expected in JS_SUITES, f"{expected} is missing from {JS_SUITES}"
 

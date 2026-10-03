@@ -164,15 +164,6 @@ class ColourPresetsManager {
     return true;
   }
 
-  rename(from, to) {
-    const target = String(to || "").trim();
-    if (!target || !(from in this.presets) || target === from) return false;
-    this.presets[target] = this.presets[from];
-    delete this.presets[from];
-    this._persist();
-    return true;
-  }
-
   remove(name) {
     if (!(name in this.presets)) return false;
     delete this.presets[name];
@@ -238,7 +229,6 @@ const CFS_TRANSLATIONS = {
     picker_description: "A card to control the Creality Filament System (CFS)",
     no_data: "No CFS data available",
     ext_label: "EXT",
-    cfs_label: "CFS",
     cfs_number_label: "CFS {number}",
     // Editor
     label_card_title: "Card Title",
@@ -508,9 +498,6 @@ class KCFSCard extends HTMLElement {
   }
 
   // i18n helpers -------------------------------------------------------
-  _resolveLanguage() {
-    return _resolveLang(this._hass);
-  }
   _t(key, vars) {
     return _translate(this._hass, "cfs_card", CFS_TRANSLATIONS, key, vars);
   }
@@ -1133,7 +1120,17 @@ class KCFSCard extends HTMLElement {
         place-items: center;
         padding: 16px;
         background: rgba(0, 0, 0, 0.55);
+        /* Undo the <dialog> defaults: the element is the full-screen backdrop. */
+        border: none;
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        max-width: none;
+        max-height: none;
+        box-sizing: border-box;
+        color: inherit;
       }
+      .edit-overlay::backdrop { background: transparent; }
       .edit-dialog {
         width: min(420px, 100%);
         max-height: 85vh;
@@ -2052,7 +2049,9 @@ class KCFSCard extends HTMLElement {
     toast.setAttribute("role", "status");
     toast.setAttribute("aria-live", "polite");
     toast.textContent = message;
-    this._root.appendChild(toast);
+    // Inside the open edit dialog when there is one: it is in the top layer,
+    // and a toast on the card would be painted under it.
+    (this._dialogEl || this._root).appendChild(toast);
     this._toastEl = toast;
     this._toastTimer = setTimeout(() => {
       if (toast.remove) toast.remove();
@@ -2104,7 +2103,11 @@ class KCFSCard extends HTMLElement {
       return;
     }
 
-    const overlay = document.createElement("div");
+    // A native <dialog> opened with showModal() renders in the top layer. The
+    // <div> overlay before it stayed inside this card's stacking context
+    // (`:host { z-index: 1 }`), so a second CFS card further down the page was
+    // painted over the bottom of the dialog (R46, seen in Chromium).
+    const overlay = document.createElement("dialog");
     overlay.className = "edit-overlay";
     const dialog = document.createElement("div");
     dialog.className = "edit-dialog";
@@ -2121,7 +2124,9 @@ class KCFSCard extends HTMLElement {
     const opener = this._root.activeElement || null;
     const close = () => {
       overlay.removeEventListener("keydown", onKeyDown);
+      if (overlay.close && overlay.open) overlay.close();
       if (overlay.remove) overlay.remove();
+      if (this._dialogEl === overlay) this._dialogEl = null;
       if (opener && opener.focus) opener.focus();
     };
     const onKeyDown = (ev) => {
@@ -2151,10 +2156,17 @@ class KCFSCard extends HTMLElement {
     overlay.appendChild(dialog);
     overlay.appendChild(after);
     overlay.addEventListener("keydown", onKeyDown);
+    // Escape on a modal <dialog> arrives as `cancel`; close it our way.
+    overlay.addEventListener("cancel", (ev) => {
+      ev.preventDefault?.();
+      close();
+    });
     overlay.addEventListener("click", (ev) => { if (ev.target === overlay) close(); });
 
     dialog.appendChild(this._renderEditForm(slot, close));
     this._root.appendChild(overlay);
+    this._dialogEl = overlay;
+    if (overlay.showModal) overlay.showModal();
     // Focus the dialog itself rather than the first field: ha-form upgrades
     // asynchronously, so its inputs may not exist yet.
     if (dialog.focus) dialog.focus();
@@ -2363,17 +2375,54 @@ class KCFSCard extends HTMLElement {
         swatch.title = name;
         swatch.setAttribute("aria-label", name);
         swatch.style.background = colour;
-        swatch.addEventListener("click", () => apply(colour));
+        let longPressed = false;
+        swatch.addEventListener("click", () => {
+          // The click that ends a long press is not a pick.
+          if (longPressed) {
+            longPressed = false;
+            return;
+          }
+          apply(colour);
+        });
 
         if (this._presets.isCustom(name)) {
           swatch.classList?.add?.("custom");
-          // Long-press-free management: a modifier click removes a custom preset,
-          // which keeps the row compact without a second list.
-          swatch.addEventListener("contextmenu", (ev) => {
-            ev.preventDefault?.();
+          const removePreset = () => {
             if (this._presets.remove(name)) {
               this._showToast(this._t("toast_preset_deleted", { name }));
               rebuild();
+            }
+          };
+          // A right-click removes a custom preset, which keeps the row compact
+          // without a second list.
+          swatch.addEventListener("contextmenu", (ev) => {
+            ev.preventDefault?.();
+            removePreset();
+          });
+          // iOS Safari fires no contextmenu on a long press, so a preset could
+          // not be removed there at all: a touch held for 600 ms does it, and
+          // Delete does it from the keyboard (R46).
+          let pressTimer = null;
+          const cancelPress = () => {
+            clearTimeout(pressTimer);
+            pressTimer = null;
+          };
+          swatch.addEventListener("pointerdown", (ev) => {
+            if (ev.pointerType === "mouse") return;
+            cancelPress();
+            pressTimer = setTimeout(() => {
+              pressTimer = null;
+              longPressed = true;
+              removePreset();
+            }, 600);
+          });
+          for (const type of ["pointerup", "pointercancel", "pointerleave"]) {
+            swatch.addEventListener(type, cancelPress);
+          }
+          swatch.addEventListener("keydown", (ev) => {
+            if (ev.key === "Delete" || ev.key === "Backspace") {
+              ev.preventDefault?.();
+              removePreset();
             }
           });
         }
@@ -2670,9 +2719,6 @@ function cfsEntitiesForDevice(hass, deviceId) {
 
 class KCFSCardEditor extends HTMLElement {
   // i18n helpers -------------------------------------------------------
-  _resolveLanguage() {
-    return _resolveLang(this._hass);
-  }
   _t(key, vars) {
     return _translate(this._hass, "cfs_card", CFS_TRANSLATIONS, key, vars);
   }

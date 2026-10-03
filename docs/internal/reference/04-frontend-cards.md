@@ -475,7 +475,7 @@ Identical or near-identical in both files: the whole i18n block (section 3), `de
 
 **T4. The CFS editor rebuilds on every keystroke.** `setConfig` -> `_render()` replaces both forms and resets the tab, and HA calls `setConfig` after each `config-changed`. Reproduced in the harness: after one `value-changed` plus the echo, `_form` is a new element and the Theme tab is no longer active. The printer editor solved exactly this; the CFS editor did not get the same treatment.
 
-**T5. The CFS dialog lives inside the card's stacking context.** `:host { position: relative; z-index: 1 }` makes every CFS card its own stacking context at level 1. The overlay's `z-index: 100` only orders it inside that context, so later siblings with their own stacking context (a second CFS card, which has the same host rule) and HA's toolbar paint over the backdrop and possibly the dialog. A native `<dialog>` with `showModal()` (top layer) would escape this and also give a focus trap and Escape handling.
+**T5. FIXED (R46): the edit dialog is a native `<dialog>` opened with `showModal()`, so it renders in the top layer; toasts raised while it is open go inside it.** Before: `:host { position: relative; z-index: 1 }` makes every CFS card its own stacking context at level 1. The overlay's `z-index: 100` only orders it inside that context, so later siblings with their own stacking context (a second CFS card, which has the same host rule) and HA's toolbar paint over the backdrop and possibly the dialog. A native `<dialog>` with `showModal()` (top layer) would escape this and also give a focus trap and Escape handling.
 
 **T6. FIXED (R23).** `getLayoutOptions` with numeric rows plus `height:auto !important` overflowed sections: measured overlap 176 px (full) and 31 px (compact) at 390 px wide, 0 with `getGridOptions` rows auto. The `!important` heights stay; with an auto row they no longer fight the wrapper.
 
@@ -483,7 +483,7 @@ Identical or near-identical in both files: the whole i18n block (section 3), `de
 
 **T8. Placeholder values are replacement strings.** `toast_preset_saved` with a preset called `Teal $& Co` renders `Preset "Teal {name} Co" saved` (reproduced). Same in the printer card. Use a replacer function.
 
-**T9. Module-scope `const` declared after `defineOnce`.** `THEME_COLOR_FIELDS` (`k_printer_card.js:1389`) is used by `KPrinterCard._migrateTheme` but declared after `defineOnce(CARD_TAG, KPrinterCard)` (`:1326`). Safe today only because HA calls `setConfig` after `whenDefined` resolves, which is after module evaluation; any synchronous use during upgrade would hit the temporal dead zone.
+**T9. FIXED (R46): both elements are defined at the end of the module.** Before: `THEME_COLOR_FIELDS` (`k_printer_card.js:1389`) is used by `KPrinterCard._migrateTheme` but declared after `defineOnce(CARD_TAG, KPrinterCard)` (`:1326`). Safe today only because HA calls `setConfig` after `whenDefined` resolves, which is after module evaluation; any synchronous use during upgrade would hit the temporal dead zone.
 
 **T10. The editors emit the whole merged config.** Both editors dispatch `{...stub, ...config}`: 62 keys for CFS, 28 top-level keys plus a 23-key theme for the printer card. Defaults are frozen into every saved dashboard, so changing a default later reaches no existing card, and the YAML view is mostly empty strings.
 

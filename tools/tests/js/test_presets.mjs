@@ -166,12 +166,33 @@ test("right-clicking a standard swatch does not delete it", async () => {
   assert.equal(swatchesOf(presetsSection(card)).length, 12);
 });
 
-test("renaming moves the colour", async () => {
+test("a long touch removes a custom preset, as iOS has no right-click", async () => {
   const { card } = await setup();
   presetsSection(card);
   card._presets.save("Teal", "#008080");
-  assert.equal(card._presets.rename("Teal", "Petrol"), true);
-  assert.equal(card._presets.presets.Petrol, "#008080");
+  const custom = swatchesOf(presetsSection(card)).find((sw) => sw.title === "Teal");
+  custom.fire("pointerdown", { pointerType: "touch" });
+  await new Promise((done) => setTimeout(done, 700));
+  assert.ok(!("Teal" in card._presets.presets), "the preset is gone");
+});
+
+test("a short touch picks the colour and keeps the preset", async () => {
+  const { card } = await setup();
+  presetsSection(card);
+  card._presets.save("Teal", "#008080");
+  const custom = swatchesOf(presetsSection(card)).find((sw) => sw.title === "Teal");
+  custom.fire("pointerdown", { pointerType: "touch" });
+  custom.fire("pointerup", {});
+  await new Promise((done) => setTimeout(done, 700));
+  assert.ok("Teal" in card._presets.presets);
+});
+
+test("Delete removes a focused custom preset", async () => {
+  const { card } = await setup();
+  presetsSection(card);
+  card._presets.save("Teal", "#008080");
+  const custom = swatchesOf(presetsSection(card)).find((sw) => sw.title === "Teal");
+  custom.fire("keydown", { key: "Delete", preventDefault() {} });
   assert.ok(!("Teal" in card._presets.presets));
 });
 

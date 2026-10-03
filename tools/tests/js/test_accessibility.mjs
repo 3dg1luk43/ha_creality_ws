@@ -87,6 +87,33 @@ test("the printer editor's tabs are keyboard-reachable tabs", () => {
   assert.deepEqual(tabs.map((t) => t.getAttribute("aria-selected")), ["false", "true"]);
 });
 
+test("Stop asks through Home Assistant's own dialog, not confirm()", () => {
+  // window.confirm() is switched off in some kiosk browsers and webviews, where
+  // it answers "no" without asking, so Stop silently did nothing (R46).
+  const { KPrinterCard, sandbox } = loadPrinterCard();
+  let nativeConfirm = 0;
+  sandbox.confirm = () => { nativeConfirm += 1; return true; };
+  const card = new KPrinterCard();
+  card.setConfig({ name: "K1C", status: "sensor.s", stop_btn: "button.stop" });
+  card.hass = {
+    states: { "sensor.s": { state: "printing", attributes: {} }, "button.stop": { state: "unknown", attributes: {} } },
+    language: "en", locale: { language: "en" }, formatEntityState: (st) => String(st?.state ?? "-"),
+    callService: async () => { throw new Error("must not run before the dialog is answered"); },
+  };
+  const events = [];
+  card.dispatchEvent = (ev) => { events.push(ev); return true; };
+  const container = card._root.getElementById("chips-container");
+  const stop = card._root.getElementById("stop");
+  container._listeners.click.forEach((fn) => fn({ target: { closest: () => stop } }));
+  assert.equal(nativeConfirm, 0);
+  const action = events.find((ev) => ev.type === "hass-action");
+  assert.ok(action, "no hass-action was fired");
+  const tap = action.detail.config.tap_action;
+  assert.equal(tap.perform_action, "button.press");
+  assert.equal(tap.target.entity_id, "button.stop");
+  assert.equal(tap.confirmation.text, "Are you sure you want to stop the print?");
+});
+
 // --------------------------------------------------------------------------- //
 // CFS card
 // --------------------------------------------------------------------------- //
@@ -158,6 +185,18 @@ test("Tab cannot leave the edit dialog", async () => {
   before._listeners.focus.forEach((fn) => fn({}));
   const buttons = Array.from(dialog.querySelectorAll("button")).filter((btn) => !btn.disabled);
   assert.ok(buttons.length && buttons[buttons.length - 1]._focused);
+});
+
+test("the edit dialog is a native modal dialog, so no card can paint over it", async () => {
+  // A <div> overlay stayed inside the card's stacking context (z-index 1), and
+  // a second CFS card further down covered the bottom of the dialog (R46).
+  const { card, SLOT } = await cfsCard();
+  card._showEditDialog(SLOT);
+  const overlay = card.children.find((c) => c.className === "edit-overlay");
+  assert.equal(overlay.tagName.toLowerCase(), "dialog");
+  // A toast raised while it is open goes inside it, or the top layer would hide it.
+  card._showToast("Saved");
+  assert.ok(overlay.children.some((c) => c.className === "cfs-toast"));
 });
 
 test("the CFS editor's tabs are keyboard-reachable tabs", () => {

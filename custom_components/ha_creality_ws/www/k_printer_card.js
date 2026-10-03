@@ -390,6 +390,20 @@ function withoutDefaults(config, defaults) {
   return out;
 }
 
+/** A theme value safe inside a <style> element, or "" when it is not (R46). */
+function cssValue(value) {
+  const text = String(value ?? "");
+  return /^[#\w\s(),.%+\-]*$/.test(text) ? text : "";
+}
+
+/** Text safe inside a double-quoted HTML attribute. */
+function attr(value) {
+  return String(value ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Entities the custom chip switches on and off rather than pressing (R46).
+const CUSTOM_TOGGLE_DOMAINS = ["switch", "light", "input_boolean", "fan", "cover"];
+
 /** A theme colour, or `fallback` when it is unset or "auto". */
 function autoColour(value, fallback) {
   return !value || value === "auto" ? fallback : value;
@@ -563,9 +577,6 @@ class KPrinterCard extends HTMLElement {
   }
 
   // i18n helpers -------------------------------------------------------
-  _resolveLanguage() {
-    return _resolveLang(this._hass);
-  }
   _t(key) {
     return _translate(this._hass, "printer_card", CARD_TRANSLATIONS, key);
   }
@@ -633,8 +644,13 @@ class KPrinterCard extends HTMLElement {
     const defaultConfig = KPrinterCard.defaultConfig();
     this._cfg.theme = { ...defaultConfig.theme, ...(this._cfg.theme || {}) };
 
-    // Apply theme variables to CSS custom properties
-    const theme = this._cfg.theme;
+    // Apply theme variables to CSS custom properties. Each value lands inside a
+    // <style> element, so anything that is not plainly a colour is dropped
+    // (and its default used): a value with `;`, `}` or `</style>` could
+    // otherwise rewrite the card's CSS or break out into markup (R46).
+    const theme = Object.fromEntries(
+      Object.entries(this._cfg.theme).map(([key, value]) => [key, cssValue(value)]),
+    );
 
     // Theme CSS custom properties - embedded directly in CSS
     const themeCSS = `
@@ -869,7 +885,8 @@ class KPrinterCard extends HTMLElement {
           // the stronger warning as much as a running print does.
           const printing = ["printing", "paused", "processing"].includes(st);
           const msg = printing ? this._t("confirm_power_off_printing") : this._t("confirm_power_off");
-          if (!confirm(msg)) return;
+          this._confirmedAction(msg, "homeassistant.turn_off", eid);
+          return;
         }
         this._toggleEntity(eid);
       } else if (id === "light") {
@@ -880,18 +897,23 @@ class KPrinterCard extends HTMLElement {
       } else if (id === "resume") {
         this._pressButtonEntity(this._cfg.resume_btn);
       } else if (id === "stop") {
-        if (confirm(this._t("confirm_stop"))) {
-          this._pressButtonEntity(this._cfg.stop_btn);
-        }
+        const eid = this._cfg.stop_btn;
+        const domain = (eid || "").split(".")[0];
+        const service = ["button", "input_button"].includes(domain) ? `${domain}.press` : "homeassistant.turn_on";
+        this._confirmedAction(this._t("confirm_stop"), service, eid);
       } else if (id === "custom") {
-        // Custom button can be a button (press), script (turn_on/run), switch (toggle), automation (trigger), etc.
-        // For simplicity, treat as toggle if switch/light/input_boolean, else press/turn_on
+        // What a tap means for each kind of entity: on/off things toggle (the
+        // chip already shows fans and covers as on/off, but only ever turned
+        // them on), an automation runs rather than being enabled, and buttons,
+        // scripts and scenes are pressed or turned on (R46).
         const eid = this._cfg.custom_btn;
         const domain = eid ? (eid.split(".")[0] || "").toLowerCase() : "";
-        if (["switch", "light", "input_boolean"].includes(domain)) {
+        if (CUSTOM_TOGGLE_DOMAINS.includes(domain)) {
           this._toggleEntity(eid);
+        } else if (domain === "automation") {
+          this._hass?.callService("automation", "trigger", { entity_id: eid });
         } else {
-          this._pressButtonEntity(eid);  // Fallback to press (works for button domain, or generic turn_on if mapped)
+          this._pressButtonEntity(eid);
         }
       }
     });
@@ -1046,11 +1068,30 @@ class KPrinterCard extends HTMLElement {
     this.dispatchEvent(new CustomEvent("ll-rebuild", { bubbles: true, composed: true }));
   }
 
-  // Re-implement _pressButtonEntity to be smarter about non-button domains if needed, 
-  // but existing implementation calls button.press. 
-  // For custom buttons (e.g. scripts), we might want to default to homeassistant.turn_on if button.press fails is overkill, 
-  // but let's keep it simple: if it's a script/automation, button.press might not work.
-  // Let's refine _pressButtonEntity to handle more types or create a generic helper.
+  /**
+   * Run `service` on `entityId` behind Home Assistant's own confirmation
+   * dialog. window.confirm() is switched off in some kiosk browsers and
+   * webviews, where it answers "no" without asking, so Stop and power-off
+   * silently did nothing there (R46).
+   */
+  _confirmedAction(text, service, entityId) {
+    if (!entityId) return;
+    this.dispatchEvent(new CustomEvent("hass-action", {
+      bubbles: true,
+      composed: true,
+      detail: {
+        action: "tap",
+        config: {
+          tap_action: {
+            action: "perform-action",
+            perform_action: service,
+            target: { entity_id: entityId },
+            confirmation: { text },
+          },
+        },
+      },
+    }));
+  }
 
   async _pressButtonEntity(eid) {
     if (!this._hass || !eid) return;
@@ -1058,7 +1099,7 @@ class KPrinterCard extends HTMLElement {
     if (domain === "button" || domain === "input_button") {
       await this._hass.callService(domain, "press", { entity_id: eid });
     } else {
-      // Fallback for scripts, automations, scenes which act like "press" via turn_on
+      // Scripts and scenes run through turn_on.
       await this._hass.callService("homeassistant", "turn_on", { entity_id: eid });
     }
   }
@@ -1275,7 +1316,7 @@ class KPrinterCard extends HTMLElement {
     uniqueOrder.forEach(key => {
       const btn = buttons[key];
       if (btn && !btn.hidden) {
-        chipsHtml += `<button class="chip ${btn.class}" id="${key}" title="${btn.title}" aria-label="${btn.title}"><ha-icon icon="${btn.icon}"></ha-icon></button>`;
+        chipsHtml += `<button class="chip ${btn.class}" id="${key}" title="${attr(btn.title)}" aria-label="${attr(btn.title)}"><ha-icon icon="${attr(btn.icon)}"></ha-icon></button>`;
       }
     });
 
@@ -1458,7 +1499,6 @@ function defineOnce(tag, cls) {
   }
 }
 
-defineOnce(CARD_TAG, KPrinterCard);
 
 /**
  * Colour controls in the theme tab, grouped the way they are rendered.
@@ -1738,9 +1778,6 @@ function colorData(cfg, group) {
 /* Visual editor: entity wiring on one tab, appearance on the other. */
 class KPrinterCardEditor extends HTMLElement {
   // i18n helpers -------------------------------------------------------
-  _resolveLanguage() {
-    return _resolveLang(this._hass);
-  }
   _t(key, vars) {
     return _translate(this._hass, "printer_card", CARD_TRANSLATIONS, key, vars);
   }
@@ -2185,6 +2222,10 @@ class KPrinterCardEditor extends HTMLElement {
     }));
   }
 }
+// Defined last, once every module-level constant the classes read exists:
+// defining the card upgrades elements already in the page on the spot, and
+// THEME_COLOR_FIELDS (used by _migrateTheme) was declared after it (R46).
+defineOnce(CARD_TAG, KPrinterCard);
 defineOnce(EDITOR_TAG, KPrinterCardEditor);
 
 try {
