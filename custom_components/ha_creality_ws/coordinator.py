@@ -223,6 +223,11 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # undeliverable -- it stays owed until there is somewhere to send it.
         self._card_dismiss_owed = False
         self._soon_dismiss_owed = False
+        # Whether a finishing-soon reminder actually went out this job. The
+        # near-end latch is set with the option off too (detection is not
+        # gated, only sends are), so dismissing on the latch sent a clear for
+        # a reminder that never existed (R28).
+        self._soon_reminder_sent = False
         # An error or runout alert is on a phone. Errors and runouts share one
         # tag, so this is deliberately not two flags: whichever condition
         # resolves last is the one that gets to take the alert away.
@@ -1277,6 +1282,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         ),
                         kind=EVENT_SOON,
                     )
+                    self._soon_reminder_sent = True
                 self._notified_minutes_to_end = True
             elif left_min > (target_min + 2):
                 # The estimate jumped back up by more than the slack; re-arm.
@@ -1293,6 +1299,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._clear_live_card(finished=self._live_card.job_finished)
         if deliver and self._soon_dismiss_owed:
             self._soon_dismiss_owed = False
+            self._soon_reminder_sent = False
             self._notify_dispatch(
                 build_clear_payload(f"{self._notify_tag_base()}_soon"),
                 kind="soon:clear",
@@ -1345,12 +1352,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # it. A print stopped in its last minutes would otherwise leave
         # "finishing in 5 minutes" sitting on the phone for good, and this frame
         # can be the last one that carries a job at all.
-        if deliver and (self._notified_minutes_to_end or self._soon_dismiss_owed):
+        if deliver and (self._soon_reminder_sent or self._soon_dismiss_owed):
             self._notify_dispatch(
                 build_clear_payload(f"{self._notify_tag_base()}_soon"),
                 kind="soon:clear",
                 mobile_only=True,
             )
+            self._soon_reminder_sent = False
         self._soon_dismiss_owed = False
 
         self._fire_print_event(
@@ -1607,7 +1615,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._card_dismiss_owed = True
                 # The reminder is on its own tag, so no banner will ever
                 # supersede it and it always needs taking away by hand.
-                self._soon_dismiss_owed = self._notified_minutes_to_end
+                self._soon_dismiss_owed = self._soon_reminder_sent
                 self._clear_live_card(finished=finished, send=False)
             return
 

@@ -1045,6 +1045,23 @@ def test_no_dismissal_is_sent_when_there_was_never_a_reminder():
     assert f"{coord._notify_tag_base()}_soon" not in tags
 
 
+def test_no_dismissal_for_a_reminder_that_was_switched_off():
+    """R28. With the reminder off, the job still passes through its window and
+    the near-end latch is still set (detection is deliberately not gated), and
+    the dismissal keyed off that latch: every completion sent a clear for a
+    reminder that never existed (the "soon:clear" in #125's log)."""
+    coord, hass = _coordinator()
+    coord._notify_minutes_to_end = False
+    coord._minutes_to_end_value = 30
+    _frame(coord, hass, **_printing(80, printLeftTime=600))
+    assert coord._notified_minutes_to_end is True
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+
+    payloads = _frame(coord, hass, **_printing(100, printLeftTime=0))
+    tags = {c["data"]["tag"] for c in _clears(payloads)}
+    assert f"{coord._notify_tag_base()}_soon" not in tags
+
+
 def test_the_reminder_is_cleared_even_with_completion_notifications_off():
     """The soon-clear used to live inside the terminal-banner path, so a user
     who wanted the reminder but not the completion ping kept a stale
