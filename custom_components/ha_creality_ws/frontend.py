@@ -212,6 +212,16 @@ async def _migrate_local_resources(
     return migrated
 
 
+
+def _remove_old_copy(path: Path) -> None:
+    """Delete a card copy an old version put under /config/www, if there is one."""
+    try:
+        if path.exists():
+            path.unlink()
+            _LOGGER.info("Removed old /config/www copy: %s", path)
+    except OSError as exc:  # pragma: no cover - best-effort cleanup
+        _LOGGER.debug("Failed to remove old /config/www copy %s: %s", path, exc)
+
 class CrealityCardRegistration:
     """Serve k_printer_card.js from the integration package and log instructions.
 
@@ -238,17 +248,11 @@ class CrealityCardRegistration:
 
             _register_static_path(self.hass, integration_url, serve_path)
 
-            # Remove old copy from /config/www if present (cleanup of previous installs)
-            try:
-                dst = Path(self.hass.config.path("www")) / LOCAL_SUBDIR / card_name
-                if dst.exists():
-                    try:
-                        dst.unlink()
-                        _LOGGER.info("Removed old /config/www copy: %s", dst)
-                    except Exception as exc:  # pragma: no cover - best-effort cleanup
-                        _LOGGER.debug("Failed to remove old /config/www copy %s: %s", dst, exc)
-            except Exception:
-                _LOGGER.debug("Could not determine config www path to cleanup old card")
+            # Remove old copy from /config/www if present (cleanup of previous
+            # installs). Filesystem work, so in the executor (R39).
+            await self.hass.async_add_executor_job(
+                _remove_old_copy, Path(self.hass.config.path("www")) / LOCAL_SUBDIR / card_name
+            )
 
             # Try a delicate auto-registration of the lovelace resource; this will only
             # update/create the single resource URL and includes a version query param.
@@ -269,9 +273,13 @@ class CrealityCardRegistration:
             except Exception:
                 _LOGGER.debug("Local-to-integration resource migration failed for %s", integration_url)
 
+        www = Path(__file__).parent / "www"
+        present = await self.hass.async_add_executor_job(
+            lambda: {name for name in (*ASSETS, "i18n") if (www / name).exists()}
+        )
         for asset_name in ASSETS:
-            asset_path = Path(__file__).parent / "www" / asset_name
-            if asset_path.exists():
+            asset_path = www / asset_name
+            if asset_name in present:
                 _register_static_path(
                     self.hass,
                     f"{INTEGRATION_URL_BASE}{asset_name}",
@@ -280,8 +288,8 @@ class CrealityCardRegistration:
             else:
                 _LOGGER.warning("Card asset missing, not registered: %s", asset_path)
 
-        i18n_path = Path(__file__).parent / "www" / "i18n"
-        if i18n_path.exists():
+        i18n_path = www / "i18n"
+        if "i18n" in present:
             # No cache headers here, unlike the cards. Their URLs carry a
             # `?v=` derived from the file's own bytes, so a month-long
             # max-age is exactly what you want; the i18n files are fetched

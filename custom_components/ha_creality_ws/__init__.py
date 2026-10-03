@@ -9,6 +9,7 @@ from typing import Any
 
 
 from homeassistant.config_entries import ConfigEntry, OperationNotAllowed # type: ignore[import]
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP  # type: ignore[import]
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback # type: ignore[import]
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError  # type: ignore[import]
 try:
@@ -306,6 +307,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Registered at once, so a setup that fails further down does not leave
     # the client task running with no entry behind it (R31).
     entry.async_on_unload(coord.async_stop)
+
+    # Entries are not unloaded when Home Assistant stops, so without this the
+    # client kept reconnecting through shutdown until the loop was torn down
+    # under it, and the printer never got a close frame (R39).
+    async def _stop_client(_event) -> None:
+        await coord.async_stop()
+
+    entry.async_on_unload(
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _stop_client)
+    )
     # No wait here. The entities come from the capability cache and fill in
     # as telemetry arrives (late discovery covers anything gated on it). An
     # unconditional 15 s wait for a printer that was switched off held up

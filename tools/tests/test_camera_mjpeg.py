@@ -1,4 +1,4 @@
-"""The MJPEG camera against a real HTTP server (R38).
+"""The MJPEG camera against a real HTTP server (R38), and the direct WebRTC candidate filter (R39).
 
 It had no tests. Snapshots opened the whole stream for one frame, a cancelled
 snapshot kept running because CancelledError was swallowed, a dark printer was
@@ -204,3 +204,70 @@ def test_the_live_stream_goes_through_home_assistants_proxy(monkeypatch):
     assert result == "proxied"
     assert seen == {"request": "req", "status": 200}
     assert printer.hits == ["stream"]
+
+
+# --------------------------------------------------------------------------- #
+# Direct WebRTC: which browser ICE candidates go to the printer (R39)
+# --------------------------------------------------------------------------- #
+
+OFFER = "\r\n".join([
+    "v=0",
+    "o=- 1 1 IN IP4 0.0.0.0",
+    "s=-",
+    "t=0 0",
+    "a=group:BUNDLE 0 1",
+    "m=audio 9 UDP/TLS/RTP/SAVPF 111",
+    "a=mid:0",
+    "m=video 9 UDP/TLS/RTP/SAVPF 96",
+    "a=mid:1",
+    "",
+])
+
+
+def _webrtc_camera():
+    from custom_components.ha_creality_ws.camera import CrealityWebRTCCamera
+
+    return CrealityWebRTCCamera.__new__(CrealityWebRTCCamera)
+
+
+def _candidate(port, mid, index):
+    """Shaped like Home Assistant's webrtc_models.RTCIceCandidateInit."""
+    return SimpleNamespace(
+        candidate=f"candidate:{port} 1 udp 1 10.0.0.2 {port} typ host",
+        sdp_mid=mid,
+        sdp_m_line_index=index,
+    )
+
+
+def test_the_video_transports_candidates_go_to_the_printer():
+    """The "balanced" policy gathers per m-line; the answer keeps the video's
+    transport, so the audio-tagged candidates are for a transport that is
+    thrown away. Read as sdpMid/sdpMLineIndex the tags were always None and
+    every candidate went (R39)."""
+    lines = _webrtc_camera()._candidate_lines_for_video(
+        [_candidate(5000, "0", 0), _candidate(5002, "1", 1), _candidate(5004, "1", 1)], OFFER
+    )
+    assert lines == [
+        "a=candidate:5002 1 udp 1 10.0.0.2 5002 typ host",
+        "a=candidate:5004 1 udp 1 10.0.0.2 5004 typ host",
+    ]
+
+
+def test_max_bundle_candidates_are_all_kept():
+    """Gathered once, tagged with the bundle's first m-line (the audio), and
+    carrying the video: dropping them would leave the printer none."""
+    lines = _webrtc_camera()._candidate_lines_for_video(
+        [_candidate(5000, "0", 0), _candidate(5001, "0", 0)], OFFER
+    )
+    assert len(lines) == 2
+
+
+def test_candidates_in_json_form_are_read_too():
+    lines = _webrtc_camera()._candidate_lines_for_video(
+        [
+            {"candidate": "candidate:5000 1 udp 1 10.0.0.2 5000 typ host", "sdpMid": "0", "sdpMLineIndex": 0},
+            {"candidate": "candidate:5002 1 udp 1 10.0.0.2 5002 typ host", "sdpMid": "1", "sdpMLineIndex": 1},
+        ],
+        OFFER,
+    )
+    assert lines == ["a=candidate:5002 1 udp 1 10.0.0.2 5002 typ host"]

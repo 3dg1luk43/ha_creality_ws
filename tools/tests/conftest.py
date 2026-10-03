@@ -492,6 +492,7 @@ setattr(components_mod, "sensor", components_sensor_mod)
 
 const_mod_ha = types.ModuleType("homeassistant.const")
 const_mod_ha.PERCENTAGE = "%"
+const_mod_ha.EVENT_HOMEASSISTANT_STOP = "homeassistant_stop"
 const_mod_ha.EntityCategory = EntityCategory
 # Not what the version gate reads -- see MAJOR/MINOR below, which is what
 # `_core_version()` imports and what a gate test has to patch. Kept here because

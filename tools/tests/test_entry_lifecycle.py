@@ -82,10 +82,18 @@ def _setup_until_after_start(monkeypatch):
 
     monkeypatch.setattr(integration, "_get_integration_version", _stop_here)
     entry = _entry()
+    listeners = {}
+
+    def _listen_once(event, handler):
+        listeners[event] = handler
+        return lambda: listeners.pop(event, None)
+
+    hass = SimpleNamespace(bus=SimpleNamespace(async_listen_once=_listen_once))
     with pytest.raises(Stop):
         asyncio.get_event_loop().run_until_complete(
-            integration.async_setup_entry(SimpleNamespace(), entry)
+            integration.async_setup_entry(hass, entry)
         )
+    entry.listeners = listeners
     return FakeCoordinator.instances[0], entry
 
 
@@ -98,7 +106,18 @@ def test_a_setup_that_fails_after_the_start_stops_the_client(monkeypatch):
     # Home Assistant runs an entry's on_unload callbacks when setup raises.
     coord, entry = _setup_until_after_start(monkeypatch)
     for fn in entry.on_unload:
-        asyncio.get_event_loop().run_until_complete(fn())
+        result = fn()
+        if asyncio.iscoroutine(result):
+            asyncio.get_event_loop().run_until_complete(result)
+    assert coord.events == ["start", "stop"]
+
+
+def test_home_assistant_stopping_closes_the_connection(monkeypatch):
+    """Entries are not unloaded at shutdown; the client kept reconnecting
+    until the loop was torn down under it (R39)."""
+    coord, entry = _setup_until_after_start(monkeypatch)
+    handler = entry.listeners[integration.EVENT_HOMEASSISTANT_STOP]
+    asyncio.get_event_loop().run_until_complete(handler(None))
     assert coord.events == ["start", "stop"]
 
 

@@ -1245,8 +1245,21 @@ class CrealityWebRTCCamera(_BaseCamera):
         return None
 
     def _candidate_lines_for_video(self, candidates: list, offer_sdp: str) -> list[str]:
-        """Return ICE candidate SDP lines that belong to the original video m-line."""
-        _session, sections = self._split_sdp(offer_sdp)
+        """ICE candidate lines for the printer's video-only offer.
+
+        Home Assistant's player offers audio (mid 0) and then video (mid 1) in
+        one BUNDLE group, and the answer built for it bundles the video alone,
+        so the video's transport is the one the browser keeps. Under the usual
+        "balanced" policy the browser gathers per m-line and tags each
+        candidate with it: the video-tagged ones are the right ones. Under
+        "max-bundle" it gathers once, for the first m-line in the group, and
+        every candidate is tagged with that; then those carry the video too.
+
+        The candidate object is webrtc_models.RTCIceCandidateInit, whose fields
+        are snake_case. Read as sdpMid/sdpMLineIndex they were always None, so
+        no candidate was ever told apart and all of them went (R39).
+        """
+        session_lines, sections = self._split_sdp(offer_sdp)
         video_index = next(
             (idx for idx, section in enumerate(sections) if section and section[0].startswith("m=video ")),
             None,
@@ -1254,32 +1267,39 @@ class CrealityWebRTCCamera(_BaseCamera):
         if video_index is None:
             return []
         video_mid = self._section_mid(sections[video_index])
+        bundle = next(
+            (line.split()[1:] for line in session_lines if line.startswith("a=group:BUNDLE")),
+            [],
+        )
+        section_mids = [self._section_mid(section) for section in sections]
 
-        lines: list[str] = []
+        tagged: list[tuple[str, str | None]] = []
         for candidate in candidates:
-            value = getattr(candidate, "candidate", None)
-            if value is None and isinstance(candidate, dict):
+            if isinstance(candidate, dict):
                 value = candidate.get("candidate")
+                cand_mid = candidate.get("sdpMid", candidate.get("sdp_mid"))
+                cand_index = candidate.get("sdpMLineIndex", candidate.get("sdp_m_line_index"))
+            else:
+                value = getattr(candidate, "candidate", None)
+                cand_mid = getattr(candidate, "sdp_mid", None)
+                cand_index = getattr(candidate, "sdp_m_line_index", None)
             if not value:
                 continue
-
-            cand_mid = getattr(candidate, "sdpMid", None)
-            cand_index = getattr(candidate, "sdpMLineIndex", None)
-            if isinstance(candidate, dict):
-                cand_mid = candidate.get("sdpMid", cand_mid)
-                cand_index = candidate.get("sdpMLineIndex", cand_index)
-
-            if cand_mid is not None and video_mid is not None and str(cand_mid) != str(video_mid):
-                continue
-            if cand_index is not None:
+            if cand_mid is None and cand_index is not None:
                 try:
-                    if int(cand_index) != int(video_index):
-                        continue
-                except (TypeError, ValueError):
-                    pass
+                    cand_mid = section_mids[int(cand_index)]
+                except (TypeError, ValueError, IndexError):
+                    cand_mid = None
+            line = value if str(value).startswith("a=") else f"a={value}"
+            tagged.append((line, None if cand_mid is None else str(cand_mid)))
 
-            lines.append(value if str(value).startswith("a=") else f"a={value}")
-        return lines
+        untagged = [line for line, mid in tagged if mid is None]
+        video = [line for line, mid in tagged if mid is not None and mid == video_mid]
+        if video:
+            return video + untagged
+        if video_mid in bundle:
+            return [line for line, mid in tagged if mid is None or mid in bundle]
+        return untagged
 
     def _replace_mid(self, section: list[str], mid: str) -> list[str]:
         """Return media section with a replaced MID."""
