@@ -357,6 +357,33 @@ def test_a_direct_data_write_of_a_gating_field_still_announces(coord):
     assert len(coord.signals) == 1
 
 
+def _boxes(*boxes):
+    return {"boxsInfo": {"materialBoxs": [
+        {"id": box_id, "type": 0, "materials": [{"id": s, "percent": 50} for s in slots]}
+        for box_id, slots in boxes
+    ]}}
+
+
+def test_a_cfs_box_added_later_fires_discovery_again(coord):
+    """R21. A second CFS unit chained on later, or the CFS reporting after the
+    external holder at boot, arrives in a boxsInfo whose key is no longer new,
+    so its sensors were never created."""
+    _feed(coord, _boxes((1, [0, 1, 2, 3])))
+    assert len(coord.signals) == 1
+    _feed(coord, _boxes((1, [0, 1, 2, 3]), (2, [0, 1, 2, 3])))
+    assert len(coord.signals) == 2, "the second box never triggered discovery"
+
+
+def test_a_changing_reading_in_the_same_boxes_does_not(coord):
+    """Filament percentages change constantly; only the set of boxes and slots
+    is a reason to look for new entities."""
+    _feed(coord, _boxes((1, [0, 1, 2, 3])))
+    _feed(coord, {"boxsInfo": {"materialBoxs": [
+        {"id": 1, "type": 0, "temp": 30, "materials": [{"id": s, "percent": 10} for s in range(4)]}
+    ]}})
+    assert len(coord.signals) == 1
+
+
 def test_the_moonraker_fallback_uses_the_announcing_merge():
     """Pins the call site, since the bug was a direct dict write."""
     from pathlib import Path

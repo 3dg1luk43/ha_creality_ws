@@ -108,6 +108,20 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _cfs_shape(boxs_info: Any) -> frozenset[tuple[Any, Any, tuple[Any, ...]]]:
+    """Which boxes and slots `boxsInfo` describes, ignoring their contents."""
+    boxes = (boxs_info or {}).get("materialBoxs") if isinstance(boxs_info, Mapping) else None
+    return frozenset(
+        (
+            box.get("id"),
+            box.get("type"),
+            tuple(m.get("id") for m in (box.get("materials") or []) if isinstance(m, Mapping)),
+        )
+        for box in (boxes or [])
+        if isinstance(box, Mapping)
+    )
+
+
 def _warn_on_unsendable(data: dict[str, Any], target: str) -> None:
     """Complain in our own log if a payload cannot survive the push relay.
 
@@ -171,6 +185,8 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # mode is forced or no camera has been set up yet.
         self.camera_type_in_use: str | None = None
         self._power_lock = asyncio.Lock()
+        # Last boxsInfo shape seen, for discovery of a CFS box added later.
+        self._cfs_shape: frozenset | None = None
         
         # Notification & Performance
         self._notify_targets: list[str] = []
@@ -638,14 +654,25 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         newly_seen = [f for f in LATE_DISCOVERY_FIELDS if f not in self.data and f in payload]
 
+        # A CFS box (or slot) can appear after the first boxsInfo: a second
+        # unit daisy-chained later, or the CFS reporting after the external
+        # holder at boot. Its key is no longer "newly seen" then, so the shape
+        # of the box list is compared as well (R21). Platforms dedupe by unique
+        # id, so a repeated signal creates nothing twice.
+        cfs_reshaped = False
+        if "boxsInfo" in payload:
+            shape = _cfs_shape(payload.get("boxsInfo"))
+            cfs_reshaped = shape != self._cfs_shape and "boxsInfo" not in newly_seen
+            self._cfs_shape = shape
+
         self.data.update(payload)
 
-        if newly_seen:
+        if newly_seen or cfs_reshaped:
             _LOGGER.info(
-                "Telemetry reported %s for the first time; triggering dynamic discovery",
-                ", ".join(newly_seen),
+                "Telemetry reported %s; triggering dynamic discovery",
+                ", ".join(newly_seen) if newly_seen else "a changed set of CFS boxes",
             )
-            if "boxsInfo" in newly_seen:
+            if "boxsInfo" in newly_seen or cfs_reshaped:
                 _LOGGER.debug("CFS Raw Data: %s", json.dumps(payload.get("boxsInfo"), default=str))
             async_dispatcher_send(self.hass, f"{DOMAIN}_new_entities_{self.entry_id}")
 

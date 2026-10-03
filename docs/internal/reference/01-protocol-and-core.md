@@ -243,6 +243,8 @@ The cumulative `_state` (`:55`) is never cleared for the lifetime of the `KClien
 
 `newly_seen = [f for f in LATE_DISCOVERY_FIELDS if f not in self.data and f in payload]`, then `self.data.update(payload)`, then one dispatcher signal `ha_creality_ws_new_entities_<entry_id>` if anything was newly seen. `LATE_DISCOVERY_FIELDS = (boxsInfo, boxTemp, maxBoxTemp, targetBoxTemp, gcodeFileInfo)` (`const.py:109-115`). Each field fires once per coordinator lifetime; "first appearance" is relative to `self.data`, which survives reconnects and power cycles. Every writer of a gating field must go through this helper (tests: `tools/tests/test_late_discovery.py:340-404`); the number entity's optimistic chamber write does (`number.py:283`), the nozzle/bed optimistic writes go straight into `.data` (`number.py:189`, `:229`) because those keys gate nothing.
 
+Since R21 a `boxsInfo` whose set of boxes and slots differs from the last one (`_cfs_shape`: box id, type, slot ids; contents ignored) fires the same signal, so a CFS box that appears after the first report is discovered. Platforms dedupe by unique id.
+
 ### 3.4 Sliced G-code metadata state machine (`coordinator.py:597-689`)
 
 - Request side, `_maybe_request_gcode_info` (`:667-689`): nothing to do without a file name or when `_gcode_info_file` already equals it. A new name resets attempts and invalidates the cached entry (`:673-676`). Otherwise give up after `GCODE_INFO_MAX_ATTEMPTS` (3) or wait `GCODE_INFO_RETRY_SECS` (30 s) between attempts (`:677-682`).

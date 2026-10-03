@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A go2rtc server you run yourself on the default address was forgotten at every restart**: on a Home Assistant install without its own go2rtc, a camera pointed at `localhost:11984` lost that setting each time the integration started, and the camera failed with "go2rtc component not loaded". The setting is now kept.
 - **The CFS card said "Saved" when the printer never received the change**: if the printer could not be reached, the material change was dropped but the action still reported success, so the card showed "Saved". It now reports the failure, and the card says the save failed. With several printers selected, the reachable ones are still updated.
 - **A printer with only the external spool holder showed its spool twice**: without a CFS, the external spool got "Box 0 Slot 1" sensors as well as the "External" ones. New installs get the "External" sensors only; an existing install keeps the extra ones, so dashboards that use them are not broken.
+- **A CFS unit that showed up later got no sensors until a restart**: a second CFS chained on while Home Assistant was running, or a CFS that reported after the external spool holder at startup, was never given entities. A change in the set of boxes now triggers the same discovery a first report does.
 
 ## 0.9.8 - 2026-09-26
 > [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)
