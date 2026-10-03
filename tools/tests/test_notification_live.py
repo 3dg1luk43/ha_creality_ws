@@ -1434,6 +1434,27 @@ def test_reprinting_the_same_file_after_a_finished_print_is_a_new_job():
     assert coord._notified_completed is False
 
 
+def test_a_stop_reported_with_its_clock_reset_is_announced_once():
+    """R11. A printer that reports state 4 on the same frame its job clock goes
+    back to 0 produced "stopped at 40%", then "stopped at 0%": the clock reset
+    satisfied is_new_job_cycle, which re-armed the stop latch, and the state-4
+    branch announced the stop again (and fired print_started besides)."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(40, printJobTime=1000))
+    hass.events.clear()
+
+    payloads = []
+    for _ in range(3):
+        hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+        payloads.extend(_frame(coord, hass, **_printing(40, state=4, printJobTime=0)))
+
+    stopped = [e for e, _ in hass.events if e.endswith("print_stopped")]
+    started = [e for e, _ in hass.events if e.endswith("print_started")]
+    assert len(stopped) == 1, f"stop announced {len(stopped)} times"
+    assert started == []
+    assert len(_events(payloads)) == 1
+
+
 # --------------------------------------------------------------------------- #
 # Applying a settings change
 # --------------------------------------------------------------------------- #
