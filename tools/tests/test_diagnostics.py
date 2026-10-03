@@ -20,7 +20,8 @@ class FakeClient:
     is_connected = True
     reconnect_count = 2
     msg_count = 40
-    last_error = None
+    # The real shape of a failed connect: the address is inside the text.
+    last_error = "[Errno 111] Connect call failed ('192.168.0.90', 9999)"
     uptime_start = 0.0
 
     def get_url(self):
@@ -84,7 +85,10 @@ def setup(monkeypatch):
     hass = SimpleNamespace(
         states=SimpleNamespace(get=lambda eid: camera_state),
         data={"ha_creality_ws": {"e1": coord}},
-        config_entries=SimpleNamespace(async_get_entry=lambda eid: entry if eid == "e1" else None),
+        config_entries=SimpleNamespace(
+            async_get_entry=lambda eid: entry if eid == "e1" else None,
+            async_entries=lambda domain=None: [entry],
+        ),
     )
     return hass, entry
 
@@ -103,6 +107,8 @@ def test_the_download_hides_addresses_names_and_tokens(setup):
         assert secret not in text, f"{secret!r} leaked into the download"
     assert out["entry"]["host"] == REDACTED
     assert out["telemetry"]["hostname"] == REDACTED
+    # Scrubbed out of free text, not dropped: the error still says what failed.
+    assert out["connection"]["last_error"] == f"[Errno 111] Connect call failed ('{REDACTED}', 9999)"
 
 
 def test_the_download_still_carries_what_triage_needs(setup):

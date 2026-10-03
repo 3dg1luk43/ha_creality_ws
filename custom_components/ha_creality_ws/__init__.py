@@ -839,15 +839,14 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
         unless `include_sensitive_data` is set, an option that used to be
         accepted and ignored.
         """
-        from .diagnostics import TO_REDACT, async_collect  # pylint: disable=import-outside-toplevel
-        from homeassistant.components.diagnostics import async_redact_data  # type: ignore[import]  # pylint: disable=import-outside-toplevel
+        from .diagnostics import async_collect, redact  # pylint: disable=import-outside-toplevel
 
         data = await async_collect(hass, await _get_integration_version(hass))
         if not data["printers"]:
             _LOGGER.error("No Creality printers found to dump data from")
             return data
         if not call.data.get("include_sensitive_data"):
-            data = async_redact_data(data, TO_REDACT)
+            data = redact(hass, data)
         json_output = json.dumps(data, indent=2, ensure_ascii=False)
         # Still logged, for anyone following the older instructions.
         _LOGGER.warning(

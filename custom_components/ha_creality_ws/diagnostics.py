@@ -18,7 +18,7 @@ from dataclasses import asdict, is_dataclass
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
-from homeassistant.components.diagnostics import async_redact_data  # type: ignore[import]
+from homeassistant.components.diagnostics import REDACTED, async_redact_data  # type: ignore[import]
 from homeassistant.config_entries import ConfigEntry  # type: ignore[import]
 from homeassistant.const import __version__ as HA_VERSION  # type: ignore[import]
 from homeassistant.core import HomeAssistant  # type: ignore[import]
@@ -71,6 +71,41 @@ def _jsonable(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     return str(value)
+
+
+def _scrub(value: Any, needles: list[str]) -> Any:
+    """Replace each needle inside every string, at any depth.
+
+    Key-based redaction cannot reach an address embedded in free text, and the
+    connection's `last_error` is exactly that: "Connect call failed
+    ('192.168.0.90', 9999)". Dropping the message would lose what it says.
+    """
+    if isinstance(value, dict):
+        return {k: _scrub(v, needles) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_scrub(v, needles) for v in value]
+    if isinstance(value, str):
+        for needle in needles:
+            value = value.replace(needle, REDACTED)
+        return value
+    return value
+
+
+def _identifying_strings(hass: HomeAssistant) -> list[str]:
+    """Every printer address and network name this instance knows, longest first."""
+    found: set[str] = set()
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        data = getattr(entry, "data", None) or {}
+        for key in ("host", "_last_ip", "_cached_hostname", "_cached_mac"):
+            text = str(data.get(key) or "").strip()
+            if len(text) >= 4:
+                found.add(text)
+    return sorted(found, key=len, reverse=True)
+
+
+def redact(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
+    """Key-based redaction, then the addresses and names wherever they appear."""
+    return _scrub(async_redact_data(data, TO_REDACT), _identifying_strings(hass))
 
 
 def printer_diagnostics(hass: HomeAssistant, entry: ConfigEntry, coord: Any) -> dict[str, Any]:
@@ -214,8 +249,7 @@ async def async_get_config_entry_diagnostics(
     """Settings > Devices & services > Download diagnostics."""
     coord = (hass.data.get(DOMAIN) or {}).get(entry.entry_id)
     if coord is None:
-        return async_redact_data(
-            _jsonable({"entry": {"options": dict(entry.options), "data": dict(entry.data)}}),
-            TO_REDACT,
+        return redact(
+            hass, _jsonable({"entry": {"options": dict(entry.options), "data": dict(entry.data)}})
         )
-    return async_redact_data(_jsonable(printer_diagnostics(hass, entry, coord)), TO_REDACT)
+    return redact(hass, _jsonable(printer_diagnostics(hass, entry, coord)))
