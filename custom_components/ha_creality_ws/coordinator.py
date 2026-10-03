@@ -18,6 +18,7 @@ from homeassistant.exceptions import HomeAssistantError  # type: ignore[import]
 from .ws_client import KClient
 from .utils import (
     BUSY_PRINT_STATES,
+    PREVIEW_PRINT_STATES,
     ModelDetection,
     derive_activity_state,
     detect_camera_type,
@@ -1432,7 +1433,15 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._notify_preview_image:
             entity_id, state = self._live_entity_state("image", "current_print_preview")
             reason = (getattr(state, "attributes", None) or {}).get("preview_reason")
-            if state is not None and reason not in PREVIEW_REASONS_UNUSABLE:
+            # "not_printing" was recorded while there was no job. With one
+            # running it is stale, and on the frame a job starts it always is:
+            # entities update after notifications, so honouring it left the
+            # start notification without its preview (R27).
+            stale = (
+                reason == "not_printing"
+                and self._job_state() in PREVIEW_PRINT_STATES
+            )
+            if state is not None and (reason not in PREVIEW_REASONS_UNUSABLE or stale):
                 preview_url = f"/api/image_proxy/{entity_id}"
 
         snapshot_url = None

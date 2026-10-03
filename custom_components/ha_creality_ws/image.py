@@ -5,7 +5,7 @@ import base64
 import time
 
 from homeassistant.components.image import ImageEntity  # type: ignore[import]
-from homeassistant.core import HomeAssistant  # type: ignore[import]
+from homeassistant.core import HomeAssistant, callback  # type: ignore[import]
 from homeassistant.config_entries import ConfigEntry  # type: ignore[import]
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback  # type: ignore[import]
 from homeassistant.helpers.aiohttp_client import async_get_clientsession  # type: ignore[import]
@@ -57,6 +57,7 @@ class CurrentPrintPreviewImage(KEntity, ImageEntity):
         self._last_source_url: str | None = None
         self._last_fetch_ts: float = 0.0
         self._min_fetch_interval: float = 5.0  # seconds
+        self._last_job_name: str | None = None
 
     def _status_allows_preview(self) -> bool:
         """Whether there is a print whose preview is worth fetching.
@@ -86,6 +87,27 @@ class CurrentPrintPreviewImage(KEntity, ImageEntity):
     @property
     def available(self) -> bool:
         return True
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Start each job from a clean slate.
+
+        The timestamp only moved when bytes were fetched, so a dashboard kept
+        the previous job's picture until the access token rotated, and the
+        idle-time `preview_reason` of "not_printing" outlived the job start
+        (R27). A new file drops both, and the new timestamp makes the frontend
+        fetch this job's preview straight away.
+        """
+        name = ((self.coordinator.data or {}).get("printFileName") or "").strip()
+        if name and name != self._last_job_name:
+            if self._last_job_name is not None:
+                self._last_image = None
+                self._last_reason = None
+                self._last_source_url = None
+                self._last_fetch_ts = 0.0
+                self._attr_image_last_updated = dt_util.utcnow()
+            self._last_job_name = name
+        super()._handle_coordinator_update()
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:

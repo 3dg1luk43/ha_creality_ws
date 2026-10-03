@@ -213,6 +213,8 @@ The coordinator attaches `/api/image_proxy/<entity_id>` to notifications unless 
 
 ---
 
+Since R27 `_handle_coordinator_update` resets the entity when `printFileName` changes to a new job: last image, reason and source cleared, `image_last_updated` bumped, so the frontend refetches at once instead of at the next token rotation. `KCoordinator._notify_media` treats a `not_printing` reason as stale while a preview state is active (entities update after notifications, so it is always stale on a job's first frame).
+
 ## 7. Camera entity classes (`camera.py`)
 
 Both classes use unique_id `<host>-camera` and translation_key `printer_camera` (`camera.py:132`, `:141`, `:338`, `:365`). Shared base `_BaseCamera` (`:64-116`): fallback image is the last good frame or a 1x1 white JPEG (`:75-96`); attribute `snapshot_supported` (`:98-116`).

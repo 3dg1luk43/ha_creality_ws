@@ -134,6 +134,12 @@ class CoordinatorEntity:
     def __init__(self, coordinator):
         self.coordinator = coordinator
 
+    def _handle_coordinator_update(self):
+        # As Home Assistant's: write the state on every coordinator update.
+        writer = getattr(self, "async_write_ha_state", None)
+        if writer is not None:
+            writer()
+
 setattr(uc_mod, "DataUpdateCoordinator", DataUpdateCoordinator)
 setattr(uc_mod, "CoordinatorEntity", CoordinatorEntity)
 setattr(helpers_mod, "update_coordinator", uc_mod)
