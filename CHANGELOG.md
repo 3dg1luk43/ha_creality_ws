@@ -64,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Current Object: `not printing` is now `not_printing`.
 
   A CFS slot with no name or type now reads "Unknown" in your language, instead of the English word.
+- **Print Status, Filament Status and Print Control list their possible states**, so an automation's state trigger offers them in a drop-down instead of a text field.
+- **Diagnostic entities are grouped as diagnostics**: Print Control, the maximum temperatures and the Reconnect button now sit with the other diagnostic entities, out of the main controls.
+- **The print head position sensors start disabled on new installs.** They change many times a second while printing and fill the history database for anyone who never looks at them. Existing installs keep them as they are; enable them on the device page if you want them.
 
 ## 0.9.8 - 2026-09-26
 > [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)

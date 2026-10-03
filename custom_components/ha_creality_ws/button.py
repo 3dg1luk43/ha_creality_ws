@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from homeassistant.components.button import ButtonEntity  # type: ignore[import]
+from homeassistant.const import EntityCategory  # type: ignore[import]
 
 from .entity import KEntity
 from .const import DOMAIN
@@ -89,6 +90,8 @@ class KReconnectButton(KEntity, ButtonEntity):
     """Button to force a reconnect."""
     _attr_translation_key = "reconnect"
     _attr_icon = "mdi:connection"
+    # A repair tool, not a control: grouped with the diagnostics (R36).
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     def __init__(self, coordinator):
         """Initialize."""
         # Unique ID suffix: reconnect_ws

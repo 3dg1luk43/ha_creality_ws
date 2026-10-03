@@ -15,6 +15,7 @@ __all__ = [
     "build_spool_key",
     "derive_print_state",
     "BUSY_PRINT_STATES",
+    "PRINT_STATES",
     "MaterialValueError",
     "build_modify_material_payload",
     "normalize_material_color",
@@ -564,6 +565,21 @@ def build_spool_key(
 # States in which the printer is doing something that must not be interrupted.
 # The CFS card mirrors this set, and a test cross-checks the two so they cannot
 # drift apart.
+# Every state derive_print_state can return; test_printer_card_layout.py reads
+# its returns and holds this, and the card's copy, to them. The print status
+# sensor offers these as its options (R36).
+PRINT_STATES = (
+    "off",
+    "unknown",
+    "error",
+    "self-testing",
+    "completed",
+    "paused",
+    "stopped",
+    "printing",
+    "processing",
+    "idle",
+)
 BUSY_PRINT_STATES = frozenset({"printing", "paused", "processing", "self-testing"})
 
 

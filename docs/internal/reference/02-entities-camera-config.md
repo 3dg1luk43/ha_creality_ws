@@ -84,7 +84,7 @@ Unique id is always `<host>-<key>`. "Default" availability is the `KEntity` rule
 | `print_progress` | `print_progress` | `printProgress or dProgress` (`:285-286`) | none | % | MEASUREMENT | none | always |
 | `total_layers` | `total_layers` | `TotalLayer` | none | none | MEASUREMENT | none | always |
 | `current_layer` | `current_layer` | `layer` | none | none | MEASUREMENT | none | always |
-| `position_x` / `_y` / `_z` | `position_x` / `_y` / `_z` | parsed from `curPosition` (`utils.py:68-81`) | DISTANCE | mm | MEASUREMENT | none | always |
+| `position_x` / `_y` / `_z` | `position_x` / `_y` / `_z` | parsed from `curPosition` (`utils.py:68-81`) | DISTANCE | mm | MEASUREMENT | none | always; disabled by default for new installs (R36) |
 | `feedrate_pct` | `feedrate_pct` | `curFeedratePct` | none | % | MEASUREMENT | none | always |
 | `flowrate_pct` | `flowrate_pct` | `curFlowratePct` | none | % | MEASUREMENT | none | always |
 | `model_info` | `model_info` | `_cached_model`, else live `model` (`:264-271`) | none | none | none | `hostname`, `modelVersion` (cache first) | always; always available (`sensor.py:1132-1147`) |
@@ -93,20 +93,20 @@ Unique id is always `<host>-<key>`. "Default" availability is the `KEntity` rule
 
 | key | translation_key | Source | Values | Category | Notes |
 |---|---|---|---|---|---|
-| `filament_status` | `filament_status` | `materialStatus` | `0 -> normal`, `1 -> runout`, otherwise `str(raw)`; missing field returns the *string* `"unknown"` | DIAGNOSTIC (`:309`) | icon `mdi:printer-3d-nozzle-alert`; no `device_class` ENUM |
+| `filament_status` | `filament_status` | `materialStatus` | `0 -> normal`, `1 -> runout`, anything else or missing -> `None` | DIAGNOSTIC | icon `mdi:printer-3d-nozzle-alert`; ENUM with options from the mapping (R36) |
 
 ### 4.3 Job and status sensors (always created, `sensor.py:1119-1126`)
 
 | key | Class (anchor) | Source | Device class / unit / state class | Notes |
 |---|---|---|---|---|
-| `print_status` | `PrintStatusSensor` (`:338-384`) | `utils.derive_print_state` (`utils.py:494-552`) | none / none / none | States `off`, `unknown`, `error`, `self-testing`, `completed`, `paused`, `stopped`, `printing`, `processing`, `idle`. Attributes `file`, `progress`, `job_time_s`, `left_time_s`, `used_material_mm`, `real_time_flow_mm3_s`, `paused_flag`, `state_raw`, `err`, plus `error_code` when non-zero (`:358-384`). |
+| `print_status` | `PrintStatusSensor` (`:338-384`) | `utils.derive_print_state` (`utils.py:494-552`) | ENUM / none / none; options `utils.PRINT_STATES` minus `unknown`, which is reported as `None` (R36) | States `off`, `unknown`, `error`, `self-testing`, `completed`, `paused`, `stopped`, `printing`, `processing`, `idle`. Attributes `file`, `progress`, `job_time_s`, `left_time_s`, `used_material_mm`, `real_time_flow_mm3_s`, `paused_flag`, `state_raw`, `err`, plus `error_code` when non-zero (`:358-384`). |
 | `used_material_length` | `UsedMaterialLengthSensor` (`:387-406`) | `usedMaterialLength` (mm) / 10 | DISTANCE / cm / MEASUREMENT | converted in code, rounded to 0.01 |
 | `print_job_time` | `PrintJobTimeSensor` (`:495-513`) | `printJobTime` | DURATION / s / MEASUREMENT | `int()` |
 | `print_left_time` | `PrintLeftTimeSensor` (`:515-533`) | `printLeftTime` | DURATION / s / MEASUREMENT | not cleared when idle |
 | `real_time_flow` | `RealTimeFlowSensor` (`:535-549`) | `realTimeFlow` | none / `mm³/s` / MEASUREMENT | no device class on purpose (`:538`) |
 | `current_object` | `CurrentObjectSensor` (`:552-585`) | `current_object` or `currentObject` | none | returns the slug `not_printing` (state translation "Not printing") when there is no file, `None` while unavailable (R33); attribute `excluded_objects` from `excluded_objects_list` or `excluded_objects` |
 | `object_count` | `ObjectCountSensor` (`:588-631`) | `objects_list` / `objectsList` / `objects` | none / none / MEASUREMENT | `objects` arrives as a JSON string with polygons on a K1C and is `json.loads`-ed on every state write (`:613-619`) |
-| `print_control` | `KPrintControlSensor` (`:634-662`) | coordinator pending flags | none | states `queued` / `ok` / `unknown`; attributes `pending_pause`, `pending_resume`, `paused`, `status_raw_state`, `status_raw_deviceState`, `print_file`, `progress`; not marked DIAGNOSTIC |
+| `print_control` | `KPrintControlSensor` (`:634-662`) | coordinator pending flags | ENUM, DIAGNOSTIC (R36) | states `queued` / `ok`, `None` when unreachable; attributes `pending_pause`, `pending_resume`, `paused`, `status_raw_state`, `status_raw_deviceState`, `print_file`, `progress` |
 
 ### 4.4 Capability-limit sensors (`KMaxTempSensor`, `sensor.py:1226-1288`)
 
@@ -201,7 +201,7 @@ Three unconditional fans (`fan.py:14-16`), `SET_SPEED | TURN_ON | TURN_OFF` (`:2
 | `pause_print` | `pause_print` | `coordinator.request_pause()` (`:57-65`) | default |
 | `resume_print` | `resume_print` | `coordinator.request_resume()` (`:67-75`) | default |
 | `stop_print` | `stop_print` | `coordinator.async_stop_print()` (`:77-86`) | default |
-| `reconnect_ws` | `reconnect` | `client.reconnect()` (`:88-101`) | always (`:103-106`) |
+| `reconnect_ws` | `reconnect` | `client.reconnect()`; DIAGNOSTIC since R36 | always |
 
 ### 6.4 Image (`image.py`)
 

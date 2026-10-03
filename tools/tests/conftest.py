@@ -466,6 +466,7 @@ class SensorDeviceClass(_StrEnumStub):
     DURATION = "duration"
     DISTANCE = "distance"
     WEIGHT = "weight"
+    ENUM = "enum"
 
 
 class SensorStateClass(_StrEnumStub):

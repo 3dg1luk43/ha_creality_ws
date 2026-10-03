@@ -101,6 +101,10 @@ def test_card_print_states_match_the_integration():
     assert in_card == declared, (
         f"card has {sorted(in_card)}, derive_print_state declares {sorted(declared)}"
     )
+    # The print status sensor offers PRINT_STATES as its options (R36).
+    from custom_components.ha_creality_ws.utils import PRINT_STATES
+
+    assert set(PRINT_STATES) == declared
 
 
 def _declared_print_states() -> set:

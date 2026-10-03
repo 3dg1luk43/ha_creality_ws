@@ -9,6 +9,7 @@ from .utils import (
     build_spool_key as _build_spool_key,
     derive_print_state as _derive_print_state,
     format_filament_label as _format_filament_label,
+    PRINT_STATES as _PRINT_STATES,
     normalize_color_hex as _normalize_color_hex,
     numeric_state as _numeric_state,
     parse_position as _parse_position,
@@ -170,6 +171,9 @@ SPECS: list[dict[str, Any]] = [
         "name": "Position X",
         "translation_key": "position_x",
         "field": "__pos_x__",
+        # Changes many times a second while printing; recorded for every user
+        # who never looks at it. Off for new installs (R36).
+        "enabled_default": False,
         "device_class": SensorDeviceClass.DISTANCE,
         "unit": U_MM,
         "attrs": lambda d: {},
@@ -180,6 +184,9 @@ SPECS: list[dict[str, Any]] = [
         "name": "Position Y",
         "translation_key": "position_y",
         "field": "__pos_y__",
+        # Changes many times a second while printing; recorded for every user
+        # who never looks at it. Off for new installs (R36).
+        "enabled_default": False,
         "device_class": SensorDeviceClass.DISTANCE,
         "unit": U_MM,
         "attrs": lambda d: {},
@@ -190,6 +197,9 @@ SPECS: list[dict[str, Any]] = [
         "name": "Position Z",
         "translation_key": "position_z",
         "field": "__pos_z__",
+        # Changes many times a second while printing; recorded for every user
+        # who never looks at it. Off for new installs (R36).
+        "enabled_default": False,
         "device_class": SensorDeviceClass.DISTANCE,
         "unit": U_MM,
         "attrs": lambda d: {},
@@ -244,6 +254,7 @@ class KSimpleFieldSensor(KEntity, SensorEntity):
         self._attr_device_class = spec.get("device_class")
         self._attr_native_unit_of_measurement = spec.get("unit")
         self._attr_state_class = spec.get("state_class")
+        self._attr_entity_registry_enabled_default = spec.get("enabled_default", True)
         self._get_attrs: Callable[[dict[str, Any]], dict[str, Any]] = spec.get("attrs") or (lambda d: {})
 
     @property
@@ -314,37 +325,38 @@ class KMappedSensor(KEntity, SensorEntity):
     """Sensor that maps integer values to human-readable strings."""
     
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # An enum, so automations offer its states in a list (R36).
+    _attr_device_class = SensorDeviceClass.ENUM
 
     def __init__(self, coordinator, spec: dict[str, Any]):
         super().__init__(coordinator, spec["name"], spec["uid"], translation_key=spec.get("translation_key"))
         self._field: str = spec["field"]
         self._mapping: dict[int, str] = spec.get("mapping", {})
+        self._attr_options = list(dict.fromkeys(self._mapping.values()))
         if spec.get("icon"):
             self._attr_icon = spec["icon"]
 
     @property
     def native_value(self) -> str | None:
+        # None, not the string "unknown": an enum's state must be one of its
+        # options, and None is Home Assistant's own unknown.
         if self._should_zero():
-            return "unknown"
+            return None
 
-        d = self.coordinator.data
-        if not d:
-            return "unknown"
-
-        raw = d.get(self._field)
-        if raw is None:
-            return "unknown"
-
+        raw = (self.coordinator.data or {}).get(self._field)
         try:
-            val = int(raw)
-            return self._mapping.get(val, str(raw))
+            return self._mapping.get(int(raw))
         except (ValueError, TypeError):
-            return str(raw)
+            return None
 
 
 class PrintStatusSensor(KEntity, SensorEntity):
     _attr_translation_key = "print_status"
     _attr_icon = "mdi:printer-3d"
+    # An enum, so automations offer the states in a list (R36). "unknown" is
+    # Home Assistant's own state, reported as None.
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = [state for state in _PRINT_STATES if state != "unknown"]
 
     def __init__(self, coordinator):
         super().__init__(coordinator, unique_id="print_status")
@@ -353,12 +365,13 @@ class PrintStatusSensor(KEntity, SensorEntity):
     def native_value(self) -> str | None:
         # The mapping lives in utils.derive_print_state so that services gating on
         # "is the printer busy" use the same definition the dashboard shows.
-        return _derive_print_state(
+        state = _derive_print_state(
             self.coordinator.data or {},
             power_off=self.coordinator.power_is_off(),
             available=self.coordinator.available,
             paused_flag=self.coordinator.paused_flag(),
         )
+        return None if state == "unknown" else state
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -636,7 +649,9 @@ class KPrintControlSensor(KEntity, SensorEntity):
     """Diagnostic sensor exposing control pipeline state (queued actions, paused flag, raw states)."""
     _attr_translation_key = "print_control"
     _attr_icon = "mdi:debug-step-over"
-    _attr_state_class = None  # not a measurement
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["queued", "ok"]
 
     def __init__(self, coordinator):
         super().__init__(coordinator, unique_id="print_control")
@@ -646,7 +661,7 @@ class KPrintControlSensor(KEntity, SensorEntity):
         # Keep state human-readable but stable: "queued" if anything is pending, else "ok".
         if self.coordinator.pending_pause() or self.coordinator.pending_resume():
             return "queued"
-        return "ok" if self.coordinator.available else "unknown"
+        return "ok" if self.coordinator.available else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -1254,6 +1269,8 @@ class KMaxTempSensor(KEntity, SensorEntity):
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
+    # A limit of the machine, not a reading (R36).
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator, uid: str, key: str, translation_key: str):
         super().__init__(coordinator, "", uid, translation_key=translation_key)
