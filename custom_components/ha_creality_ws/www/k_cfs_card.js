@@ -33,9 +33,12 @@ function _translate(hass, section, fallbackDict, key, vars) {
     : (remoteEn && key in remoteEn) ? remoteEn[key]
     : (fallbackDict[lang]?.[key] ?? fallbackDict[short]?.[key] ?? fallbackDict["en"]?.[key] ?? key);
   if (vars) {
-    Object.entries(vars).forEach(([k, v]) => {
-      text = text.replace(new RegExp(`\\{${k}\\}`, "g"), v);
-    });
+    // One pass with a function: a replacement *string* expands `$&` and
+    // friends, so a preset named "Teal $& Co" toasted as "Teal {name} Co", and
+    // a value containing "{other}" was substituted again by a later key.
+    text = text.replace(/\{(\w+)\}/g, (match, name) => (
+      Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : match
+    ));
   }
   return text;
 }

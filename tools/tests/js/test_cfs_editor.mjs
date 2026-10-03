@@ -74,6 +74,34 @@ test("a config that really changed reaches the forms", () => {
   assert.equal(ed._root.getElementById("form").data.name, "Workshop");
 });
 
+// --------------------------------------------------------------------------- //
+// Placeholder substitution (R28)
+// --------------------------------------------------------------------------- //
+
+function cardInstance() {
+  const { defined } = loadCardModule(CARD_PATH);
+  const Card = defined.get("k-cfs-card");
+  const c = new Card();
+  c._hass = { states: {}, language: "en", locale: { language: "en" } };
+  return c;
+}
+
+test("a dollar sign in a value is inserted as typed", () => {
+  // A replacement *string* expands `$&` to the matched placeholder.
+  const c = cardInstance();
+  assert.equal(c._t("toast_preset_saved", { name: "Teal $& Co" }), "Preset \u201cTeal $& Co\u201d saved");
+});
+
+test("a value that contains another placeholder is not substituted again", () => {
+  // Substituted key by key, the first value's "{slot}" was then filled in by
+  // the second key.
+  const c = cardInstance();
+  assert.equal(
+    c._t("label_slot_filament", { box: "{slot}", slot: 2 }),
+    "Box {slot} Slot 2 Filament",
+  );
+});
+
 const run = async () => {
   let failed = 0;
   for (const [name, fn] of tests) {
