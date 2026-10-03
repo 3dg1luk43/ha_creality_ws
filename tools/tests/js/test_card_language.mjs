@@ -92,6 +92,74 @@ test("a printer card the user named keeps its name", async () => {
   assert.equal(card._root.getElementById("name").textContent, "Taller");
 });
 
+// --------------------------------------------------------------------------- //
+// Fetching the translations (R45)
+// --------------------------------------------------------------------------- //
+
+function countingFetch({ fail = false } = {}) {
+  const calls = [];
+  const fn = async (url, options) => {
+    calls.push({ url: String(url), options });
+    if (fail) throw new Error("offline");
+    const lang = String(url).match(/(\w+)\.json/)?.[1];
+    return { ok: Boolean(I18N[lang]), status: I18N[lang] ? 200 : 404, json: async () => I18N[lang] };
+  };
+  return { fn, calls };
+}
+
+const CZECH = { language: "cs", locale: { language: "cs" }, states: {} };
+
+test("a language with no translation file is asked for once", async () => {
+  const { fn, calls } = countingFetch();
+  const { KPrinterCard } = loadPrinterCard({ fetch: fn });
+  for (let i = 0; i < 3; i += 1) {
+    const card = new KPrinterCard();
+    card.setConfig({ name: "K1C" });
+    card.hass = CZECH;
+    await settle();
+  }
+  assert.equal(calls.filter((c) => c.url.includes("/cs.json")).length, 1);
+});
+
+test("both cards share one copy of the translations", async () => {
+  const { fn, calls } = countingFetch();
+  const shared = { data: {}, promises: {} };
+  const { KPrinterCard } = loadPrinterCard({ fetch: fn, __haCrealityWsI18n: shared });
+  const { defined } = loadCardModule(CFS_PATH, { fetch: fn, __haCrealityWsI18n: shared });
+  const printer = new KPrinterCard();
+  printer.setConfig({ name: "K1C" });
+  printer.hass = SPANISH;
+  const cfs = new (defined.get("k-cfs-card"))();
+  cfs.setConfig({});
+  cfs.hass = SPANISH;
+  await settle();
+  assert.equal(calls.filter((c) => c.url.includes("/en.json")).length, 1);
+  assert.equal(calls.filter((c) => c.url.includes("/es.json")).length, 1);
+});
+
+test("translations are revalidated rather than served stale", async () => {
+  const { fn, calls } = countingFetch();
+  const { KPrinterCard } = loadPrinterCard({ fetch: fn });
+  const card = new KPrinterCard();
+  card.setConfig({ name: "K1C" });
+  card.hass = SPANISH;
+  await settle();
+  assert.ok(calls.length && calls.every((c) => c.options?.cache === "no-cache"));
+});
+
+test("a failed request is tried again", async () => {
+  const failing = countingFetch({ fail: true });
+  const shared = { data: {}, promises: {} };
+  const { KPrinterCard } = loadPrinterCard({ fetch: failing.fn, __haCrealityWsI18n: shared });
+  for (let i = 0; i < 2; i += 1) {
+    const card = new KPrinterCard();
+    card.setConfig({ name: "K1C" });
+    card.hass = SPANISH;
+    await settle();
+  }
+  assert.equal(failing.calls.filter((c) => c.url.includes("/es.json")).length, 2);
+});
+
 const run = async () => {
   let failed = 0;
   for (const [name, fn] of tests) {

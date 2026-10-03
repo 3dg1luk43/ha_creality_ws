@@ -2,20 +2,28 @@ const CARD_TAG = "k-printer-card";
 const EDITOR_TAG = "k-printer-card-editor";
 
 const I18N_URL_BASE = "/ha_creality_ws/i18n/";
-const _i18nData = {};
-const _i18nPromises = {};
+// One cache for both cards, on the page: each module used to fetch en.json for
+// itself, and a language with no file (a 404) was asked for again by every new
+// card. A 404 is now remembered; only a failed request is retried. `no-cache`
+// revalidates, so an updated translation is not served stale (R45).
+const _i18nShared = (globalThis.__haCrealityWsI18n = globalThis.__haCrealityWsI18n || { data: {}, promises: {} });
+const _i18nData = _i18nShared.data;
 function _loadI18n(lang) {
-  if (_i18nData[lang]) return Promise.resolve(_i18nData[lang]);
-  if (_i18nPromises[lang]) return _i18nPromises[lang];
-  _i18nPromises[lang] = fetch(`${I18N_URL_BASE}${lang}.json`)
-    .then((res) => (res.ok ? res.json() : null))
+  if (lang in _i18nData) return Promise.resolve(_i18nData[lang]);
+  const promises = _i18nShared.promises;
+  if (promises[lang]) return promises[lang];
+  promises[lang] = fetch(`${I18N_URL_BASE}${lang}.json`, { cache: "no-cache" })
+    .then((res) => {
+      if (res.ok) return res.json();
+      if (res.status === 404) return null;
+      throw new Error(`HTTP ${res.status}`);
+    })
     .then((data) => {
-      if (data) _i18nData[lang] = data;
-      else _i18nPromises[lang] = null;
+      _i18nData[lang] = data;
       return data;
     })
-    .catch(() => { _i18nPromises[lang] = null; return null; });
-  return _i18nPromises[lang];
+    .catch(() => { promises[lang] = null; return null; });
+  return promises[lang];
 }
 function _resolveLang(hass) {
   return hass?.locale?.language || hass?.language || "en";
