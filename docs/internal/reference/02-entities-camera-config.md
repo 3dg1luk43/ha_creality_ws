@@ -134,7 +134,7 @@ Creates `box_temperature` and (if a max exists, cached or live) `max_box_temp` w
 
 ### 4.7 CFS sensors (`add_cfs_entities`, `sensor.py:924-1001`)
 
-Source: `coordinator.data["boxsInfo"]["materialBoxs"]`, requested on connect and every 300 s (`ws_client.py:35`, `ws_client.py:441-500`); service `request_cfs_info` asks on demand. Box `type == 0` is a CFS unit, `type == 1` the external spool holder.
+Source: `coordinator.data["boxsInfo"]["materialBoxs"]`, requested on connect and every 300 s (`ws_client.py:35`, `ws_client.py:441-500`); service `request_cfs_info` asks on demand. Box `type == 0` is a CFS unit, `type == 1` the external spool holder. The per-box pass skips the type-1 box (it gets the `cfs_external_*` set); before R20 it skipped it only when a CFS was present, so an external-only printer got both sets for one spool. `_box_slots_registered` keeps creating the per-box set where an earlier version already registered it.
 
 | Entity | unique_id suffix | translation_key (placeholders) | Device class / unit / state class | Value | Anchor |
 |---|---|---|---|---|---|

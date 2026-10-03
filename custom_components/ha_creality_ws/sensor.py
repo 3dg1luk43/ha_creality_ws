@@ -30,6 +30,7 @@ from homeassistant.const import (  # type: ignore[import]
     UnitOfTime,
 )
 from homeassistant.helpers.dispatcher import async_dispatcher_connect # type: ignore[import]
+from homeassistant.helpers import entity_registry as er  # type: ignore[import]
 from .entity import KEntity
 from .const import DOMAIN, GCODE_INFO_KEY
 
@@ -921,6 +922,25 @@ async def async_setup_entry(hass, entry, async_add_entities):
     # Track which CFS entities we've already added to avoid duplicates
     added_cfs_uids: set[str] = set()
 
+    def _slot_id_of(slot: Mapping[str, Any], idx: int) -> int:
+        try:
+            slot_id = int(slot.get("id")) if slot.get("id") is not None else None
+        except (TypeError, ValueError):
+            slot_id = None
+        return idx if slot_id is None or slot_id < 0 else slot_id
+
+    def _box_slots_registered(box: Mapping[str, Any]) -> bool:
+        """Whether a box's per-slot sensors already exist in the registry."""
+        ent_reg = er.async_get(hass)
+        host = coord.client._host
+        return any(
+            ent_reg.async_get_entity_id(
+                "sensor", DOMAIN,
+                f"{host}-cfs_box_{box.get('id')}_slot_{_slot_id_of(slot, idx)}_filament",
+            )
+            for idx, slot in enumerate(box.get("materials", []))
+        )
+
     def add_cfs_entities():
         """Helper to create CFS entities from current data."""
         new_ents = []
@@ -941,8 +961,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
             if box_id is None:
                 _LOGGER.debug("Skipping box with no ID: %s", box)
                 continue
-            if has_cfs_box and box.get("type") == 1:
-                _LOGGER.debug("Skipping external box (type 1) because CFS (type 0) is present")
+            # The external spool holder (type 1) has its own sensors, created
+            # below. Without a CFS it used to get a second set here as well,
+            # "Box 0 Slot 1" next to "External" for the same spool (R20). Kept
+            # only where an earlier version already registered that set, so a
+            # dashboard built on it does not lose its entities.
+            if box.get("type") == 1 and (
+                has_cfs_box or not _box_slots_registered(box)
+            ):
+                _LOGGER.debug("External box (type 1) is covered by the external sensors")
                 continue
 
             
@@ -959,13 +986,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 
             # Slots
             for idx, slot in enumerate(box.get("materials", [])):
-                slot_id = slot.get("id")
-                try:
-                    slot_id = int(slot_id) if slot_id is not None else None
-                except (TypeError, ValueError):
-                    slot_id = None
-                if slot_id is None or slot_id < 0:
-                    slot_id = idx
+                slot_id = _slot_id_of(slot, idx)
                 for s_type in ("filament", "color", "percent"):
                     uid = f"cfs_box_{box_id}_slot_{slot_id}_{s_type}"
                     if uid not in added_cfs_uids:

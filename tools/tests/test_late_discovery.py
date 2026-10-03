@@ -577,3 +577,47 @@ def test_deferred_entity_adds_are_dropped_after_unload(monkeypatch):
 
 def teardown_module(_module):
     restore_stubs(__name__)
+
+
+# --- the external spool holder without a CFS (R20) ------------------------- #
+
+EXTERNAL_ONLY = {
+    "boxsInfo": {
+        "materialBoxs": [
+            {"id": 0, "type": 1, "materials": [{"id": 0, "type": "PLA", "color": "#0ffffff", "percent": 100}]},
+        ]
+    }
+}
+
+
+def _cfs_ids(run):
+    return sorted(
+        e._attr_unique_id.split("-", 1)[1]
+        for e in run.added
+        if "cfs_" in (getattr(e, "_attr_unique_id", "") or "")
+    )
+
+
+def test_an_external_spool_without_a_cfs_gets_one_set_of_sensors(monkeypatch):
+    """Without a CFS the external holder's box was not skipped in the per-box
+    pass, so the one spool got "Box 0 Slot 1" sensors next to the "External"
+    ones."""
+    run = _run_sensor_setup(_bare_coord(monkeypatch, EXTERNAL_ONLY), {})
+    assert _cfs_ids(run) == ["cfs_external_color", "cfs_external_filament", "cfs_external_percent"]
+
+
+def test_an_install_that_already_has_the_box_sensors_keeps_them(monkeypatch):
+    """A dashboard built on the old duplicates must not lose its entities."""
+    from unittest.mock import MagicMock
+
+    import custom_components.ha_creality_ws.sensor as sensor_mod
+
+    registered = {"1.2.3.4-cfs_box_0_slot_0_filament"}
+    registry = MagicMock()
+    registry.async_get_entity_id = lambda domain, platform, uid: "sensor.x" if uid in registered else None
+    monkeypatch.setattr(sensor_mod.er, "async_get", lambda hass: registry)
+
+    run = _run_sensor_setup(_bare_coord(monkeypatch, EXTERNAL_ONLY), {})
+    ids = _cfs_ids(run)
+    assert "cfs_box_0_slot_0_filament" in ids
+    assert "cfs_external_filament" in ids
