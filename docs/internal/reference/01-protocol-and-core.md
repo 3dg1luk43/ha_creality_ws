@@ -94,7 +94,7 @@ There is no `async_setup`, no `diagnostics.py`, no repairs, and no `runtime_data
 
 ### 1.1 Transport
 
-- URL: `WS_URL_TEMPLATE = "ws://{host}:9999"` (`const.py:20-23`), host resolved through `socket.gethostbyname` on every connect attempt (`ws_client.py:52`, `:176-180`, `:219`). `gethostbyname` is IPv4 only and blocks the event loop when `host` is a name rather than an IP.
+- URL: `WS_URL_TEMPLATE = "ws://{host}:9999"` (`const.py`). Since R16 the connect loop resolves the host with `loop.getaddrinfo(family=AF_INET)` (still preferring IPv4, falling back to the host as given) and `get_url()` returns the unresolved URL. Before, `socket.gethostbyname` ran on the event loop at every connect attempt and in `get_url()`, so a `.local` name could stall Home Assistant for seconds per retry. `test_no_blocking_calls.py` now flags `socket.gethostbyname` / `socket.getaddrinfo(`.
 - Handshake: `websockets.connect(url, ping_interval=None, subprotocols=["wsslicer"])` (`ws_client.py:223-227`). Library keepalive pings are disabled on purpose; liveness is app-level (section 2.4). `max_size=WS_MAX_MESSAGE_BYTES` (16 MiB) since R15: the G-code listing reply is ~150 KiB per 200 files, and the library's 1 MiB default closed the connection with 1009 on a printer holding more than ~1300 files. Everything else is the library default (`open_timeout=10`, `close_timeout=10` with websockets 15).
 - `manifest.json:12-15` declares `websockets>=10.4` and `go2rtc-client>=0.1.0` (the latter is for `camera.py`).
 

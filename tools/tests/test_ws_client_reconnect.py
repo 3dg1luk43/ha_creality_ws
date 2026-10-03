@@ -389,7 +389,7 @@ def test_a_large_file_listing_is_received_not_a_disconnect():
         async with real_websockets.serve(handler, "127.0.0.1", 0) as server:
             port = server.sockets[0].getsockname()[1]
             client = KClient("127.0.0.1", _on_msg)
-            client._url = lambda: f"ws://127.0.0.1:{port}"
+            client._url = lambda host=None: f"ws://127.0.0.1:{port}"
             await client.start()
             for _ in range(40):
                 if received:
@@ -401,6 +401,72 @@ def test_a_large_file_listing_is_received_not_a_disconnect():
         assert len(received[0]["retGcodeFileInfo2"]) == 50000
 
     asyncio.run(run())
+
+
+def test_resolving_the_host_never_blocks_the_event_loop():
+    """R16. `socket.gethostbyname` ran on the loop at every connect attempt.
+    Here the resolver takes 0.3 s; a ticker on the same loop must keep
+    running while the client connects."""
+
+    async def run():
+        ticks: list[float] = []
+        stop = asyncio.Event()
+
+        async def ticker():
+            while not stop.is_set():
+                ticks.append(asyncio.get_running_loop().time())
+                await asyncio.sleep(0.02)
+
+        def slow_lookup(*_a, **_k):
+            import time as _time
+
+            _time.sleep(0.3)
+            return [(2, 1, 6, "", ("192.0.2.7", 0))]
+
+        async def _on_msg(payload):
+            """No-op message handler used for testing."""
+
+        seen_urls: list[str] = []
+
+        @asynccontextmanager
+        async def _fake_connect(url, **kwargs):
+            seen_urls.append(url)
+            raise OSError("refused")
+            yield  # pragma: no cover
+
+        client = KClient("printer.local", _on_msg)
+        tick_task = asyncio.create_task(ticker())
+        with patch.object(ws_client_module.socket, "getaddrinfo", slow_lookup), \
+                patch.object(ws_client_module.socket, "gethostbyname", lambda h: slow_lookup()[0][4][0]), \
+                patch.object(ws_client_module.websockets, "connect", _fake_connect):
+            await client.start()
+            await asyncio.sleep(0.5)
+            await client.stop()
+        stop.set()
+        await tick_task
+
+        gaps = [b - a for a, b in zip(ticks, ticks[1:])]
+        assert max(gaps) < 0.2, f"the loop stalled for {max(gaps):.2f}s"
+        assert seen_urls and seen_urls[0] == "ws://192.0.2.7:9999"
+
+    asyncio.run(run())
+
+
+def test_get_url_does_not_resolve():
+    """Diagnostics call it on the event loop."""
+
+    async def _on_msg(payload):
+        """No-op message handler used for testing."""
+
+    lookups: list[str] = []
+
+    def _lookup(host):
+        lookups.append(host)
+        return "192.0.2.7"
+
+    with patch.object(ws_client_module.socket, "gethostbyname", _lookup):
+        assert KClient("printer.local", _on_msg).get_url() == "ws://printer.local:9999"
+    assert lookups == []
 
 
 def teardown_module(_module):

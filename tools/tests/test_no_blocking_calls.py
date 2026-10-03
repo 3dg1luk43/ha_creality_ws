@@ -9,6 +9,8 @@ BLOCK_PATTERNS = [
     r"^\s*import\s+requests\b",        # importing requests implies potential blocking HTTP
     r"^\s*from\s+requests\s+import\b",
     r"urllib\.request",                # legacy sync HTTP usage
+    r"socket\.gethostbyname",          # sync DNS on the loop (R16)
+    r"socket\.getaddrinfo\(",          # ditto; loop.getaddrinfo is the async one
 ]
 
 

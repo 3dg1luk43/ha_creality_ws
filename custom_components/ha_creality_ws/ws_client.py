@@ -55,8 +55,8 @@ class KClient:
 
     def __init__(self, host: str, on_message: OnMessage):
         self._host = host
-        # Resolve host to IPv4 if available and build URL via template
-        self._url = lambda: WS_URL_TEMPLATE.format(host=self._resolve_host())
+        # The URL for a host; the connect loop passes the resolved address.
+        self._url = lambda host=None: WS_URL_TEMPLATE.format(host=host or self._host)
         self._on_message = on_message
         self._check_power_status: Callable[[], bool] | None = None
         self._state: dict[str, Any] = {}
@@ -180,11 +180,21 @@ class KClient:
         await self.start()
 
     # ---------- connectivity loop ----------
-    def _resolve_host(self) -> str:
+    async def _async_resolve_host(self) -> str:
+        """The host's IPv4 address, preferred as before, or the host as given.
+
+        Resolved through the event loop's executor-backed `getaddrinfo`. The
+        old synchronous lookup ran on the loop itself at every connect
+        attempt: with a `.local` name and the printer switched off, each retry
+        could hold Home Assistant for seconds.
+        """
         try:
-            return socket.gethostbyname(self._host)
-        except Exception:
+            infos = await asyncio.get_running_loop().getaddrinfo(
+                self._host, None, family=socket.AF_INET, type=socket.SOCK_STREAM
+            )
+        except (OSError, UnicodeError):
             return self._host
+        return infos[0][4][0] if infos else self._host
 
     async def _loop(self) -> None:
         backoff = RETRY_MIN_BACKOFF
@@ -222,7 +232,7 @@ class KClient:
 
             connected_this_attempt = False
             try:
-                url = self._url()
+                url = self._url(await self._async_resolve_host())
                 _LOGGER.debug("K WS connecting host=%s url=%s", self._host, url)
                 # Disable library pings; we do app-level heartbeat + periodic GETs.
                 # Advertise the printer web UI's subprotocol for handshake parity.
