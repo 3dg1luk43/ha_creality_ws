@@ -433,7 +433,25 @@ class KCFSCard extends HTMLElement {
     return '#f44336';                    // Red (60-100%) - Critical
   }
 
-  static getStubConfig() {
+  /**
+   * What a new card starts with: the first printer that has CFS sensors, else
+   * nothing. Only what differs from the defaults goes into the dashboard
+   * (R44); every default used to be written there.
+   */
+  static getStubConfig(hass) {
+    const registry = hass?.entities || {};
+    const devices = [...new Set(Object.values(registry)
+      .filter((e) => e?.platform === "ha_creality_ws" && e.device_id)
+      .map((e) => e.device_id))];
+    for (const deviceId of devices) {
+      const found = cfsEntitiesForDevice(hass, deviceId);
+      if (Object.keys(found).length) return { device: deviceId, ...found };
+    }
+    return {};
+  }
+
+  /** Every option with its default value. */
+  static defaultConfig() {
     const cfg = {
       name: "CFS",
       view_mode: "full",
@@ -461,7 +479,7 @@ class KCFSCard extends HTMLElement {
   }
 
   setConfig(config) {
-    this._cfg = { ...KCFSCard.getStubConfig(), ...KCFSCard._migrateConfig(config) };
+    this._cfg = { ...KCFSCard.defaultConfig(), ...KCFSCard._migrateConfig(config) };
     if (!this._root) {
       this._root = this.attachShadow({ mode: "open" });
     }
@@ -2659,7 +2677,7 @@ class KCFSCardEditor extends HTMLElement {
   }
 
   setConfig(config) {
-    this._cfg = { ...KCFSCard.getStubConfig(), ...KCFSCard._migrateConfig(config) };
+    this._cfg = { ...KCFSCard.defaultConfig(), ...KCFSCard._migrateConfig(config) };
     this._refresh();
   }
 
@@ -2909,8 +2927,12 @@ class KCFSCardEditor extends HTMLElement {
   }
 
   _dispatchConfigChange() {
+    // Only what differs from the defaults (R44): the card merges them back.
+    const defaults = KCFSCard.defaultConfig();
+    const config = Object.fromEntries(Object.entries(this._cfg)
+      .filter(([key, value]) => !(key in defaults) || value !== defaults[key]));
     this.dispatchEvent(new CustomEvent("config-changed", {
-      detail: { config: this._cfg },
+      detail: { config },
       bubbles: true,
       composed: true,
     }));

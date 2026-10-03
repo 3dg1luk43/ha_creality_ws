@@ -359,13 +359,52 @@ function computeColor(status) {
   return "var(--secondary-text-color)";
 }
 
+/**
+ * `config` minus what equals its default, the theme likewise (R44).
+ * @param {!Object} config
+ * @param {!Object} defaults
+ * @return {!Object}
+ */
+function withoutDefaults(config, defaults) {
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const out = {};
+  for (const [key, value] of Object.entries(config)) {
+    if (key === "theme" && value && typeof value === "object") {
+      const theme = {};
+      for (const [k, v] of Object.entries(value)) {
+        if (!same(v, defaults.theme?.[k])) theme[k] = v;
+      }
+      if (Object.keys(theme).length) out.theme = theme;
+    } else if (!(key in defaults) || !same(value, defaults[key])) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
 /** A theme colour, or `fallback` when it is unset or "auto". */
 function autoColour(value, fallback) {
   return !value || value === "auto" ? fallback : value;
 }
 
 class KPrinterCard extends HTMLElement {
-  static getStubConfig() {
+  /**
+   * What a new card starts with: the first printer's entities when there is
+   * one, else nothing. Only what differs from the defaults goes into the
+   * dashboard; every default used to be written there and then outlived any
+   * later change to it (R44).
+   */
+  static getStubConfig(hass) {
+    const registry = hass?.entities || {};
+    const deviceId = Object.values(registry).find((e) => e?.platform === INTEGRATION_DOMAIN && e.device_id)?.device_id;
+    if (!deviceId) return {};
+    const device = hass?.devices?.[deviceId];
+    const name = device?.name_by_user || device?.name || "";
+    return { ...(name ? { name } : {}), device: deviceId, ...entitiesForDevice(hass, deviceId) };
+  }
+
+  /** Every option with its default value. */
+  static defaultConfig() {
     return {
       name: "",
       // Device the entity fields were filled from. Stored so the editor's
@@ -476,9 +515,11 @@ class KPrinterCard extends HTMLElement {
   }
 
   setConfig(config) {
-    const defaultConfig = KPrinterCard.getStubConfig();
+    const defaultConfig = KPrinterCard.defaultConfig();
     const migrated = KPrinterCard._migrateConfig(config);
     this._cfg = { ...defaultConfig, ...migrated };
+    // A dashboard now holds only the colours that differ from the defaults.
+    this._cfg.theme = { ...defaultConfig.theme, ...(migrated.theme || {}) };
     // Init optimistic state overrides map
     if (!this._optimisticStates) this._optimisticStates = {};
 
@@ -581,7 +622,7 @@ class KPrinterCard extends HTMLElement {
     if (!this._root) return;
 
     // Ensure theme is always properly initialized
-    const defaultConfig = KPrinterCard.getStubConfig();
+    const defaultConfig = KPrinterCard.defaultConfig();
     this._cfg.theme = { ...defaultConfig.theme, ...(this._cfg.theme || {}) };
 
     // Apply theme variables to CSS custom properties
@@ -1709,7 +1750,7 @@ class KPrinterCardEditor extends HTMLElement {
   }
 
   setConfig(config) {
-    const defaults = KPrinterCard.getStubConfig();
+    const defaults = KPrinterCard.defaultConfig();
     this._cfg = { ...defaults, ...KPrinterCard._migrateConfig(config) };
     this._cfg.theme = { ...defaults.theme, ...(this._cfg.theme || {}) };
     this._refresh();
@@ -1991,7 +2032,7 @@ class KPrinterCardEditor extends HTMLElement {
   }
 
   _onColorChanged(group, value) {
-    const defaults = KPrinterCard.getStubConfig().theme;
+    const defaults = KPrinterCard.defaultConfig().theme;
     const theme = { ...this._cfg.theme };
     const wasAuto = new Map(group.fields.map((field) => [field.key, isAutoColor(this._cfg, field)]));
     for (const field of group.fields) {
@@ -2096,7 +2137,7 @@ class KPrinterCardEditor extends HTMLElement {
   // Reset ----------------------------------------------------------------
 
   _resetTheme() {
-    const defaults = KPrinterCard.getStubConfig();
+    const defaults = KPrinterCard.defaultConfig();
     const cfg = { ...this._cfg, theme: { ...defaults.theme } };
     for (const key of LAYOUT_RESET_KEYS) cfg[key] = defaults[key];
 
@@ -2130,7 +2171,7 @@ class KPrinterCardEditor extends HTMLElement {
     // localStorage write. The card saves the same thing again from setConfig.
     saveThemeToStorage(generateCardId(this._cfg), this._cfg.theme);
     this.dispatchEvent(new CustomEvent("config-changed", {
-      detail: { config: this._cfg },
+      detail: { config: withoutDefaults(this._cfg, KPrinterCard.defaultConfig()) },
       bubbles: true,
       composed: true,
     }));

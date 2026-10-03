@@ -55,7 +55,7 @@ test("every shipped default is a colour the editor can read", () => {
   // reaches the form as no value, and an automatic field would read as
   // customised or the reverse.
   const { KPrinterCard, sandbox } = loadPrinterCard();
-  const theme = KPrinterCard.getStubConfig().theme;
+  const theme = KPrinterCard.defaultConfig().theme;
   const autos = [];
   for (const [key, value] of Object.entries(theme)) {
     if (value === "auto") {

@@ -27,14 +27,14 @@ function card(config) {
 
 test("a new card defaults to full", () => {
   const { KCFSCard } = loadCard();
-  assert.equal(KCFSCard.getStubConfig().view_mode, "full");
+  assert.equal(KCFSCard.defaultConfig().view_mode, "full");
 });
 
 test("the stub does not carry the legacy key", () => {
   // Keeping both would make the migration unreachable: getStubConfig is spread
   // *before* the user config, so view_mode would always already be set.
   const { KCFSCard } = loadCard();
-  assert.ok(!("compact_view" in KCFSCard.getStubConfig()));
+  assert.ok(!("compact_view" in KCFSCard.defaultConfig()));
 });
 
 test("compact_view: true migrates to compact", () => {

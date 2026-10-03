@@ -67,7 +67,7 @@ for (const [path, type, section] of [
 
 test("a new printer card is not given an English name", () => {
   const { KPrinterCard } = loadPrinterCard();
-  assert.equal(KPrinterCard.getStubConfig().name, "");
+  assert.ok(!("name" in KPrinterCard.getStubConfig()), "no name written into the YAML");
 });
 
 for (const name of [undefined, "3D Printer"]) {

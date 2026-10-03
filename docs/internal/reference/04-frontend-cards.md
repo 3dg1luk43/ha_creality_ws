@@ -520,3 +520,11 @@ A device picker (`#device-form`, filtered to `ha_creality_ws`) and a "Fill all f
 - CFS units take card positions 0-3 in printer box order. Box 0, the external holder (pre-R20 installs still have "Box 0 Slot 1" sensors), is skipped.
 
 Picking a device fills only empty fields; the button replaces. The status line reads "Filled X of Y fields." `device` is stored in the card config for the button.
+
+## Defaults stay out of the dashboard (R44, 2026-10-03)
+
+- **Defaults.** `KPrinterCard.defaultConfig()` / `KCFSCard.defaultConfig()` hold every option with its default; `getStubConfig` is no longer the source of defaults.
+- **Writing.** The printer editor's `_emitConfig` sends `withoutDefaults(cfg, defaultConfig())`, which drops keys equal to their default and the same per theme colour, and drops an empty theme. The CFS editor's `_dispatchConfigChange` does the same.
+- **Reading.** Both cards merge `defaultConfig()` back in on `setConfig`; the printer card merges the theme per key.
+- **New cards.** `getStubConfig(hass)` fills a new card from the first `ha_creality_ws` device: the printer card via `entitiesForDevice` plus the device name, the CFS card via `cfsEntitiesForDevice`. With no printer it is `{}`.
+- **Existing cards.** Configs written before this keep their full YAML until next edited; values equal to today's defaults then drop out. A colour equal to an old default (`#000` for the off-state icons) is indistinguishable from a deliberate choice and stays.
