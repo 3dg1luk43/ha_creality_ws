@@ -508,3 +508,15 @@ Identical or near-identical in both files: the whole i18n block (section 3), `de
 - **Editor tabs.** Both editors' tabs are `<button role="tab">` inside a `role="tablist"`, with `aria-selected` kept in step and a focus ring.
 - **Motion.** The CFS status pulse stops under `prefers-reduced-motion: reduce`.
 - **Tests.** `tools/tests/js/test_accessibility.mjs` covers all of the above.
+
+## CFS editor: fill from the printer (R43, 2026-10-03)
+
+A device picker (`#device-form`, filtered to `ha_creality_ws`) and a "Fill all fields from the printer" button (`#refill`) sit above the entity form.
+
+`cfsEntitiesForDevice(hass, deviceId)` walks `hass.entities` for that device:
+- `cfs_slot_*` sensors are placed by their `box_id`/`slot_id` attributes, or by the default entity id (`..._cfs_box_1_slot_2_filament`, slot 1-based) while a sensor has no reading.
+- `cfs_box_temp`/`cfs_box_humidity` are placed by the new `box_id` attribute.
+- `cfs_ext_*` fill the external fields.
+- CFS units take card positions 0-3 in printer box order. Box 0, the external holder (pre-R20 installs still have "Box 0 Slot 1" sensors), is skipped.
+
+Picking a device fills only empty fields; the button replaces. The status line reads "Filled X of Y fields." `device` is stored in the card config for the button.

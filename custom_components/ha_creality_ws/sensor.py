@@ -714,6 +714,13 @@ class KCFSBoxSensor(KEntity, SensorEntity):
             return _numeric_state(data.get(self._type))
         return None
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        # Which CFS unit this is, as the slot sensors already say: the card's
+        # "fill from device" places it by this, not by the entity id the user
+        # may have renamed (R43).
+        return {"box_id": self._box_id}
+
 
 def _cfs_slot_attributes(
     data: dict[str, Any],

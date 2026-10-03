@@ -326,3 +326,12 @@ def test_an_idle_printer_has_a_translated_current_object():
     )
     value = CurrentObjectSensor(coord).native_value
     assert value in _SENSOR_STRINGS["current_object"]["state"], value
+
+
+def test_a_box_sensor_says_which_unit_it_is():
+    """The card's "fill from device" places it by this, not by an entity id the
+    user may have renamed (R43)."""
+    from custom_components.ha_creality_ws.sensor import KCFSBoxSensor
+
+    sensor = KCFSBoxSensor(_coordinator(GENERIC_SLOT), box_id=2, sensor_type="temp")
+    assert sensor.extra_state_attributes == {"box_id": 2}

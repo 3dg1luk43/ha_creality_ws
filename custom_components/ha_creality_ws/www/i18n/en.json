@@ -115,6 +115,10 @@
   },
   "cfs_card": {
     "picker_name": "Creality CFS Card",
+    "label_device": "Printer",
+    "btn_fill_from_device": "Fill all fields from the printer",
+    "status_device_filled": "Filled {filled} of {total} fields.",
+    "status_device_empty": "This printer has no CFS sensors yet.",
     "picker_description": "A card to control the Creality Filament System (CFS)",
     "no_data": "No CFS data available",
     "ext_label": "EXT",

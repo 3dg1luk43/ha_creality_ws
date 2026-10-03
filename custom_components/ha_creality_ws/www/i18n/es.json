@@ -116,6 +116,10 @@
   "cfs_card": {
     "picker_name": "Tarjeta CFS de Creality",
     "picker_description": "Tarjeta para controlar el Creality Filament System (CFS)",
+    "label_device": "Impresora",
+    "btn_fill_from_device": "Rellenar todos los campos desde la impresora",
+    "status_device_filled": "Se han rellenado {filled} de {total} campos.",
+    "status_device_empty": "Esta impresora aún no tiene sensores del CFS.",
     "no_data": "No hay datos del CFS disponibles",
     "ext_label": "EXT",
     "cfs_label": "CFS",

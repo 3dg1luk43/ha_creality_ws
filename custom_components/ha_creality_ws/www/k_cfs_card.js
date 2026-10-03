@@ -223,6 +223,10 @@ const BUSY_PRINT_STATES = new Set([
 const CFS_TRANSLATIONS = {
   en: {
     picker_name: "Creality CFS Card",
+    label_device: "Printer",
+    btn_fill_from_device: "Fill all fields from the printer",
+    status_device_filled: "Filled {filled} of {total} fields.",
+    status_device_empty: "This printer has no CFS sensors yet.",
     picker_description: "A card to control the Creality Filament System (CFS)",
     no_data: "No CFS data available",
     ext_label: "EXT",
@@ -2570,6 +2574,74 @@ function defineOnce(tag, cls) {
 
 defineOnce(CARD_TAG, KCFSCard);
 
+/**
+ * This integration's CFS sensors for one device, as a card config patch.
+ *
+ * CFS units take card positions 0-3 in the printer's box order; the external
+ * spool holder is box 0 on the printer and goes to the external fields. Box and
+ * slot come from the sensors' `box_id`/`slot_id` attributes, falling back to
+ * the default entity id ("..._cfs_box_1_slot_2_filament", slot 1-based) for a
+ * sensor with no reading yet. Without this, a CFS card meant filling up to 51
+ * entity pickers by hand (R43).
+ * @param {?Object} hass
+ * @param {string} deviceId
+ * @return {!Object<string, string>} Config key -> entity id.
+ */
+function cfsEntitiesForDevice(hass, deviceId) {
+  const registry = hass?.entities || {};
+  const states = hass?.states || {};
+  const patch = {};
+  if (!deviceId) return patch;
+  const slots = [];
+  const boxes = [];
+  for (const [entityId, entry] of Object.entries(registry)) {
+    if (!entry || entry.device_id !== deviceId) continue;
+    if (entry.platform && entry.platform !== "ha_creality_ws") continue;
+    const key = entry.translation_key || "";
+    const attrs = states[entityId]?.attributes || {};
+    let m = /^cfs_ext_(filament|color|percent)$/.exec(key);
+    if (m) {
+      patch[`external_${m[1]}`] = entityId;
+      continue;
+    }
+    m = /^cfs_slot_(filament|color|percent)$/.exec(key);
+    if (m) {
+      let box = attrs.box_id;
+      let slot = attrs.slot_id;
+      if (box === undefined || box === null || slot === undefined || slot === null) {
+        const id = /_cfs_box_(\d+)_slot_(\d+)_/.exec(entityId);
+        if (!id) continue;
+        box = Number(id[1]);
+        slot = Number(id[2]) - 1;
+      }
+      // Box 0 is the external spool holder; an install from before R20 still
+      // has "Box 0 Slot 1" sensors for it next to the External ones.
+      if (Number(box) >= 1) slots.push({ box: Number(box), slot: Number(slot), kind: m[1], entityId });
+      continue;
+    }
+    m = /^cfs_box_(temp|humidity)$/.exec(key);
+    if (m) {
+      let box = attrs.box_id;
+      if (box === undefined || box === null) {
+        const id = /_cfs_box_(\d+)_(temperature|humidity)/.exec(entityId);
+        if (!id) continue;
+        box = Number(id[1]);
+      }
+      if (Number(box) >= 1) boxes.push({ box: Number(box), kind: m[1], entityId });
+    }
+  }
+  const order = [...new Set([...slots, ...boxes].map((e) => e.box))].sort((a, b) => a - b).slice(0, 4);
+  for (const e of slots) {
+    const pos = order.indexOf(e.box);
+    if (pos >= 0 && e.slot >= 0 && e.slot < 4) patch[`box${pos}_slot${e.slot}_${e.kind}`] = e.entityId;
+  }
+  for (const e of boxes) {
+    const pos = order.indexOf(e.box);
+    if (pos >= 0) patch[`box${pos}_${e.kind}`] = e.entityId;
+  }
+  return patch;
+}
+
 class KCFSCardEditor extends HTMLElement {
   // i18n helpers -------------------------------------------------------
   _resolveLanguage() {
@@ -2614,6 +2686,7 @@ class KCFSCardEditor extends HTMLElement {
     }
     this._form.hass = this._hass;
     this._themeForm.hass = this._hass;
+    this._deviceForm.hass = this._hass;
     if (relabel) this._applyLabels();
     this._setFormData();
   }
@@ -2624,6 +2697,8 @@ class KCFSCardEditor extends HTMLElement {
     this._shownKey = key;
     this._form.data = this._cfg;
     this._themeForm.data = this._cfg;
+    this._deviceForm.data = { device: this._cfg.device || "" };
+    this._root.getElementById("refill").disabled = !this._cfg.device;
   }
 
   _build() {
@@ -2636,6 +2711,12 @@ class KCFSCardEditor extends HTMLElement {
       .tab-content { display: none; }
       .tab-content.active { display: block; }
       .input-helper { font-size: 0.9em; color: var(--secondary-text-color); margin-top: 4px; padding: 0 8px; }
+      .device-row { display: flex; align-items: center; gap: 12px; margin: 4px 0 16px; flex-wrap: wrap; }
+      .ghost-btn { background: none; border: 1px solid var(--divider-color); border-radius: 6px; padding: 6px 12px;
+        color: var(--primary-color); font: inherit; cursor: pointer; }
+      .ghost-btn:disabled { color: var(--disabled-text-color); cursor: default; }
+      .ghost-btn:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+      .status { color: var(--secondary-text-color); font-size: 0.9em; }
     `;
 
     this._root.innerHTML = `
@@ -2646,6 +2727,11 @@ class KCFSCardEditor extends HTMLElement {
           <button type="button" class="tab" role="tab" aria-selected="false" data-tab="theme" id="tab-theme"></button>
         </div>
         <div class="tab-content active" id="entities-tab">
+          <ha-form id="device-form"></ha-form>
+          <div class="device-row">
+            <button type="button" class="ghost-btn" id="refill"></button>
+            <span class="status" id="refill-status" role="status"></span>
+          </div>
           <ha-form id="form"></ha-form>
         </div>
         <div class="tab-content" id="theme-tab">
@@ -2655,14 +2741,61 @@ class KCFSCardEditor extends HTMLElement {
     `;
 
     this._setupTabs();
+    this._setupDeviceForm();
     this._setupEntitiesForm();
     this._setupThemeForm();
+  }
+
+  _setupDeviceForm() {
+    this._deviceForm = this._root.getElementById("device-form");
+    this._deviceForm.schema = [{
+      name: "device",
+      selector: { device: { filter: [{ integration: "ha_creality_ws" }] } },
+    }];
+    this._deviceForm.addEventListener("value-changed", (ev) => this._onDeviceChanged(ev.detail.value || {}));
+    this._root.getElementById("refill").addEventListener("click", () => this._applyDeviceFill(true));
+  }
+
+  _onDeviceChanged(value) {
+    const deviceId = value.device || "";
+    if (deviceId === (this._cfg.device || "")) return;
+    this._cfg = { ...this._cfg, device: deviceId };
+    if (deviceId) {
+      // Picking a device fills what is still blank; the button replaces too.
+      this._applyDeviceFill(false);
+      return;
+    }
+    this._setRefillStatus("");
+    this._setFormData();
+    this._dispatchConfigChange();
+  }
+
+  _applyDeviceFill(overwrite) {
+    const found = cfsEntitiesForDevice(this._hass, this._cfg.device);
+    const patch = {};
+    for (const [key, entityId] of Object.entries(found)) {
+      if (overwrite || !this._cfg[key]) patch[key] = entityId;
+    }
+    this._cfg = { ...this._cfg, ...patch };
+    const total = Object.keys(found).length;
+    this._setRefillStatus(total
+      ? this._t("status_device_filled", { filled: Object.keys(patch).length, total })
+      : this._t("status_device_empty"));
+    this._setFormData();
+    this._dispatchConfigChange();
+  }
+
+  _setRefillStatus(text) {
+    const el = this._root?.getElementById("refill-status");
+    if (el) el.textContent = text;
   }
 
   /** Everything that reads a translation, so a late language load relabels. */
   _applyLabels() {
     this._root.getElementById("tab-entities").textContent = this._t("tab_entities");
     this._root.getElementById("tab-theme").textContent = this._t("tab_theme");
+    this._root.getElementById("refill").textContent = this._t("btn_fill_from_device");
+    this._deviceForm.computeLabel = () => this._t("label_device");
     // New function objects, so ha-form re-renders its labels.
     this._form.computeLabel = (s) => this._entityLabel(s);
     this._themeForm.schema = this._themeSchema();
