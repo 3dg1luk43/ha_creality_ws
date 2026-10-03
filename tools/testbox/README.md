@@ -1,7 +1,8 @@
 # The test box - a real Home Assistant with a mock printer
 
-A disposable Home Assistant container plus the mock printer
-(`tools/creality_printer_test_server.py`), on a private network, with the
+A disposable Home Assistant container plus the simulated printer
+(`tools/simulator/`, started through `tools/creality_printer_test_server.py`),
+on a private network, with the
 working tree bind-mounted in. Ported from ha_washdata's test box.
 
 It exists because the unit suite stubs Home Assistant (`tools/tests/conftest.py`).
@@ -30,8 +31,11 @@ cd tools/testbox
 - The printer is `172.31.77.10` (network `box`) and also `172.31.78.10` (network
   `alt`), so a test can move it: `docker network disconnect creality-testbox_alt
   creality-testbox-printer` kills the second address.
-- `PRINTER_MODEL=k2plus ./up.sh` picks another mock model (see `MODEL_CONFIGS` in
-  the server).
+- The simulator's control UI: <http://127.0.0.1:8323/ui/> (prints, faults, CFS,
+  power, overrides, the message log). `hactl.py printer-set` uses the same port.
+- `PRINTER_MODEL=k2plus ./up.sh` picks another model (`--help` lists them), or
+  switch it in the control UI. Re-add the entry after a model change: the
+  integration keeps the camera type it detected (#46).
 - The integration is mounted read-only, so the box always runs the code being
   edited; `hactl.py restart` reloads it. An edit to the mock printer needs
   `docker compose restart printer`.

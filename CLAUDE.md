@@ -20,7 +20,7 @@ node --check custom_components/ha_creality_ws/www/*.js
 python3 -m compileall -q custom_components/ha_creality_ws
 tools/release_check.sh                           # release preflight (what CI runs)
 tools/release_check.sh --tag v0.9.9              # also require tag == manifest version
-python3 tools/creality_printer_test_server.py --help   # mock printer (WS :9999, HTTP :8000)
+python3 tools/creality_printer_test_server.py --help   # simulated printer (tools/simulator/); control UI :8099/ui/
 ./webrtc_test_server.sh on|off|status            # mock K2 Plus in the background for camera work
 ```
 
@@ -84,8 +84,12 @@ the mock printer, and say which in the commit or report.
 - **Capabilities are cached in `entry.data`** (model, camera type, firmware) and refreshed only
   when the integration version changes.
 - **Entity unique_ids contain the host** (`entity.py:23`). Changing that needs a registry migration.
-- The mock printer serves MJPEG at `:8000/stream.mjpeg`; the integration reads
-  `:8080/?action=stream`. Use the Custom URL camera mode against it.
+- The simulator (`tools/simulator/`, R77) mimics real ports: MJPEG on `:8080/?action=stream`,
+  WebRTC on `:8000`, preview on `:80`, Moonraker on `:7125` (K2 Base). Changing its model on the same
+  IP leaves the integration's cached camera type behind (by design, #46): re-add the entry.
+  Camera media is pre-rendered in `tools/simulator/media/`; never encode at runtime.
+- On the test box, go2rtc receives no RTP from the simulator (old or new) although ICE connects and an
+  aiortc client decodes it fine (R78); WebRTC snapshots through go2rtc time out there.
 - `tools/test_files/` is gitignored and holds a secret (`deploy_to_ha.sh`). Never copy from it
   into tracked files.
 - `backups/`, `conductor/`, `.agent/` and `tools/test_files/internal_docs/` are stale scaffolding,

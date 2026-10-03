@@ -79,6 +79,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The print head position sensors start disabled on new installs.** They change many times a second while printing and fill the history database for anyone who never looks at them. Existing installs keep them as they are; enable them on the device page if you want them.
 - **"Enable debug logging" now includes the WebSocket and go2rtc libraries**, which is where a dropped connection or a camera stream failure shows its cause.
 
+### Internal
+
+- **The printer simulator is rebuilt** as `tools/simulator/`, with a control page at `/ui/` on its control port (on the test box: http://127.0.0.1:8323/ui/). It now behaves like a real printer:
+  - full frames on connect, then only the changes, with numbers sent as strings on the K1 family;
+  - self-test at the start of a print, the real stop and finish sequences, pause, runout and errors;
+  - power cuts and dropped connections;
+  - CFS units that come and go;
+  - an MJPEG camera on the real port, the print preview, and Moonraker for the K2 Base.
+
+  The camera picture is a short loop stored with it, so nothing is encoded while it runs. It is what found the K2 Base chamber target never arriving.
+
 ## 0.9.8 - 2026-09-26
 > [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)
 

@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Creality simulator</title>
+  <link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="title" id="h-title">Creality simulator</span>
+    <span class="muted mono" id="h-key"></span>
+  </div>
+  <span class="model-switch">
+    <select id="h-model" aria-label="Printer model"></select>
+    <button type="button" class="small" id="h-switch" disabled>Switch</button>
+  </span>
+  <span class="badge" id="h-power">power ?</span>
+  <span class="chip" id="h-phase" title="Simulator job phase">phase -</span>
+  <span class="chip" id="h-clients" title="WebSocket clients">0 clients</span>
+  <span class="chips" id="h-listeners"></span>
+  <span class="conn" id="h-conn" role="status"><span class="dot"></span><span id="h-conn-text">connecting</span></span>
+</header>
+
+<main class="layout">
+  <section class="panel" id="p-telemetry" aria-labelledby="t-tele">
+    <div class="panel-head">
+      <h2 id="t-tele">Telemetry</h2>
+      <span class="muted small" id="tele-count"></span>
+      <input type="search" id="tele-filter" placeholder="Filter keys or values" aria-label="Filter telemetry">
+    </div>
+    <div class="scroll tele-scroll">
+      <table class="kv">
+        <tbody id="tele-pinned" class="pinned"></tbody>
+        <tbody id="tele-rest"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" id="p-job" aria-labelledby="t-job">
+    <div class="panel-head">
+      <h2 id="t-job">Job</h2>
+      <span class="badge" id="job-phase">-</span>
+    </div>
+    <div class="job-status">
+      <div class="job-line">
+        <span class="mono ellipsis" id="job-name">No job</span>
+        <span class="muted small" id="job-meta"></span>
+      </div>
+      <div class="progress" id="job-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="bar" id="job-bar"></div>
+      </div>
+      <div class="muted small" id="job-time"></div>
+    </div>
+    <form id="f-start" class="form-grid" autocomplete="off">
+      <label class="wide">Name <input name="name" value="demo.gcode"></label>
+      <label>Seconds <input name="seconds" type="number" min="1" step="1" value="120"></label>
+      <label>Layers <input name="layers" type="number" min="1" step="1" value="120"></label>
+      <label>Objects <input name="objects" type="number" min="0" step="1" value="6"></label>
+      <label>Self-test
+        <select name="self_test">
+          <option value="" id="opt-selftest-default">default</option>
+          <option value="yes">yes</option>
+          <option value="no">no</option>
+        </select>
+      </label>
+      <button type="submit" class="primary">Start print</button>
+    </form>
+    <div class="btn-row">
+      <button type="button" data-act="pause">Pause</button>
+      <button type="button" data-act="resume">Resume</button>
+      <button type="button" data-act="finish_now">Finish now</button>
+      <button type="button" data-act="clear_job">Clear job</button>
+    </div>
+    <div class="btn-row">
+      <select id="stop-style" aria-label="Stop style">
+        <option value="" id="opt-stop-default">default</option>
+        <option value="state4">state4: progress kept</option>
+        <option value="state0">state0: progress reset</option>
+        <option value="clear">clear: file cleared</option>
+      </select>
+      <button type="button" class="danger" id="btn-stop">Stop</button>
+    </div>
+    <div class="btn-row">
+      <label class="inline">swap <input id="swap-seconds" class="n4" type="number" min="1" step="1" value="20"> s</label>
+      <button type="button" id="btn-swap">CFS swap</button>
+    </div>
+  </section>
+
+  <section class="panel" id="p-faults" aria-labelledby="t-faults">
+    <div class="panel-head"><h2 id="t-faults">Faults and conditions</h2></div>
+    <div class="rows">
+      <div class="row">
+        <span class="lbl">Error</span>
+        <input id="err-code" class="n6" type="number" step="1" placeholder="code" aria-label="Error code">
+        <input id="err-key" class="n4" type="number" step="1" placeholder="key" aria-label="Error key">
+        <button type="button" id="btn-err-set">Set</button>
+        <button type="button" data-act="clear_error">Clear</button>
+        <span class="cur mono" id="err-cur"></span>
+      </div>
+      <div class="row">
+        <span class="lbl">Filament</span>
+        <button type="button" data-act="runout">Runout</button>
+        <button type="button" id="btn-resolve">Resolve</button>
+        <label class="inline"><input type="checkbox" id="resolve-resume"> resume</label>
+        <span class="cur mono" id="runout-cur"></span>
+      </div>
+      <div class="row">
+        <span class="lbl">Home</span>
+        <input id="home-axes" class="n4" value="XYZ" aria-label="Axes">
+        <input id="home-seconds" class="n4" type="number" min="0" step="0.5" value="4" aria-label="Homing seconds"> s
+        <button type="button" id="btn-home">Home</button>
+        <span class="cur mono" id="home-cur"></span>
+      </div>
+      <div class="row">
+        <span class="lbl">Blank</span>
+        <input id="blank-fields" class="grow" placeholder="fields, comma separated (default: boot fields)" aria-label="Fields to blank">
+        <input id="blank-seconds" class="n4" type="number" min="0" step="1" value="20" aria-label="Blank seconds"> s
+        <button type="button" id="btn-blank">Blank</button>
+      </div>
+      <div class="row">
+        <span class="lbl">Power</span>
+        <button type="button" class="danger" id="btn-power-off">Power off</button>
+        <button type="button" id="btn-power-on">Power on</button>
+        <label class="inline">boot blanks <input id="boot-blanks" class="n4" type="number" min="0" step="1" value="0"> s</label>
+      </div>
+      <div class="row">
+        <span class="lbl">Connection</span>
+        <button type="button" data-act="drop" data-args='{"clean":true}'>Drop (clean)</button>
+        <button type="button" data-act="drop" data-args='{"clean":false}'>Drop (abnormal)</button>
+      </div>
+      <div class="row">
+        <span class="lbl">Link faults</span>
+        <label class="inline"><input type="checkbox" id="set-silent"> silent</label>
+        <label class="inline"><input type="checkbox" id="set-reject"> reject commands</label>
+        <label class="inline">first frame delay <input id="set-ffd" class="n4" type="number" min="0" step="0.5"> s</label>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" id="p-settings" aria-labelledby="t-settings">
+    <div class="panel-head"><h2 id="t-settings">Settings</h2></div>
+    <div class="settings-grid">
+      <label>Frame mode
+        <select id="s-frames">
+          <option value="delta">delta</option>
+          <option value="full">full</option>
+        </select>
+      </label>
+      <label>Stop style
+        <select id="s-stop">
+          <option value="state4">state4</option>
+          <option value="state0">state0</option>
+          <option value="clear">clear</option>
+        </select>
+      </label>
+      <label>Self-test style
+        <select id="s-selftest">
+          <option value="withSelfTest">withSelfTest</option>
+          <option value="state2">state2</option>
+        </select>
+      </label>
+      <label>G-code listing
+        <select id="s-gcode">
+          <option value="v2">v2</option>
+          <option value="legacy">legacy</option>
+          <option value="none">none</option>
+        </select>
+      </label>
+      <label title="A finished job's progress drops to 0 after this long; 0 keeps it at 100">Finished reset (s)
+        <input id="s-finreset" type="number" min="0" step="1">
+      </label>
+      <label class="check"><input type="checkbox" id="s-heartbeat"> printer heartbeat</label>
+    </div>
+  </section>
+
+  <section class="panel" id="p-controls" aria-labelledby="t-controls">
+    <div class="panel-head"><h2 id="t-controls">Controls</h2></div>
+    <div class="ctl-grid">
+      <span class="lbl">Nozzle</span>
+      <span class="cur mono" id="c-nozzle-cur"></span>
+      <input id="c-nozzle" class="n5" type="number" min="0" step="1" placeholder="target" aria-label="Nozzle target">
+      <button type="button" data-target="nozzle">Set</button>
+
+      <span class="lbl">Bed</span>
+      <span class="cur mono" id="c-bed-cur"></span>
+      <input id="c-bed" class="n5" type="number" min="0" step="1" placeholder="target" aria-label="Bed target">
+      <button type="button" data-target="bed">Set</button>
+
+      <span class="lbl">Box</span>
+      <span class="cur mono" id="c-box-cur"></span>
+      <input id="c-box" class="n5" type="number" min="0" step="1" placeholder="target" aria-label="Box target">
+      <button type="button" data-target="box">Set</button>
+
+      <span class="lbl">Light</span>
+      <span class="cur mono" id="c-light-cur"></span>
+      <button type="button" id="c-light-on">On</button>
+      <button type="button" id="c-light-off">Off</button>
+    </div>
+    <div class="muted small" id="c-note"></div>
+  </section>
+
+  <section class="panel" id="p-cfs" aria-labelledby="t-cfs">
+    <div class="panel-head">
+      <h2 id="t-cfs">CFS</h2>
+      <span class="chip" id="cfs-connect">cfsConnect -</span>
+    </div>
+    <div class="btn-row">
+      <button type="button" data-act="cfs_attach">Attach</button>
+      <button type="button" data-act="cfs_detach">Detach</button>
+      <button type="button" data-act="cfs_add_box">Add box</button>
+      <span class="sep"></span>
+      <label class="inline">echo colour
+        <select id="cfs-echo">
+          <option value="as_sent">as sent</option>
+          <option value="padded">padded</option>
+        </select>
+      </label>
+    </div>
+    <div class="muted small" id="cfs-note"></div>
+    <div class="boxes" id="cfs-boxes"></div>
+  </section>
+
+  <section class="panel" id="p-overrides" aria-labelledby="t-ovr">
+    <div class="panel-head">
+      <h2 id="t-ovr">Overrides</h2>
+      <button type="button" class="small" data-act="clear_overrides">Clear all</button>
+    </div>
+    <ul class="ovr-list" id="ovr-list"></ul>
+    <h3 class="sub">Timed blanks</h3>
+    <ul class="ovr-list" id="blank-list"></ul>
+    <p class="muted none" id="blank-none">None.</p>
+    <form id="f-ovr" class="row" autocomplete="off">
+      <input name="key" list="tele-keys" placeholder="field" aria-label="Override field" required>
+      <input name="value" class="grow" placeholder="value: JSON, else text" aria-label="Override value">
+      <button type="submit">Add</button>
+    </form>
+    <datalist id="tele-keys"></datalist>
+  </section>
+
+  <section class="panel" id="p-events" aria-labelledby="t-events">
+    <div class="panel-head">
+      <h2 id="t-events">Events</h2>
+      <span class="muted small">newest first</span>
+    </div>
+    <ol class="events scroll" id="events"></ol>
+  </section>
+
+  <section class="panel" id="p-log" aria-labelledby="t-log">
+    <div class="panel-head log-head">
+      <h2 id="t-log">Message log</h2>
+      <label class="inline tag d-in"><input type="checkbox" id="lf-in" checked> in</label>
+      <label class="inline tag d-out"><input type="checkbox" id="lf-out" checked> out</label>
+      <label class="inline tag d-note"><input type="checkbox" id="lf-note" checked> note</label>
+      <input type="search" id="lf-text" placeholder="Filter text" aria-label="Filter log">
+      <label class="inline"><input type="checkbox" id="lf-follow" checked> autoscroll</label>
+      <button type="button" class="small" id="lf-clear">Clear view</button>
+      <span class="muted small" id="log-count"></span>
+    </div>
+    <div class="log scroll" id="log" aria-live="off"></div>
+  </section>
+</main>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<script src="/ui/app.js"></script>
+</body>
+</html>

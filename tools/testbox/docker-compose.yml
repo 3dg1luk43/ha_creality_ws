@@ -41,8 +41,10 @@ services:
       alt:
         ipv4_address: 172.31.78.10
     ports:
-      # Only the test-control endpoint (POST /test/set ...) for hactl.py.
-      - "127.0.0.1:8323:8000"
+      # Only the simulator's control port: the web UI at /ui, the JSON API and
+      # the old /test/* endpoints hactl.py uses. It stays up while the
+      # simulated printer is switched off, which :8000 cannot.
+      - "127.0.0.1:8323:8099"
 
   ha:
     image: ghcr.io/home-assistant/home-assistant:stable

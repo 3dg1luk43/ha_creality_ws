@@ -14,3 +14,4 @@ conductor
 tools/testbox/config/
 tools/testbox/**/__pycache__/
 tools/testbox/node_modules/
+tools/simulator/**/__pycache__/

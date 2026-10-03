@@ -87,7 +87,7 @@ python -m pytest
 
 ### No printer needed
 
-`tools/creality_printer_test_server.py` emulates K1, K2, Ender 3 V3 and Hi printers: WebSocket telemetry on port 9999, MJPEG or WebRTC video on port 8000, fans, CFS material writes, and test-control endpoints that pin a scenario instantly. Run it without arguments for the full help, and see [tools/README.md](tools/README.md).
+`tools/creality_printer_test_server.py` (the `tools/simulator/` package) simulates K1, K2, Ender 3 V3 and Hi printers on their real ports: WebSocket telemetry and commands on 9999, WebRTC on 8000, MJPEG on 8080, the print preview on 80 and Moonraker on 7125. A control UI at `http://<host>:8099/ui/` drives prints, faults, the CFS and power cuts. Run it without arguments for the full help, and see [tools/README.md](tools/README.md).
 
 ```bash
 python3 tools/creality_printer_test_server.py --model k2plus --simulate-print --deterministic

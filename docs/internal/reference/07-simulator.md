@@ -1,6 +1,25 @@
 # 07 - The printer simulator: what it does, what it lacks
 
-Audit of `tools/creality_printer_test_server.py` (2026-10-03), done before rebuilding it (R77). Paths: SIM = the simulator, INT = `custom_components/ha_creality_ws/`, TB = `tools/testbox/`, CAP = `tools/test_files/` (gitignored real-printer captures; never copied into tracked files).
+Audit of `tools/creality_printer_test_server.py` (2026-10-03), done before rebuilding it (R77).
+
+## 0. Status after the rebuild (2026-10-03)
+
+The simulator is now the `tools/simulator/` package. `creality_printer_test_server.py` is an entry shim that keeps the old flags and names. Of the gaps below, these are done:
+
+- **Wire format.** Delta frames, numbers as strings on the K1 family, `ok` to client heartbeats, real `get` replies (`reqPrintObjects`, `reqProbedMatrix`, both listing formats or none), and every key in a `set` applied.
+- **Print lifecycle.** `withSelfTest` at print start, 100 then 99 then completed with the file kept, the optional reset to 0, a pause that freezes progress, three stop styles, reprints, runout with a pause, a mid-print `state 0` swap, homing with `deviceState` 7, and `err.key`.
+- **Ports.** MJPEG on `:8080` with the mjpg-streamer headers and `?action=snapshot` (R75 closed), the preview on `:80`, Moonraker on `:7125` parsing queries the way Moonraker does (it exposed R41's query bug), and `webrtcSupport` on `k1c-1.3.5`.
+- **Faults.** Power off and on, a boot with blanks, clean and abnormal drops, a silent printer, ignored commands, a late first frame.
+- **CFS.** Runtime attach, detach, add and remove; consumption; the echo mode; per-model presence.
+- **Engine.** One clock independent of clients (the handler leak and per-connection ticking are gone), a message log, a control UI at `:8099/ui/`, a runtime model switch, and a pre-rendered video loop with no runtime encoding.
+
+Still open:
+
+- G-code listings over 1 MiB, and multi-material listing entries.
+- The K1C 2025 RTP payload-type quirk.
+- WebRTC through go2rtc on the test box (R78).
+- `reqProbedMatrix` values are synthetic.
+- No captured K2, Hi or CFS frames exist, so those profiles follow the issue reports. Paths: SIM = the simulator, INT = `custom_components/ha_creality_ws/`, TB = `tools/testbox/`, CAP = `tools/test_files/` (gitignored real-printer captures; never copied into tracked files).
 
 ## 1. What it implements today
 

@@ -152,11 +152,12 @@ _SIMULATOR_OPTIONAL_DEPS = frozenset(
 
 
 def _test_server_source() -> str:
+    """The simulator's code: the entry script and the tools/simulator package."""
     from pathlib import Path
 
-    return (
-        Path(__file__).resolve().parents[2] / "tools" / "creality_printer_test_server.py"
-    ).read_text()
+    tools = Path(__file__).resolve().parents[2] / "tools"
+    files = [tools / "creality_printer_test_server.py", *sorted((tools / "simulator").glob("*.py"))]
+    return "\n".join(f.read_text(encoding="utf-8") for f in files)
 
 
 def _load_simulator(name: str):

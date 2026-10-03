@@ -53,6 +53,7 @@ start() {
         --model "$MODEL" \
         --simulate-print \
         --print-seconds "$PRINT_SECONDS" \
+        --web-port 0 --moonraker-port 0 \
         >"$LOG_FILE" 2>&1 &
     echo $! >"$PID_FILE"
     sleep 1
@@ -60,6 +61,7 @@ start() {
         echo "Started (PID $(cat "$PID_FILE")). Logs: $LOG_FILE"
         echo "  WebRTC signaling: POST http://localhost:8000/call/webrtc_local"
         echo "  WS telemetry:     ws://localhost:9999"
+        echo "  Control UI:       http://localhost:8099/ui/"
     else
         echo "Failed to start. Check $LOG_FILE:"
         tail -n 20 "$LOG_FILE" || true
