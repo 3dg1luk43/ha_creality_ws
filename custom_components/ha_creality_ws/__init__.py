@@ -956,6 +956,10 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
 async def options_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Apply an options change: in place where that is enough, else a reload."""
     coord = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if coord is not None and coord.consume_own_data_write(entry):
+        # The coordinator refreshing its own cache, e.g. a new firmware
+        # version (R40): nothing to reload.
+        return
     if coord is not None:
         # A change confined to the notification settings needs no reload. One
         # would drop the WebSocket, flip every entity unavailable and restart

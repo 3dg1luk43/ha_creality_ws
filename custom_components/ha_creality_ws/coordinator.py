@@ -10,6 +10,7 @@ from typing import Any
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator  # type: ignore[import]
 from homeassistant.helpers.aiohttp_client import async_get_clientsession  # type: ignore[import]
 from homeassistant.helpers.dispatcher import async_dispatcher_send  # type: ignore[import]
+from homeassistant.helpers import device_registry as dr  # type: ignore[import]
 from homeassistant.helpers import entity_registry as er  # type: ignore[import]
 from homeassistant.helpers import issue_registry as ir  # type: ignore[import]
 from homeassistant.helpers.translation import async_get_translations  # type: ignore[import]
@@ -22,6 +23,7 @@ from .utils import (
     ModelDetection,
     derive_activity_state,
     detect_camera_type,
+    parse_model_version,
     safe_float,
 )
 from .notification_rules import (
@@ -227,6 +229,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._notify_templates: dict[str, str] = {}
         # The options as of the last `_load_options`; see `notifications_only_change`.
         self._loaded_options: dict[str, Any] | None = None
+        # The entry data this coordinator wrote itself, so the update listener
+        # can tell that write from a change that needs a reload (R40).
+        self._own_data_write: dict[str, Any] | None = None
         # (notification, template) pairs already complained about; see
         # `_custom_message`.
         self._notify_template_warned: set[tuple[str, str]] = set()
@@ -880,6 +885,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             payload.pop("targetBoxTemp")
 
         self._absorb_gcode_file_listing(payload)
+        self._follow_firmware(payload)
 
         self.merge_telemetry(payload)
         self._check_camera_type()
@@ -2113,6 +2119,45 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.hass.async_create_task(
                     self._async_deliver_one(target, payload)
                 )
+
+    def _follow_firmware(self, payload: Mapping[str, Any]) -> None:
+        """Show a new firmware version as soon as the printer reports it (R40).
+
+        The device's version came only from the cache that setup fills on the
+        first run, an integration upgrade or a new address, so a printer
+        updated since kept showing the old firmware indefinitely.
+        """
+        entry = self.config_entry
+        reported = payload.get("modelVersion")
+        if entry is None or not isinstance(reported, str) or not entry.data.get("_device_info_cached"):
+            # Setup's own cache pass writes the first value.
+            return
+        cached = entry.data.get("_cached_model_version")
+        hw, sw = parse_model_version(reported)
+        if not (hw or sw) or (hw, sw) == parse_model_version(cached):
+            return
+        new_data = {**entry.data, "_cached_model_version": reported}
+        self._own_data_write = new_data
+        self.hass.config_entries.async_update_entry(entry, data=new_data)
+        dev_reg = dr.async_get(self.hass)
+        for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
+            if (DOMAIN, self.client._host) in device.identifiers:  # pylint: disable=protected-access
+                dev_reg.async_update_device(device.id, hw_version=hw, sw_version=sw)
+        _LOGGER.info("Printer firmware is now %s (was %s)", sw or hw, parse_model_version(cached)[1])
+
+    def consume_own_data_write(self, entry) -> bool:
+        """Whether the entry update just seen is this coordinator's own cache write.
+
+        Such a write changes nothing the entities are built from at runtime,
+        so it must not reload the entry: a reload mid-print drops the
+        connection and every entity goes unavailable.
+        """
+        expected, self._own_data_write = self._own_data_write, None
+        return (
+            expected is not None
+            and dict(entry.data) == expected
+            and dict(entry.options) == (self._loaded_options or {})
+        )
 
     def notifications_only_change(self, options: Mapping[str, Any]) -> bool:
         """Whether an options update touched nothing but the notification path.
