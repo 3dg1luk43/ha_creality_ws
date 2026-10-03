@@ -167,7 +167,7 @@ Box loop rule (`sensor.py:936-946`): the `type == 1` box is skipped in the per-b
 | `bed_target_0` | `BedTargetNumber` (`:196-233`) | `bed_target` | `targetBedTemp0` | optimistic, then `bedTempControl={"num": 0, "val": v}` | BOX, 0..max (default 100), C | always (index 0 only, `:30`) |
 | `box_target` | `BoxTargetNumber` (`:236-286`) | `chamber_target` | `targetBoxTemp` | optimistic via `merge_telemetry`, then `boxTempControl=v` | BOX, 0..max (cached/live `maxBoxTemp`, default 60), C | `_chamber_entities` (`:43-75`): `_cached_has_chamber_control` (legacy `_cached_has_box_control`) or live `targetBoxTemp`; with cache only, also needs a max; re-run on discovery |
 
-All writes go through `client.send_set_retry`, which raises `RuntimeError` if the link is not back within 6 s (`ws_client.py:509-523`); no entity translates that into a `HomeAssistantError`. K2 Base: `targetBoxTemp: 0` is stripped from WS frames and the real target comes from a Moonraker poll on port 7125 every 30 s (`coordinator.py:700-706`, `coordinator.py:731-736`, `coordinator.py:2250-2279`, `const.py:318-321`).
+All writes go through `KEntity._send` (`coordinator.send_command` around `client.send_set_retry`), which raises the translated `HomeAssistantError` `printer_not_connected` if the link is not back within 6 s; the home and stop buttons raise the same when `ensure_connected` fails, and a Stop tapped on the live card logs a warning instead (R32). Temperature targets are written to `coordinator.data` only after the send succeeds. K2 Base: `targetBoxTemp: 0` is stripped from WS frames and the real target comes from a Moonraker poll on port 7125 every 30 s (`coordinator.py:700-706`, `coordinator.py:731-736`, `coordinator.py:2250-2279`, `const.py:318-321`).
 
 ---
 

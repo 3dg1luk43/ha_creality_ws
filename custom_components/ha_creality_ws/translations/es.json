@@ -63,6 +63,9 @@
     },
     "cfs_material_write_failed": {
       "message": "No se ha cambiado el material del CFS en {printers}: {error}"
+    },
+    "printer_not_connected": {
+      "message": "La impresora no está conectada, así que no se ha enviado el comando. Comprueba que esté encendida y que se pueda acceder a ella, y vuelve a intentarlo."
     }
   },
   "issues": {

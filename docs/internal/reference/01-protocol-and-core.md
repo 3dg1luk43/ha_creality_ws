@@ -136,7 +136,7 @@ All are compact JSON (`separators=(",", ":")`, `ws_client.py:530`) sent through 
 | `{"method":"set","params":{"gcodeCmd":"M106 P<ch> S<0-255>"}}` | `fan.py:63` | fans |
 | `{"method":"set","params":{"modifyMaterial":{boxId,id,type,...}}}` | `__init__.py:646` | `set_cfs_material` service; payload from `utils.py:594-674` |
 
-`send_set_retry` (`ws_client.py:509-523`): one attempt; on any exception wait up to 6 s for `_ws_ready` and try once more; raises `RuntimeError("printer link not available after 6.0s")` if the link never comes back. If the first failure happened on a socket that is closing but not yet torn down, `_ws_ready` is still set, so the retry runs immediately against the same dead socket and the original library exception propagates instead.
+`send_set_retry` (`ws_client.py:509-523`): one attempt; on any exception wait up to 6 s for `_ws_ready` and try once more; raises `RuntimeError("printer link not available after 6.0s")` if the link never comes back. User commands call it through `coordinator.send_command`, which turns any failure into the translated `HomeAssistantError` `printer_not_connected` (R32). If the first failure happened on a socket that is closing but not yet torn down, `_ws_ready` is still set, so the retry runs immediately against the same dead socket and the original library exception propagates instead.
 
 ### 1.4 Telemetry keys the core consumes
 
@@ -367,7 +367,7 @@ Consumers: `KEntity._get_cached_device_info` / `device_info` (`entity.py:43-55`,
 10. `async_forward_entry_setups(entry, PLATFORMS)` (`:493`).
 11. Register `diagnostic_dump` and the two CFS services if not yet registered (`:498-502`).
 
-The client is not registered with `entry.async_on_unload`; if anything after step 4 raises (for example `request_boxs_info` at `:296` hitting `RuntimeError("WebSocket not connected")` after a drop), setup fails with the `KClient` task still running and nothing left to stop it.
+Since R31 `coord.async_stop` is registered with `entry.async_on_unload` right after start, so a setup that raises later (for example `request_boxs_info` hitting `RuntimeError("WebSocket not connected")` after a drop) no longer leaves the `KClient` task running.
 
 ### 7.2 Options and reload (`__init__.py:971-1010`, `coordinator.py:1880-1922`)
 

@@ -60,7 +60,7 @@ class _KFanEntity(KEntity, FanEntity):
         pct = max(0, min(100, int(round(percentage))))
         s_val = int(round(255 * (pct / 100.0)))
         cmd = f"M106 P{self._channel} S{s_val}"
-        await self.coordinator.client.send_set_retry(gcodeCmd=cmd)
+        await self._send(gcodeCmd=cmd)
 
     async def async_turn_on(
         self,

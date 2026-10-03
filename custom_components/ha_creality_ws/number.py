@@ -150,8 +150,8 @@ class PrintTuningPercent(KEntity, NumberEntity):
         """Update the current value."""
         v = int(max(self._attr_native_min_value, min(self._attr_native_max_value, round(value))))
         # Write BOTH, keep them in lockstep
-        await self.coordinator.client.send_set_retry(setFeedratePct=v)
-        await self.coordinator.client.send_set_retry(setFlowratePct=v)
+        await self._send(setFeedratePct=v)
+        await self._send(setFlowratePct=v)
 
 
 # ---------- Temperature targets (BOX inputs) ----------
@@ -186,11 +186,11 @@ class NozzleTargetNumber(KEntity, NumberEntity):
         max_v = self._attr_native_max_value
         if max_v is not None:
             v = min(int(max_v), v)
-        
+
+        # Sent first: a target the printer never received must not show (R32).
+        await self._send(nozzleTempControl=v)
         self.coordinator.data["targetNozzleTemp"] = v
         self.coordinator.async_update_listeners()
-        
-        await self.coordinator.client.send_set_retry(nozzleTempControl=v)
 
 
 class BedTargetNumber(KEntity, NumberEntity):
@@ -226,11 +226,10 @@ class BedTargetNumber(KEntity, NumberEntity):
         max_v = self._attr_native_max_value
         if max_v is not None:
             v = min(int(max_v), v)
-        
+
+        await self._send(bedTempControl={"num": self._idx, "val": v})
         self.coordinator.data[f"targetBedTemp{self._idx}"] = v
         self.coordinator.async_update_listeners()
-        
-        await self.coordinator.client.send_set_retry(bedTempControl={"num": self._idx, "val": v})
 
 
 class BoxTargetNumber(KEntity, NumberEntity):
@@ -274,7 +273,8 @@ class BoxTargetNumber(KEntity, NumberEntity):
         max_v = self._attr_native_max_value
         if max_v is not None:
             v = min(int(max_v), v)
-        
+
+        await self._send(boxTempControl=v)
         # Optimistic update. Via the coordinator helper, not a direct write:
         # targetBoxTemp is a LATE_DISCOVERY_FIELDS entry, and writing it straight
         # into .data consumes the one-shot that other gates depend on. Harmless
@@ -282,5 +282,3 @@ class BoxTargetNumber(KEntity, NumberEntity):
         # the invariant has been broken this way before.
         self.coordinator.merge_telemetry({"targetBoxTemp": v})
         self.coordinator.async_update_listeners()
-
-        await self.coordinator.client.send_set_retry(boxTempControl=v)

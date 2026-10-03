@@ -7,6 +7,7 @@ from homeassistant.components.button import ButtonEntity  # type: ignore[import]
 
 from .entity import KEntity
 from .const import DOMAIN
+from .coordinator import not_connected_error
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,12 +36,11 @@ class KHomeAllButton(KEntity, ButtonEntity):
         async with self._seq_lock:
             # Ensure WebSocket connection is active before sending commands
             if not await self.coordinator.ensure_connected():
-                _LOGGER.warning("Cannot execute home command: printer not connected")
-                return
-            await self.coordinator.client.send_set_retry(autohome="X Y")
+                raise not_connected_error()
+            await self._send(autohome="X Y")
             await asyncio.sleep(1.0)
             await self._wait_until_idle_or_timeout(15.0)
-            await self.coordinator.client.send_set_retry(autohome="Z")
+            await self._send(autohome="Z")
 
     async def _wait_until_idle_or_timeout(self, timeout: float) -> None:
         loop = asyncio.get_running_loop()

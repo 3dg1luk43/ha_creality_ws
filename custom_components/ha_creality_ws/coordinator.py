@@ -161,6 +161,25 @@ def _warn_on_unsendable(data: dict[str, Any], target: str) -> None:
         )
 
 
+def not_connected_error() -> HomeAssistantError:
+    """What a user command reports when the printer cannot take it (R32)."""
+    return HomeAssistantError(
+        translation_domain=DOMAIN, translation_key="printer_not_connected"
+    )
+
+
+async def send_command(client, **params: Any) -> None:
+    """Send a user's command, or tell them it did not go.
+
+    The client raises a bare RuntimeError, which Home Assistant shows as
+    "Unknown error" with a traceback in the log (R32).
+    """
+    try:
+        await client.send_set_retry(**params)
+    except Exception as exc:  # pylint: disable=broad-except
+        raise not_connected_error() from exc
+
+
 class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator to manage connection and data for the printer."""
     def __init__(self, hass, host: str, power_switch: str | None = None, config_entry=None):
@@ -1810,7 +1829,12 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         elif action == ids[ACTION_RESUME]:
             await self.request_resume()
         elif action == ids[ACTION_STOP]:
-            await self.async_stop_print()
+            # No one to show the error to: the tap came from a phone.
+            try:
+                await self.async_stop_print()
+            except HomeAssistantError:
+                _LOGGER.warning("Stop from the live card not sent: the printer is not connected")
+                return True
         elif action == ids[ACTION_DISMISS]:
             # A swipe only removes the notification that is on screen; the
             # next live-card refresh posts it again under the same tag. This
@@ -1831,9 +1855,8 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         here; telemetry reflects idle soon enough.
         """
         if not await self.ensure_connected():
-            _LOGGER.warning("Cannot execute stop command: printer not connected")
-            return
-        await self.client.send_set_retry(stop=1)
+            raise not_connected_error()
+        await send_command(self.client, stop=1)
 
     def notifier_tick(self) -> None:
         """Clear a live card the printer has stopped reporting on.

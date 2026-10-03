@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Upgrading from a version that installed the cards under `/local/` left broken dashboard resources behind**: the old entries were rewritten into addresses that do not exist, which every dashboard then failed to load. They are now removed; the correct entries were already added separately.
 - **The CFS card's external spool read "Generic PLA PLA"** ([#115](https://github.com/3dg1luk43/ha_creality_ws/issues/115)): the material type was added after a name that already included it. A colour sensor reporting "unknown" also turned a spool grey instead of using the colour the printer had stored for it.
 - **Home Assistant started up to 15 seconds later for every printer that was switched off**: setup waited for the printer's first message before carrying on, even though the entities do not need it. It no longer waits, so an offline printer sets up at once and shows as unavailable until it answers.
+- **A command the printer did not receive showed "Unknown error", or nothing at all**: changing a temperature, fan or light while the connection was dropping failed with "Unknown error" and a stack trace in the log, the home and stop buttons did nothing without a word, and a new temperature target showed as set although it never reached the printer. These now say the printer is not connected, and a target appears only once the printer was sent it.
 
 ## 0.9.8 - 2026-09-26
 > [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)

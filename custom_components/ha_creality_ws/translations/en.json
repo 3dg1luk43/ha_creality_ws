@@ -63,6 +63,9 @@
     },
     "cfs_material_write_failed": {
       "message": "The CFS material was not changed on {printers}: {error}"
+    },
+    "printer_not_connected": {
+      "message": "The printer is not connected, so the command was not sent. Check that it is switched on and reachable, then try again."
     }
   },
   "issues": {

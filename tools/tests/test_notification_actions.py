@@ -19,6 +19,8 @@ from conftest import (
     restore_stubs,
 )
 
+from homeassistant.exceptions import HomeAssistantError
+
 from custom_components.ha_creality_ws.coordinator import KCoordinator
 from custom_components.ha_creality_ws.notification_rules import (
     ACTION_DISMISS,
@@ -278,8 +280,17 @@ def test_stop_refuses_to_fire_blind_when_disconnected(monkeypatch):
     monkeypatch.setattr(
         coord.client, "send_set_retry", lambda **kw: asyncio.sleep(0, result=sent.append(kw))
     )
-    _run(coord.async_stop_print())
+    with pytest.raises(HomeAssistantError) as err:
+        _run(coord.async_stop_print())
+    assert err.value.translation_key == "printer_not_connected"
     assert sent == []
+
+
+def test_a_stop_tap_while_disconnected_is_handled_quietly(monkeypatch):
+    """The tap comes from a phone, so there is no dialog to raise into (R32)."""
+    coord = _coordinator()
+    monkeypatch.setattr(coord, "ensure_connected", lambda: asyncio.sleep(0, result=False))
+    assert _run(coord.async_handle_notification_action(coord._notify_action_ids()[ACTION_STOP])) is True
 
 
 def test_stop_sends_the_printer_command_when_connected(monkeypatch):
@@ -323,6 +334,21 @@ def test_the_stop_button_entity_uses_the_same_path(monkeypatch):
     )
     _run(button.async_press())
     assert called == [True]
+
+
+def test_the_home_button_says_when_the_printer_is_not_connected(monkeypatch):
+    """It returned without a word, so the press looked like it had worked (R32)."""
+    test_the_stop_button_entity_uses_the_same_path(monkeypatch)  # installs the button stub
+    from custom_components.ha_creality_ws.button import KHomeAllButton
+
+    coord = _coordinator()
+    monkeypatch.setattr(coord, "ensure_connected", lambda: asyncio.sleep(0, result=False))
+    button = KHomeAllButton.__new__(KHomeAllButton)
+    button.coordinator = coord
+    button._seq_lock = asyncio.Lock()
+    with pytest.raises(HomeAssistantError) as err:
+        _run(button.async_press())
+    assert err.value.translation_key == "printer_not_connected"
 
 
 def test_printers_added_in_the_same_second_do_not_share_action_ids():

@@ -3,6 +3,7 @@ from homeassistant.helpers.device_registry import DeviceInfo #type: ignore[impor
 from homeassistant.helpers.update_coordinator import CoordinatorEntity #type: ignore[import]
 
 from .const import DOMAIN, MFR, MODEL
+from .coordinator import send_command
 from .utils import parse_model_version
 
 
@@ -39,7 +40,11 @@ class KEntity(CoordinatorEntity):
         coord = self.coordinator
         # Returns True if connection is lost OR if the power switch is off.
         return (not coord.available) or coord.power_is_off()
-    
+
+    async def _send(self, **params) -> None:
+        """Send a command for this entity; raises a translated error if it fails."""
+        await send_command(self.coordinator.client, **params)
+
     def _get_cached_device_info(self) -> dict | None:
         """
         Get cached device info from config entry (model, hostname, modelVersion).
