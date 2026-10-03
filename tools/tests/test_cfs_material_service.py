@@ -572,6 +572,21 @@ def test_a_successful_retry_dismisses_the_earlier_failure(integration):
 
 
 @requires_voluptuous
+def test_the_success_message_numbers_the_slot_as_the_sensors_do(integration):
+    """Slot 0 on the wire is "Slot 1" on every sensor and on the card."""
+    _module, notifications, _ = integration
+    notifications.clear()
+    coord = FakeCoordinator("printer-a", IDLE)
+    hass, services, _ = _make_hass(integration, {"e": coord}, {"d": _device("e")})
+    _register(integration, hass)
+    _call_service(integration, hass, services, {
+        "device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA",
+    })
+    message = next(n["message"] for n in notifications if "Updated" in str(n.get("title")))
+    assert "slot 1 " in message, message
+
+
+@requires_voluptuous
 def test_a_successful_write_schedules_the_echo_readback(integration):
     """The echo log is how the colour-format question gets settled from a user's
     debug log, so it must actually be scheduled."""

@@ -739,7 +739,8 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
                 hass,
                 title="CFS Material Updated",
                 message=(
-                    f"Box {box_id} slot {slot_id} on {host} updated."
+                    # 1-based, as the sensors name the slots (R28).
+                    f"Box {box_id} slot {slot_id + 1} on {host} updated."
                 ),
                 notification_id=f"cfs_material_update_{host}",
             )
