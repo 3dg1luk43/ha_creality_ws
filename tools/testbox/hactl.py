@@ -22,6 +22,7 @@ Assistant or a real printer.
     ./hactl.py notifications [--since ISO]   what the plain notify target got
     ./hactl.py zeroconf --host IP [--hostname H]   inject a zeroconf discovery
     ./hactl.py flows                         in-progress config flows
+    ./hactl.py go2rtc                        go2rtc streams, producers, consumers
     ./hactl.py printer-set k=v ...           force telemetry fields on the mock
     ./hactl.py printer-reset                 drop every forced field
     ./hactl.py errors [--since ISO]          ERROR/WARNING lines from the HA log
@@ -464,6 +465,13 @@ async def cmd_flows(_args: argparse.Namespace) -> int:
     return 0
 
 
+async def cmd_go2rtc(_args: argparse.Namespace) -> int:
+    """go2rtc's streams, producers and consumer counts, from inside the box."""
+    script = HERE / "support" / "scripts" / "go2rtc_streams.py"
+    subprocess.run(["docker", "cp", str(script), "creality-testbox-ha:/tmp/go2rtc_streams.py"], check=True)
+    return subprocess.run(["docker", "exec", "creality-testbox-ha", "python3", "/tmp/go2rtc_streams.py"]).returncode
+
+
 async def cmd_printer_set(args: argparse.Namespace) -> int:
     async with aiohttp.ClientSession() as session:
         _print(await rest(session, "POST", "/test/set", _kv(args.data), auth=False, base=PRINTER_URL))
@@ -541,6 +549,7 @@ def main() -> int:
     p.add_argument("--properties")
     p.set_defaults(func=cmd_zeroconf)
     sub.add_parser("flows").set_defaults(func=cmd_flows)
+    sub.add_parser("go2rtc").set_defaults(func=cmd_go2rtc)
     p = sub.add_parser("printer-set")
     p.add_argument("data", nargs="+")
     p.set_defaults(func=cmd_printer_set)

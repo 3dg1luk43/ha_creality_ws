@@ -852,7 +852,7 @@ class CrealityWebRTCCamera(_BaseCamera):
                     getattr(p, "url", None)
                     for p in getattr(existing_stream, "producers", []) or []
                 ]
-                if go2rtc_src not in existing_urls:
+                if not any(_same_go2rtc_source(go2rtc_src, url) for url in existing_urls):
                     _LOGGER.warning(
                         "ha_creality_ws: Stream '%s' exists but source mismatch: "
                         "expected '%s', found %s. Recreating...",
@@ -1420,6 +1420,41 @@ class CrealityWebRTCCamera(_BaseCamera):
         if not data or len(data) < 20:
             return False
         return data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9")
+
+
+def _source_identity(url: str | None) -> str:
+    """What identifies a go2rtc source, without the decoration go2rtc drops.
+
+    A stream is configured as `webrtc:http://<ip>:8000/call/webrtc_local
+    #format=creality`, but once a producer is connected go2rtc 1.9 reports it as
+    the bare `http://<ip>:8000/call/webrtc_local` (seen on the test box).
+    """
+    text = (url or "").split("#", 1)[0].strip()
+    if text.startswith("webrtc:"):
+        text = text[len("webrtc:"):]
+    return text.rstrip("/")
+
+
+def _same_go2rtc_source(expected: str, actual: str | None) -> bool:
+    """Whether an existing producer already serves the expected source.
+
+    go2rtc reports an idle producer by its configured source, and a connected
+    one by its bare URL. The exact comparison read every stream someone was
+    watching as a mismatch, so a reload deleted and recreated it under the
+    viewers (#88, #46).
+
+    The fragment only stops mattering in the connected form. An idle stream
+    left over from 0.9.3 without `#format=creality` still has to be replaced,
+    and such a stream never connects, so it never shows the bare form. A
+    genuinely different source, a moved printer, matches in neither form.
+    """
+    if not actual:
+        return False
+    if actual == expected:
+        return True
+    if expected.startswith("webrtc:") and not actual.startswith("webrtc:"):
+        return _source_identity(expected) == _source_identity(actual)
+    return False
 
 
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities):

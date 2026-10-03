@@ -246,7 +246,7 @@ Both classes use unique_id `<host>-camera` and translation_key `printer_camera` 
 |---|---|
 | Stream name | `creality_k2_<host with dots as underscores>`; custom sources `creality_custom_<host>` (`:811-827`) |
 | Source | `webrtc:http://<host>:8000/call/webrtc_local#format=creality`, or the custom URL verbatim (`:835`) |
-| Reuse rule | Existing stream kept only if one producer `url` equals the source string exactly; otherwise delete and re-add (`:839-888`) |
+| Reuse rule | `_same_go2rtc_source` (R17): a producer matches if its `url` equals the source exactly (the idle form), or, for a `webrtc:` source, if it is the bare connected form go2rtc 1.9 reports (`http://<ip>:8000/call/webrtc_local`, no prefix, no fragment) for the same address. Otherwise delete and re-add. The exact-only rule deleted a watched stream on every reload (reproduced on the test box with three viewers); an idle 0.9.3 stream without `#format=creality` is still replaced. `hactl.py go2rtc` shows the producers |
 | Failure | `_force_recreate_stream = True` (`:897-908`) |
 
 **RTSP for HA's stream pipeline** (`stream_source`, `camera.py:523-539`; endpoint `:460-521`): `rtsp://<host>:<port>/<stream_name>`, where port is the explicit `go2rtc_rtsp_port` override (unless the custom server failed), else `18554` for HA's managed go2rtc on loopback:11984 (`const.py:70`), else `8554` (`const.py:71`). IPv6 hosts are bracketed. `None` for direct signalling or while a recreate is pending.

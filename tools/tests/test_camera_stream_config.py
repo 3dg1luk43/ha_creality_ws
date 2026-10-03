@@ -143,6 +143,47 @@ def test_existing_stream_with_matching_source_is_not_recreated():
     assert camera._force_recreate_stream is False
 
 
+def _ensure_with_existing(producer_urls):
+    """Run stream configuration against a go2rtc that already has the stream."""
+    import asyncio
+    from types import SimpleNamespace
+
+    existing_stream = SimpleNamespace(producers=[SimpleNamespace(url=u) for u in producer_urls])
+    client = MagicMock()
+    client.streams = MagicMock()
+    client.streams.list = AsyncMock(return_value={"creality_k2_1_2_3_4": existing_stream})
+    client.streams.add = AsyncMock()
+    client.streams.delete = AsyncMock()
+    with patch("custom_components.ha_creality_ws.camera._BaseCamera.__init__"):
+        camera = CrealityWebRTCCamera(MagicMock(), "http://1.2.3.4:8000/call/webrtc_local")
+    camera.hass = MagicMock()
+    camera._go2rtc_client = client
+
+    async def run():
+        with patch.object(camera, "_initialize_go2rtc_client", new_callable=AsyncMock) as mock_init:
+            mock_init.return_value = True
+            await camera._ensure_stream_configured()
+
+    asyncio.run(run())
+    return client
+
+
+def test_a_stream_someone_is_watching_is_not_recreated():
+    """R17. A connected producer is reported by its bare URL (go2rtc 1.9.14 on
+    the test box: `http://<ip>:8000/call/webrtc_local`, no `webrtc:` and no
+    `#format`). The exact comparison took that for a wrong source, and a reload
+    deleted the stream from under three viewers."""
+    client = _ensure_with_existing(["http://1.2.3.4:8000/call/webrtc_local"])
+    client.streams.delete.assert_not_called()
+    client.streams.add.assert_not_called()
+
+
+def test_a_connected_stream_from_another_printer_is_still_replaced():
+    client = _ensure_with_existing(["http://9.9.9.9:8000/call/webrtc_local"])
+    client.streams.delete.assert_called_once()
+    client.streams.add.assert_called_once()
+
+
 def test_existing_stream_with_wrong_source_is_recreated():
     """A stream left over from 0.9.3 (wrong source) must be replaced, not reused."""
     import asyncio
