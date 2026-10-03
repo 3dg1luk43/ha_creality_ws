@@ -484,7 +484,7 @@ def normalize_color_hex(value: Any) -> Any:
     return _normalize_color_token(value)
 
 
-def format_filament_label(vendor: Any, name: Any, material_type: Any = None) -> str:
+def format_filament_label(vendor: Any, name: Any, material_type: Any = None) -> str | None:
     """Build the human-readable filament label for a CFS slot.
 
     The printer often repeats the vendor inside the material name (vendor
@@ -497,7 +497,9 @@ def format_filament_label(vendor: Any, name: Any, material_type: Any = None) -> 
     if not name_txt:
         name_txt = str(material_type).strip() if material_type not in (None, "") else ""
     if not name_txt:
-        name_txt = "Unknown"
+        # The vendor alone, or None, which reads as Home Assistant's own,
+        # translated "Unknown"; this used to append the English word (R33).
+        return vendor_txt or None
     if not vendor_txt:
         return name_txt
     if name_txt.casefold().startswith(vendor_txt.casefold()):

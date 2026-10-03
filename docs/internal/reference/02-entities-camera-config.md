@@ -104,7 +104,7 @@ Unique id is always `<host>-<key>`. "Default" availability is the `KEntity` rule
 | `print_job_time` | `PrintJobTimeSensor` (`:495-513`) | `printJobTime` | DURATION / s / MEASUREMENT | `int()` |
 | `print_left_time` | `PrintLeftTimeSensor` (`:515-533`) | `printLeftTime` | DURATION / s / MEASUREMENT | not cleared when idle |
 | `real_time_flow` | `RealTimeFlowSensor` (`:535-549`) | `realTimeFlow` | none / `mm³/s` / MEASUREMENT | no device class on purpose (`:538`) |
-| `current_object` | `CurrentObjectSensor` (`:552-585`) | `current_object` or `currentObject` | none | returns literal `"not printing"` when there is no file (`:571-576`); attribute `excluded_objects` from `excluded_objects_list` or `excluded_objects` |
+| `current_object` | `CurrentObjectSensor` (`:552-585`) | `current_object` or `currentObject` | none | returns the slug `not_printing` (state translation "Not printing") when there is no file, `None` while unavailable (R33); attribute `excluded_objects` from `excluded_objects_list` or `excluded_objects` |
 | `object_count` | `ObjectCountSensor` (`:588-631`) | `objects_list` / `objectsList` / `objects` | none / none / MEASUREMENT | `objects` arrives as a JSON string with polygons on a K1C and is `json.loads`-ed on every state write (`:613-619`) |
 | `print_control` | `KPrintControlSensor` (`:634-662`) | coordinator pending flags | none | states `queued` / `ok` / `unknown`; attributes `pending_pause`, `pending_resume`, `paused`, `status_raw_state`, `status_raw_deviceState`, `print_file`, `progress`; not marked DIAGNOSTIC |
 
@@ -140,11 +140,11 @@ Source: `coordinator.data["boxsInfo"]["materialBoxs"]`, requested on connect and
 |---|---|---|---|---|---|
 | Box temperature | `cfs_box_{box_id}_temp` | `cfs_box_temp` (`box_id`) | TEMPERATURE / C / MEASUREMENT | box `temp` | `sensor.py:666-699`; created when `temp` is non-null (`:950-956`) |
 | Box humidity | `cfs_box_{box_id}_humidity` | `cfs_box_humidity` (`box_id`) | HUMIDITY / % / MEASUREMENT | box `humidity` | same |
-| Slot filament | `cfs_box_{box_id}_slot_{slot_id}_filament` | `cfs_slot_filament` (`box_id`, `slot` = slot_id + 1) | none | `format_filament_label(vendor, name, type)`; `"Unknown"` when all empty (`utils.py:408-426`) | `sensor.py:744-803` |
+| Slot filament | `cfs_box_{box_id}_slot_{slot_id}_filament` | `cfs_slot_filament` (`box_id`, `slot` = slot_id + 1) | none | `format_filament_label(vendor, name, type)`; the vendor alone, or `None` (HA's own "Unknown") when name and type are empty (R33) | `sensor.py:744-803` |
 | Slot color | `..._slot_{slot_id}_color` | `cfs_slot_color` | none, icon `mdi:palette` | `normalize_color_hex(color)`: last six hex digits, lowercase `#rrggbb`, list-aware (`utils.py:365-405`) | same |
 | Slot remaining | `..._slot_{slot_id}_percent` | `cfs_slot_percent` | none / % / MEASUREMENT | `percent` | same |
 | External filament / color / remaining | `cfs_external_filament` / `_color` / `_percent` | `cfs_ext_filament` / `cfs_ext_color` / `cfs_ext_percent` | as above | first `type == 1` box, slot matched by id else `materials[0]` | `sensor.py:806-870`, created at `:978-991` |
-| Active slot | `active_filament_slot` | `active_filament_slot` | none, icon `mdi:printer-3d-nozzle` | first slot with `selected`: literal `"External"` or `"Box {box_id} Slot {n}"`; attributes `filament`, `color`, `percent` | `sensor.py:873-913`, created once per printer (`:993-998`) |
+| Active slot | `active_filament_slot` | `active_filament_slot` | none, icon `mdi:printer-3d-nozzle` | first slot with `selected`: slug `external` or `box_{box_id}_slot_{n}`, shown through state translations for boxes 1-4 (R33; the raw state used to be the English text); attributes `filament`, `color`, `percent` | `sensor.py:873-913`, created once per printer (`:993-998`) |
 
 Slot attributes (box slots and external slot alike, `_cfs_slot_attributes`, `sensor.py:702-741`): `vendor`, `type`, `name`, `color_hex`, `color_hex_raw`, `rfid`, `spool_key` (`utils.build_spool_key`, `utils.py:434-476`: rfid else vendor+name/type, plus normalised colour tokens), `state`, `selected`, `box_id`, `slot_id`, `min_temp`, `max_temp`, `pressure`. Attributes are empty when the printer is unavailable (`sensor.py:798-799`, `862-863`).
 
@@ -415,7 +415,7 @@ Locales: `en`, `es` (`translations/`). `strings.json`, `en.json` and `es.json` e
 | `options.error` | `invalid_camera_url`, `unknown_placeholder` | none |
 | `selector.camera_mode` | all five modes | none |
 | `entity.*` names | every translation_key used by the seven platforms (sensor 36, button 5, number 4, fan 3, light 1, camera 1, image 1) | none |
-| `entity.sensor.*.state` | `filament_status`, `print_status`, `print_control` | `current_object` (`"not printing"`), `active_filament_slot` (`"External"`, `"Box N Slot M"`), CFS filament `"Unknown"` are untranslated state literals |
+| `entity.sensor.*.state` | `filament_status`, `print_status`, `print_control`, `current_object`, `active_filament_slot` (R33) | none left among sensor states |
 | `exceptions` | `unsupported_ha_version` only | every service error in section 11 |
 | `services` | all three, every field | none |
 | `common` | notification and channel strings (coordinator) | outside this slice |

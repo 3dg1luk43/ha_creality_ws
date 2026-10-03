@@ -52,6 +52,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A command the printer did not receive showed "Unknown error", or nothing at all**: changing a temperature, fan or light while the connection was dropping failed with "Unknown error" and a stack trace in the log, the home and stop buttons did nothing without a word, and a new temperature target showed as set although it never reached the printer. These now say the printer is not connected, and a target appears only once the printer was sent it.
 - **The CFS material action's errors and the CFS and diagnostic notifications were always in English**: they were written into the code instead of the translation files. They now follow Home Assistant's language, and a rejected value names the field in words, such as "The maximum temperature (200) must not be below the minimum temperature (240)".
 
+### Changed
+
+- **Two sensors' raw states changed so they can be translated.** Home Assistant shows the same text as before, in your language now, but a template or automation that compares the raw state needs the new value:
+  - Active Filament Slot: `External` is now `external`, and `Box 1 Slot 2` is now `box_1_slot_2`.
+  - Current Object: `not printing` is now `not_printing`.
+
+  A CFS slot with no name or type now reads "Unknown" in your language, instead of the English word.
+
 ## 0.9.8 - 2026-09-26
 > [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)
 

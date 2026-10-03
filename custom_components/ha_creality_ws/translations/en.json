@@ -277,7 +277,10 @@
       "print_job_time": { "name": "Print Job Time" },
       "print_left_time": { "name": "Print Time Left" },
       "real_time_flow": { "name": "Real-Time Flow" },
-      "current_object": { "name": "Current Object" },
+      "current_object": {
+        "name": "Current Object",
+        "state": { "not_printing": "Not printing" }
+      },
       "object_count": { "name": "Object Count" },
       "print_control": {
         "name": "Print Control",
@@ -290,7 +293,28 @@
       "max_nozzle_temp": { "name": "Max Nozzle Temperature" },
       "max_bed_temp": { "name": "Max Bed Temperature" },
       "max_chamber_temp": { "name": "Max Chamber Temperature" },
-      "active_filament_slot": { "name": "Active Filament Slot" },
+      "active_filament_slot": {
+        "name": "Active Filament Slot",
+        "state": {
+          "external": "External",
+          "box_1_slot_1": "Box 1 Slot 1",
+          "box_1_slot_2": "Box 1 Slot 2",
+          "box_1_slot_3": "Box 1 Slot 3",
+          "box_1_slot_4": "Box 1 Slot 4",
+          "box_2_slot_1": "Box 2 Slot 1",
+          "box_2_slot_2": "Box 2 Slot 2",
+          "box_2_slot_3": "Box 2 Slot 3",
+          "box_2_slot_4": "Box 2 Slot 4",
+          "box_3_slot_1": "Box 3 Slot 1",
+          "box_3_slot_2": "Box 3 Slot 2",
+          "box_3_slot_3": "Box 3 Slot 3",
+          "box_3_slot_4": "Box 3 Slot 4",
+          "box_4_slot_1": "Box 4 Slot 1",
+          "box_4_slot_2": "Box 4 Slot 2",
+          "box_4_slot_3": "Box 4 Slot 3",
+          "box_4_slot_4": "Box 4 Slot 4"
+        }
+      },
       "cfs_box_temp": { "name": "CFS Box {box_id} Temperature" },
       "cfs_box_humidity": { "name": "CFS Box {box_id} Humidity" },
       "cfs_slot_filament": { "name": "CFS Box {box_id} Slot {slot} Filament" },

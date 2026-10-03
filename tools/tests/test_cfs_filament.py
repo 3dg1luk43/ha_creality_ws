@@ -64,8 +64,10 @@ def test_normalize_color_hex_handles_multi_colour_lists():
         # A missing vendor is left out rather than invented.
         (None, "Hyper PLA", "PLA", "Hyper PLA"),
         ("", None, "PLA", "PLA"),
-        # Nothing usable at all.
-        (None, None, None, "Unknown"),
+        # Nothing usable at all: Home Assistant's own, translated "Unknown",
+        # not the English word (R33).
+        (None, None, None, None),
+        ("Generic", None, None, "Generic"),
     ],
 )
 def test_format_filament_label(vendor, name, material_type, expected):

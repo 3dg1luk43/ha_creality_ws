@@ -559,21 +559,21 @@ class CurrentObjectSensor(KEntity, SensorEntity):
 
     @property
     def native_value(self) -> str | None:
-        # If printer is off or unavailable, show N/A
         if self._should_zero():
-            return "N/A"
+            return None
         
         d = self.coordinator.data or {}
         v = d.get("current_object") or d.get("currentObject")
 
-        # If no current object and printer is not printing, show "not printing".
+        # If no current object and printer is not printing, say so: a state
+        # translation turns the slug into "Not printing" (R33).
         # Firmware may send this as a non-string (e.g. an int object index), so
         # only run the whitespace check on actual strings to avoid AttributeError.
         if not v or (isinstance(v, str) and not v.strip()):
             # Check if printer is actually printing
             fname = d.get("printFileName") or ""
             if not fname:
-                return "not printing"
+                return "not_printing"
             return None
 
         return str(v)
@@ -775,7 +775,7 @@ class KCFSSlotSensor(KEntity, SensorEntity):
     @property
     def native_value(self) -> Any:
         if self._should_zero():
-            return 0 if self._type == "percent" else "N/A"
+            return 0 if self._type == "percent" else None
             
         data = self._get_slot_data()
         if not data:
@@ -842,7 +842,7 @@ class KCFSExtSlotSensor(KEntity, SensorEntity):
     @property
     def native_value(self) -> Any:
         if self._should_zero():
-            return 0 if self._type == "percent" else "N/A"
+            return 0 if self._type == "percent" else None
 
         data = self._get_slot_data()
         if not data:
@@ -888,11 +888,13 @@ class KActiveFilamentSensor(KEntity, SensorEntity):
             box_type = box.get("type", 0)
             for slot in box.get("materials", []):
                 if slot.get("selected"):
+                    # Slugs, shown as "External" and "Box 1 Slot 2" by state
+                    # translations; the English text was the raw state (R33).
                     if box_type == 1:
-                        return "External"
+                        return "external"
                     slot_id = slot.get("id", 0)
                     box_id = box.get("id", 0)
-                    return f"Box {box_id} Slot {slot_id + 1}"
+                    return f"box_{box_id}_slot_{slot_id + 1}"
         return None
 
     @property

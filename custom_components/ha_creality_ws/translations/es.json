@@ -277,7 +277,10 @@
       "print_job_time": { "name": "Tiempo de trabajo de impresión" },
       "print_left_time": { "name": "Tiempo restante de impresión" },
       "real_time_flow": { "name": "Flujo en tiempo real" },
-      "current_object": { "name": "Objeto actual" },
+      "current_object": {
+        "name": "Objeto actual",
+        "state": { "not_printing": "Sin impresión" }
+      },
       "object_count": { "name": "Cantidad de objetos" },
       "print_control": {
         "name": "Control de impresión",
@@ -290,7 +293,28 @@
       "max_nozzle_temp": { "name": "Temperatura máxima de la boquilla" },
       "max_bed_temp": { "name": "Temperatura máxima de la cama" },
       "max_chamber_temp": { "name": "Temperatura máxima de la cámara" },
-      "active_filament_slot": { "name": "Ranura de filamento activa" },
+      "active_filament_slot": {
+        "name": "Ranura de filamento activa",
+        "state": {
+          "external": "Externa",
+          "box_1_slot_1": "Caja 1, ranura 1",
+          "box_1_slot_2": "Caja 1, ranura 2",
+          "box_1_slot_3": "Caja 1, ranura 3",
+          "box_1_slot_4": "Caja 1, ranura 4",
+          "box_2_slot_1": "Caja 2, ranura 1",
+          "box_2_slot_2": "Caja 2, ranura 2",
+          "box_2_slot_3": "Caja 2, ranura 3",
+          "box_2_slot_4": "Caja 2, ranura 4",
+          "box_3_slot_1": "Caja 3, ranura 1",
+          "box_3_slot_2": "Caja 3, ranura 2",
+          "box_3_slot_3": "Caja 3, ranura 3",
+          "box_3_slot_4": "Caja 3, ranura 4",
+          "box_4_slot_1": "Caja 4, ranura 1",
+          "box_4_slot_2": "Caja 4, ranura 2",
+          "box_4_slot_3": "Caja 4, ranura 3",
+          "box_4_slot_4": "Caja 4, ranura 4"
+        }
+      },
       "cfs_box_temp": { "name": "Temperatura de la caja CFS {box_id}" },
       "cfs_box_humidity": { "name": "Humedad de la caja CFS {box_id}" },
       "cfs_slot_filament": { "name": "Filamento (caja CFS {box_id}, ranura {slot})" },
