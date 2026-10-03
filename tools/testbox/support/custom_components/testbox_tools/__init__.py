@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from ipaddress import ip_address
 from typing import Any
 
@@ -67,7 +67,14 @@ class PushCaptureView(HomeAssistantView):
         hass: HomeAssistant = request.app["hass"]
         await hass.async_add_executor_job(_append, line)
         _LOGGER.info("testbox push captured for %s", name)
-        return self.json({"rateLimits": {"successful": 1, "maximum": 500}}, status_code=201)
+        # Every field core's log_rate_limits reads, or the call raises KeyError
+        # after the push has been "delivered" and the success callback (which
+        # retires a Live Activity token on END) never runs.
+        resets = (datetime.now(timezone.utc) + timedelta(hours=12)).isoformat()
+        return self.json(
+            {"rateLimits": {"successful": 1, "errors": 0, "maximum": 500, "resetsAt": resets}},
+            status_code=201,
+        )
 
 
 def _append(line: str) -> None:

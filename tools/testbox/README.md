@@ -44,6 +44,7 @@ cd tools/testbox
 | `printer/Dockerfile` | python 3.13 + the mock's dependencies (aiortc is not in the HA image) |
 | `up.sh` / `down.sh` | start + onboard / stop (`--wipe` deletes `config/`) |
 | `hactl.py` | the driver: REST, WebSocket, flows, registry, pushes, mock control |
+| `smoke.py` | the end-to-end checks; exit code is the number of failures |
 | `card_check.mjs`, `package.json` | the bundled cards in headless Chromium against the box |
 | `support/configuration.yaml` | baseline HA config, copied into `config/` on first start |
 | `support/custom_components/testbox_tools/` | push capture endpoint + zeroconf injection |
@@ -70,6 +71,33 @@ $H errors                              # ERROR/WARNING lines from the HA log
 points back into the box, so `pushes` shows exactly what core sends to the push
 relay, after its own Live Activity routing. That is the only place the iOS and
 Android wire formats can be checked end to end without a phone.
+
+## The smoke run
+
+```bash
+./up.sh --fresh && ../../.venv/bin/python3 smoke.py     # ~5 min, 16 checks
+```
+
+Adds the mock through the user flow, then checks on real Home Assistant:
+entities and numeric states, a blank value reading unknown (#121), the plug
+switch stopping and restarting the connection (#45), a two-minute mock print
+announced to a fake iPhone (native types, routed by core as a Live Activity), a
+fake Android phone (strings) and a plain target (text only) (#125), the
+diagnostics download hiding the address, a host change keeping every entity
+(#39), and no integration errors in the log. Against the code from before the
+2026-10-02 fixes it fails 7 of the 16, each on the bug it pins.
+
+### Upgrade test
+
+`INTEGRATION_DIR` mounts another checkout in place of the working tree:
+
+```bash
+git worktree add /tmp/old v0.9.8
+INTEGRATION_DIR=/tmp/old/custom_components/ha_creality_ws ./up.sh --fresh
+../../.venv/bin/python3 hactl.py setup && ../../.venv/bin/python3 hactl.py registry > before.json
+docker compose up -d --force-recreate ha     # back to the working tree, same config/
+../../.venv/bin/python3 hactl.py registry > after.json   # compare, then run smoke.py
+```
 
 ## The cards in a real browser
 

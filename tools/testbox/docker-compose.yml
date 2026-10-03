@@ -59,7 +59,9 @@ services:
       PYTHONDONTWRITEBYTECODE: "1"
     volumes:
       - ./config:/config
-      - ../../custom_components/ha_creality_ws:/config/custom_components/ha_creality_ws:ro
+      # INTEGRATION_DIR swaps in another checkout (an older release, for an
+      # upgrade test); it defaults to the working tree.
+      - ${INTEGRATION_DIR:-../../custom_components/ha_creality_ws}:/config/custom_components/ha_creality_ws:ro
       - ./support/custom_components/testbox_notify:/config/custom_components/testbox_notify:ro
       - ./support/custom_components/testbox_tools:/config/custom_components/testbox_tools:ro
     networks:
