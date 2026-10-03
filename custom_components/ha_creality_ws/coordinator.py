@@ -1536,7 +1536,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "body_layer", layer=snap.layer, total_layers=snap.total_layers
                 )
             )
-        remaining = format_duration(snap.seconds_left, self._notify_strings or {})
+        # Zero or less is the printer having no estimate (warm-up, self-test, or
+        # an estimate that ran out), not "0s left" (R25).
+        remaining = (
+            format_duration(snap.seconds_left, self._notify_strings or {})
+            if snap.seconds_left is not None and snap.seconds_left > 0
+            else ""
+        )
         if remaining:
             parts.append(self._t("body_time_left", duration=remaining))
         return NOTIFY_BODY_SEPARATOR.join(p for p in parts if p) or self._t(
@@ -1624,7 +1630,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             progress=snap.progress,
             when=when,
             channel=self._t(NOTIFY_CHANNEL_KEY_LIVE),
-            status_text=self._live_status_text(phase, paused),
+            status_text=self._live_status_text(phase, paused, snap),
             live_update=not expired,
             group=tag_base,
             # No snapshot: Android re-downloads a big picture on every push and
@@ -1649,13 +1655,24 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             when=when,
         )
 
-    def _live_status_text(self, phase: str, paused: bool) -> str:
-        """The short label shown when there is no chronometer to show instead."""
+    def _live_status_text(self, phase: str, paused: bool, snap: LiveSnapshot) -> str:
+        """The short label shown when there is no chronometer to show instead.
+
+        "Finishing" used to be the answer to everything else, so a printer
+        heating or self-testing with no time estimate yet read "Finishing" at 0%
+        (#125's log, R25). It now means what it says: progress under way and
+        the printer's own estimate run out.
+        """
         if paused:
             return self._t("status_paused")
-        if phase == PHASE_START:
+        # From the printer's state, not from this being the card's first push:
+        # a card that starts mid-print (after a restart, or with notifications
+        # switched on mid-print) is not "Starting".
+        if snap.activity_state in ("self-testing", "processing") or snap.progress == 0:
             return self._t("status_starting")
-        return self._t("status_finishing")
+        if snap.seconds_left is not None and snap.seconds_left <= 0:
+            return self._t("status_finishing")
+        return self._t("status_printing")
 
     def _clear_live_card(self, *, finished: bool = False, send: bool = True) -> None:
         """End the live activity.

@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Typing in the CFS card's editor lost the cursor after every character**: each change rebuilt the editor, so a title had to be typed one letter at a time, and changing the display mode jumped back to the first tab. The editor is now built once and keeps its focus and tab.
 - **In a sections dashboard the CFS card covered the card below it**: the card asked for a fixed height and then drew past it, by about 170 pixels for one CFS on a phone. It now takes exactly the height it needs.
 - **A renamed or deleted power switch kept the printer offline for good**: the integration treated a power switch it could not find as "off" and never connected again, with nothing in the log at the normal level. A switch that is still missing two minutes after startup is now ignored, the printer connects, and a repair in Settings > Repairs names the switch so you can choose another one.
+- **The live print card said "Finishing" and "0s" while the printer was still heating** ([#125](https://github.com/3dg1luk43/ha_creality_ws/issues/125)): with no time estimate yet, the card fell back to "Finishing", and a card that appeared part-way through a print said "Starting". It now says Starting while the printer heats or self-tests, Finishing only when its time estimate has run out, and Printing otherwise, and leaves the time out until there is one.
 
 ## 0.9.8 - 2026-09-26
 > [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)

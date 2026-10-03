@@ -1461,6 +1461,30 @@ def test_a_stop_reported_with_its_clock_reset_is_announced_once():
     assert len(_events(payloads)) == 1
 
 
+def test_a_self_test_at_the_start_reads_starting_not_finishing():
+    """R25, #125's log: "0% - 0s" with "Finishing" while the printer heated and
+    self-tested. No estimate yet is not an estimate that ran out."""
+    coord, hass = _coordinator()
+    push = _live(_frame(coord, hass, **_printing(0, printLeftTime=0, withSelfTest=50)))[0]
+    assert push["data"]["critical_text"] == "Starting"
+    assert "0s" not in push["message"]
+
+
+def test_a_print_with_no_estimate_reads_printing():
+    coord, hass = _coordinator()
+    frame = _printing(40)
+    frame.pop("printLeftTime")
+    push = _live(_frame(coord, hass, **frame))[0]
+    assert push["data"]["critical_text"] == "Printing"
+
+
+def test_an_estimate_that_ran_out_late_reads_finishing():
+    coord, hass = _coordinator()
+    push = _live(_frame(coord, hass, **_printing(97, printLeftTime=0)))[0]
+    assert push["data"]["critical_text"] == "Finishing"
+    assert "0s" not in push["message"]
+
+
 def _alerts(payloads):
     return [p for p in payloads if p["data"]["tag"].endswith("_alert")]
 

@@ -39,6 +39,7 @@
     "status_starting": "Iniciando",
     "status_paused": "En pausa",
     "status_finishing": "Finalizando",
+    "status_printing": "Imprimiendo",
     "body_progress": "{progress}%",
     "body_paused": "En pausa al {progress}%",
     "body_paused_unknown": "En pausa",
