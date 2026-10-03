@@ -1,5 +1,8 @@
 {
   "printer_card": {
+    "default_name": "3D Printer",
+    "picker_name": "Creality Printer Card",
+    "picker_description": "Standalone card for Creality K-Series printers",
     "status_unknown": "Unknown",
     "confirm_stop": "Are you sure you want to stop the print?",
     "confirm_power_off": "Are you sure you want to power off the printer?",
@@ -111,6 +114,8 @@
     "editor_error_prefix": "Error:"
   },
   "cfs_card": {
+    "picker_name": "Creality CFS Card",
+    "picker_description": "A card to control the Creality Filament System (CFS)",
     "no_data": "No CFS data available",
     "ext_label": "EXT",
     "cfs_label": "CFS",

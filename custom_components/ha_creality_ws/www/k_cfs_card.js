@@ -222,6 +222,8 @@ const BUSY_PRINT_STATES = new Set([
 
 const CFS_TRANSLATIONS = {
   en: {
+    picker_name: "Creality CFS Card",
+    picker_description: "A card to control the Creality Filament System (CFS)",
     no_data: "No CFS data available",
     ext_label: "EXT",
     cfs_label: "CFS",
@@ -2751,10 +2753,18 @@ window.customCards = window.customCards || [];
 // Once per page, like the element itself: a second copy of this module (two
 // resource entries with different ?v=) listed the card twice in the picker.
 if (!window.customCards.some((card) => card.type === "k-cfs-card")) {
-  window.customCards.push({
+  const pickerEntry = {
     type: "k-cfs-card",
-    name: "Creality CFS Card",
+    name: CFS_TRANSLATIONS.en.picker_name,
     preview: true,
-    description: "A card to control the Creality Filament System (CFS)"
+    description: CFS_TRANSLATIONS.en.picker_description,
+  };
+  window.customCards.push(pickerEntry);
+  // The picker reads the entry when it opens, so the page's language can be
+  // applied once its strings arrive (R33).
+  const pageHass = document.querySelector?.("home-assistant")?.hass;
+  _requestI18n({}, pageHass, () => {
+    pickerEntry.name = _translate(pageHass, "cfs_card", CFS_TRANSLATIONS, "picker_name");
+    pickerEntry.description = _translate(pageHass, "cfs_card", CFS_TRANSLATIONS, "picker_description");
   });
 }

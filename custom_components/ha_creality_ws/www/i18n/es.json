@@ -1,5 +1,8 @@
 {
   "printer_card": {
+    "default_name": "Impresora 3D",
+    "picker_name": "Tarjeta de impresora Creality",
+    "picker_description": "Tarjeta independiente para impresoras Creality de la serie K",
     "status_unknown": "Desconocido",
     "confirm_stop": "¿Seguro que deseas detener la impresión?",
     "confirm_power_off": "¿Seguro que deseas apagar la impresora?",
@@ -111,6 +114,8 @@
     "editor_error_prefix": "Error:"
   },
   "cfs_card": {
+    "picker_name": "Tarjeta CFS de Creality",
+    "picker_description": "Tarjeta para controlar el Creality Filament System (CFS)",
     "no_data": "No hay datos del CFS disponibles",
     "ext_label": "EXT",
     "cfs_label": "CFS",

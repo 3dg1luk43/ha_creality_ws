@@ -67,7 +67,13 @@ const TELEMETRY_COMPACT_HYSTERESIS = 8;
 
 const INTEGRATION_DOMAIN = "ha_creality_ws";
 // The name a card carries until the user (or the device picker) names it.
-const DEFAULT_CARD_NAME = "3D Printer";
+// What the card picker used to write into every new card's YAML. Still read as
+// "no name", so such a card shows the translated default and is renamed from
+// its device like an unnamed one (R33).
+const LEGACY_DEFAULT_CARD_NAME = "3D Printer";
+function isUnnamed(name) {
+  return !name || name === LEGACY_DEFAULT_CARD_NAME;
+}
 
 /**
  * Card roles the printer's own device can fill, keyed by the translation_key
@@ -356,7 +362,7 @@ function computeColor(status) {
 class KPrinterCard extends HTMLElement {
   static getStubConfig() {
     return {
-      name: DEFAULT_CARD_NAME,
+      name: "",
       // Device the entity fields were filled from. Stored so the editor's
       // "fill from device" button has something to re-read; the card itself
       // resolves nothing from it, so a config written by hand needs no device.
@@ -1079,7 +1085,7 @@ class KPrinterCard extends HTMLElement {
     };
     const fmtWithUnit = (eid) => fmtState(gObj(eid));
 
-    const name = this._cfg.name || DEFAULT_CARD_NAME;
+    const name = isUnnamed(this._cfg.name) ? this._t("default_name") : this._cfg.name;
     const status = g(this._cfg.status) ?? "unknown";
     const pct = clamp(Number.isFinite(gNum(this._cfg.progress)) ? gNum(this._cfg.progress) : 0, 0, 100);
     const timeLeft = durationToSeconds(gObj(this._cfg.time_left));
@@ -1254,6 +1260,9 @@ class KPrinterCard extends HTMLElement {
 }
 const CARD_TRANSLATIONS = {
   en: {
+    default_name: "3D Printer",
+    picker_name: "Creality Printer Card",
+    picker_description: "Standalone card for Creality K-Series printers",
     status_unknown: "Unknown",
     confirm_stop: "Are you sure you want to stop the print?",
     confirm_power_off: "Are you sure you want to power off the printer?",
@@ -2041,9 +2050,9 @@ class KPrinterCardEditor extends HTMLElement {
     }
     const device = this._hass?.devices?.[deviceId];
     const deviceName = device?.name_by_user || device?.name || "";
-    // Every card starts life named "3D Printer", so that counts as unset --
+    // Cards used to start life named "3D Printer", so that counts as unset --
     // otherwise the field the user most expects to be filled never would be.
-    const nameUnset = !this._cfg.name || this._cfg.name === DEFAULT_CARD_NAME;
+    const nameUnset = isUnnamed(this._cfg.name);
     if (deviceName && (overwrite || nameUnset)) patch.name = deviceName;
     return patch;
   }
@@ -2120,11 +2129,19 @@ try {
   // Once per page, like the element itself: a second copy of this module (two
   // resource entries with different ?v=) listed the card twice in the picker.
   if (!window.customCards.some((card) => card.type === CARD_TAG)) {
-    window.customCards.push({
+    const pickerEntry = {
       type: CARD_TAG,
-      name: "Creality Printer Card",
-      description: "Standalone card for Creality K-Series printers",
+      name: CARD_TRANSLATIONS.en.picker_name,
+      description: CARD_TRANSLATIONS.en.picker_description,
       preview: true,
+    };
+    window.customCards.push(pickerEntry);
+    // The picker reads the entry when it opens, so the page's language can be
+    // applied once its strings arrive (R33).
+    const pageHass = document.querySelector?.("home-assistant")?.hass;
+    _requestI18n({}, pageHass, () => {
+      pickerEntry.name = _translate(pageHass, "printer_card", CARD_TRANSLATIONS, "picker_name");
+      pickerEntry.description = _translate(pageHass, "printer_card", CARD_TRANSLATIONS, "picker_description");
     });
   }
 } catch (_) { }

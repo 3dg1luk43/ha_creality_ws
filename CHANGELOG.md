@@ -52,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A command the printer did not receive showed "Unknown error", or nothing at all**: changing a temperature, fan or light while the connection was dropping failed with "Unknown error" and a stack trace in the log, the home and stop buttons did nothing without a word, and a new temperature target showed as set although it never reached the printer. These now say the printer is not connected, and a target appears only once the printer was sent it.
 - **The CFS material action's errors and the CFS and diagnostic notifications were always in English**: they were written into the code instead of the translation files. They now follow Home Assistant's language, and a rejected value names the field in words, such as "The maximum temperature (200) must not be below the minimum temperature (240)".
 - **The filament runout notification put an English word into other languages, and "finishing soon" could say "0 minutes"**: the runout text included the print's state as the internal word ("printing"), and the reminder dropped the seconds, so 40 seconds left read as 0 minutes. The state now comes from the translations, and the reminder rounds up and says "min".
+- **The cards' names in the "add card" picker and the printer card's default title were always in English**: they now follow your language. New printer cards are no longer created with the name "3D Printer" written into them, and existing cards still named that show the title in your language.
 
 ### Changed
 

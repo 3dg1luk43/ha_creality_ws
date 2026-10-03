@@ -24,7 +24,7 @@ Line anchors are `file:line`; the file name alone is used when the path is unamb
 | `k-cfs-card` | `KCFSCard` | `k_cfs_card.js:280` | `k_cfs_card.js:2522` |
 | `k-cfs-card-editor` | `KCFSCardEditor` | `k_cfs_card.js:2524` | `k_cfs_card.js:2697` |
 
-Card picker entries are pushed onto `window.customCards` at `k_printer_card.js:2053-2061` (wrapped in try) and `k_cfs_card.js:2699-2705` (not wrapped). Both set `preview: true`. Neither push is deduplicated.
+Card picker entries are pushed onto `window.customCards` at `k_printer_card.js:2053-2061` (wrapped in try) and `k_cfs_card.js:2699-2705` (not wrapped). Both set `preview: true`. Both are pushed once per page (R28) and filled in English from the bundled dictionary, then re-labelled in the page's language once `i18n/<lang>.json` loads; the picker reads the entry when it opens (R33, checked in Chromium with a Spanish profile).
 
 ### Key properties (both cards)
 
@@ -153,7 +153,7 @@ The bundled English dicts are a second copy of `i18n/en.json`. Drift is guarded 
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `name` | string | `"3D Printer"` (`DEFAULT_CARD_NAME`, `:60`) | Rendered via `textContent` (`:1046`). Also part of `generateCardId`. |
+| `name` | string | `""` since R33 (was `"3D Printer"`) | Rendered via `textContent`; empty or the legacy `"3D Printer"` (`isUnnamed`) shows the translated `default_name` and is renamed from the device by "fill from device". Also part of `generateCardId`. |
 | `device` | device id | `""` | Editor only. The card never reads it at runtime (`:328-331`). |
 | `camera` | entity id | `""` | Only used as the more-info target. |
 | `status` | entity id | `""` | Raw state drives icon, colour, chips; display via `formatEntityState`. Also part of `generateCardId`. |
@@ -413,7 +413,7 @@ Two sections, `printer_card` (109 keys) and `cfs_card` (54 keys), identical key 
 
 Unused keys: `cfs_card.cfs_label` and `cfs_card.schema_compact_view` (the latter is not in the bundled dict either). Printer keys that look unused (`label_*`, `helper_*`, `color_*`, `helper_auto_*`) are built dynamically in `_label`/`_helper`.
 
-Strings that bypass i18n: `DEFAULT_CARD_NAME "3D Printer"` (rendered), CFS stub `name: "CFS"` and the `'Creality CFS'` fallback, both `customCards` names/descriptions (evaluated at module load, before any `hass` exists), `CREALITY_STANDARD_COLOURS` names (deliberate, tooltips), `humanizeName` labels, the `#rrggbb` placeholder, and the `Ns` seconds suffix in `fmtTimeLeft`.
+Strings that bypass i18n, all deliberate since R33 translated the default printer title and the picker entries: CFS stub `name: "CFS"` and the `'Creality CFS'` fallback (product names), `CREALITY_STANDARD_COLOURS` names (deliberate, tooltips), `humanizeName` labels, the `#rrggbb` placeholder, and the `Ns` seconds suffix in `fmtTimeLeft`.
 
 ---
 
