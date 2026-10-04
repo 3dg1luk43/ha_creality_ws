@@ -43,6 +43,8 @@ Other `.github` files:
 - `FUNDING.yml`: `ko_fi: 3dg1luk43`.
 - `pr-assets/wrapped-telemetry-overlap.png` is a 180 KB PR screenshot.
 
+`.coderabbit.yaml` (repo root) limits CodeRabbit to `custom_components/`, `.github/`, the release script, the requirements files, `tools/simulator/` and `README.md`, because CodeRabbit reviews at most 100 files per PR and `0.9.9` touches 195. Tests and the other docs are not reviewed.
+
 ### 1.1 Labels
 
 All labels the workflows use exist on the repo (verified with `gh label list`): `bug`, `feature request`, `documentation`, `more info required`, `awaiting maintainer review`, `accepted`, `done`, `needs description`, `needs accepted issue`, `awaiting maintainer`.

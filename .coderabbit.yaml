@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# CodeRabbit reviews at most 100 files per PR. Review the integration, CI, release
+# tooling, the simulator and the README; skip tests and the remaining docs.
+reviews:
+  path_filters:
+    - "custom_components/**"
+    - ".github/**"
+    - "!.github/ISSUE_TEMPLATE/*.md"
+    - "tools/release_check.sh"
+    - "tools/requirements*.txt"
+    - "tools/simulator/**"
+    - "!tools/simulator/media/**"
+    - "README.md"
