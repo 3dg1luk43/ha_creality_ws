@@ -607,3 +607,104 @@ def test_a_standalone_go2rtc_on_the_default_pair_is_still_used_without_has_own()
         "a stand-alone go2rtc was recorded as Home Assistant's own, so the RTSP "
         "endpoint will derive 18554 for a server listening on 8554"
     )
+
+
+def _strikes(answers):
+    """Run failed-snapshot checks with go2rtc answering `answers` in turn;
+    return how many times the camera asked to move to direct WebRTC."""
+    import asyncio
+
+    cam = _camera()
+    cam._stream_name = "creality_k2_1_2_3_4"
+    moves = []
+    cam._on_no_video = lambda: moves.append(1)
+    cam._go2rtc_receiving = AsyncMock(side_effect=list(answers))
+
+    async def run():
+        for _ in answers:
+            await cam._note_failed_snapshot()
+
+    asyncio.run(run())
+    return len(moves)
+
+
+def test_go2rtc_connected_without_video_twice_moves_to_direct_webrtc():
+    """#46: the K1C 2025 sends a payload type its own answer did not list,
+    go2rtc drops every packet, and only the browser-side path shows video."""
+    assert _strikes([False, False]) == 1
+    # Once is enough: the camera is rebuilt by then.
+    assert _strikes([False, False, False, False]) == 1
+
+
+def test_one_silent_moment_or_a_dark_printer_moves_nothing():
+    assert _strikes([False]) == 0
+    # Video arrived in between: the count starts again.
+    assert _strikes([False, True, False]) == 0
+    # go2rtc not connected to the printer at all (off, unreachable): no evidence.
+    assert _strikes([None, None, None]) == 0
+    assert _strikes([False, None, False]) == 0
+
+
+def test_a_camera_not_wired_for_it_never_moves():
+    """User-forced go2rtc, and the K2 family, get no callback from setup."""
+    import asyncio
+
+    cam = _camera()
+    cam._stream_name = "creality_k2_1_2_3_4"
+    cam._go2rtc_receiving = AsyncMock(return_value=False)
+    asyncio.run(cam._note_failed_snapshot())
+    asyncio.run(cam._note_failed_snapshot())
+    cam._go2rtc_receiving.assert_not_called()
+
+
+# What go2rtc 1.9.14 answered on the test box (R78, #46).
+_SILENT = {"producers": [{"id": 2, "format_name": "webrtc/creality", "remote_addr": "172.31.78.10:38191 host",
+                          "receivers": [{"id": 3, "codec": {"codec_name": "h264"}, "childs": [4]}]}]}
+_FLOWING = {"producers": [{"id": 1, "remote_addr": "172.31.77.10:8080", "bytes_recv": 343471,
+                           "receivers": [{"id": 3, "codec": {"codec_name": "mjpeg"}, "bytes": 343471, "packets": 32}]}]}
+_IDLE = {"producers": [{"url": "http://172.31.77.10:8000/call/webrtc_local"}], "consumers": []}
+
+
+def _receiving(reply):
+    import asyncio
+
+    cam = _camera()
+    cam._stream_name = "creality_k2_1_2_3_4"
+    resp = MagicMock()
+    resp.json = AsyncMock(return_value=reply)
+    cam._go2rtc_client = MagicMock()
+    cam._go2rtc_client._client.request = AsyncMock(return_value=resp)
+    return asyncio.run(cam._go2rtc_receiving())
+
+
+def test_go2rtc_replies_are_read_as_go2rtc_writes_them():
+    assert _receiving(_SILENT) is False
+    assert _receiving(_FLOWING) is True
+    assert _receiving(_IDLE) is None
+    assert _receiving({}) is None
+
+
+def test_the_video_check_runs_while_the_snapshot_is_still_waiting(monkeypatch):
+    """Home Assistant cancels a still image at 10 s, so a check placed after a
+    failed snapshot never ran on the box: the check is its own task (#46)."""
+    import asyncio
+    import custom_components.ha_creality_ws.camera as camera_mod
+
+    monkeypatch.setattr(camera_mod, "NO_VIDEO_CHECK_AFTER", 0)
+
+    def run(succeeded):
+        cam = _camera()
+        cam._note_failed_snapshot = AsyncMock()
+        cam._silent_snapshots = 1
+        cam._video_check_pending = True
+        started = 100.0
+        cam._last_snapshot_ts = started if succeeded else 50.0
+        asyncio.run(cam._check_video_soon(started))
+        return cam
+
+    stalled = run(succeeded=False)
+    stalled._note_failed_snapshot.assert_awaited_once()
+    assert stalled._video_check_pending is False
+    fine = run(succeeded=True)
+    fine._note_failed_snapshot.assert_not_awaited()
+    assert fine._silent_snapshots == 0

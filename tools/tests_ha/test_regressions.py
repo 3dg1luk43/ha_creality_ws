@@ -201,3 +201,44 @@ async def test_the_new_controls_and_sensor_register(hass: HomeAssistant, fake_pr
         "number", "set_value", {"entity_id": reg[f"{HOST}-flow_rate_pct"].entity_id, "value": 95}, blocking=True
     )
     assert fake_printer.instances[-1].sent[-1] == {"setFlowratePct": 95}
+
+
+K1C_2025 = {"model": "K1C", "webrtcSupport": 1}
+
+
+def _camera_entity(hass: HomeAssistant, entry: MockConfigEntry):
+    from homeassistant.components.camera import DATA_COMPONENT
+
+    entity_id = next(
+        e.entity_id for e in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id) if e.domain == "camera"
+    )
+    return hass.data[DATA_COMPONENT].get_entity(entity_id)
+
+
+async def test_an_auto_webrtc_k1c_moves_to_direct_webrtc_when_go2rtc_gets_no_video(
+    hass: HomeAssistant, fake_printer
+) -> None:
+    """#46: the camera asks for direct WebRTC; the entry reloads with a direct
+    camera, and the choice survives the next start."""
+    fake_printer.overrides = K1C_2025
+    entry = await _add(hass)
+    assert entry.data["_cached_camera_type"] == "webrtc"
+    camera = _camera_entity(hass, entry)
+    assert camera._on_no_video is not None
+
+    camera._on_no_video()
+    await hass.async_block_till_done()
+    assert entry.data["_cached_camera_type"] == "webrtc_direct"
+    direct = _camera_entity(hass, entry)
+    assert direct._uses_go2rtc_webrtc_bridge() is False
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.data["_cached_camera_type"] == "webrtc_direct"
+
+
+async def test_a_k2_never_leaves_go2rtc_on_its_own(hass: HomeAssistant, fake_printer) -> None:
+    fake_printer.overrides = K2_PLUS
+    entry = await _add(hass)
+    assert entry.data["_cached_camera_type"] == "webrtc"
+    assert _camera_entity(hass, entry)._on_no_video is None

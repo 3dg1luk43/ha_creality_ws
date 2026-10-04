@@ -247,6 +247,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # undeliverable -- it stays owed until there is somewhere to send it.
         self._card_dismiss_owed = False
         self._soon_dismiss_owed = False
+        # The printer was mid-job when the baseline was taken (a restart), so
+        # the next START re-syncs a card that may still be on the phone.
+        self._live_resync = False
         # Whether a finishing-soon reminder actually went out this job. The
         # near-end latch is set with the option off too (detection is not
         # gated, only sends are), so dismissing on the latch sent a clear for
@@ -1033,6 +1036,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Milestone comes off the progress we can actually see so the first real
         # push is a start, not a redundant milestone.
         self._live_card.reset_for_new_job(progress=prog_val)
+        self._live_resync = primed_state in BUSY_PRINT_STATES
 
         # A card outlives the process. `card_active` is in-memory, so after a
         # restart nothing knows one is still on a phone -- and `notifier_tick`
@@ -1431,6 +1435,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._live_card.card_active:
             self._clear_live_card()
         self._live_card.reset_for_new_job(progress=prog_val)
+        self._live_resync = False
         self._notified_started = False
         self._notified_stopped = False
         # Also once per print: a job stopped near the end latches this, and the
@@ -1717,8 +1722,21 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # The card's subtitle on both platforms.
             job_name=display_filename(snap.filename) or snap.filename or "",
         )
+        # A new card on an iPhone. Home Assistant keeps an activity token per
+        # tag, and while one has not expired it sends every push to it as an
+        # UPDATE -- this START included. A card swiped away on the phone leaves
+        # such a token behind, and the next print's card then never appeared
+        # (#125, finding 2). Clearing the tag first ends that activity and drops
+        # the token, so the START is a real one. Not after a restart mid-print:
+        # there the token is most likely the card still on screen.
+        clear_first = None
+        if reason is PushReason.START and not self._live_card.card_active:
+            if self._live_resync:
+                self._live_resync = False
+            else:
+                clear_first = build_clear_payload(f"{tag_base}_live")
         self._notify_dispatch(
-            payload, kind=f"live:{reason.value}", live_only=True
+            payload, kind=f"live:{reason.value}", live_only=True, clear_first=clear_first
         )
         self._live_card.record_push(
             reason=reason,
@@ -2439,8 +2457,12 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         kind: str = "event",
         mobile_only: bool = False,
         live_only: bool = False,
+        clear_first: dict[str, Any] | None = None,
     ) -> None:
         """Fan a payload out to every configured target without blocking.
+
+        `clear_first` goes to Apple targets just before the payload, in the
+        same task: the clear has to be delivered before the payload is routed.
 
         Deliberately not a coroutine that awaits the sends. `ws_client` awaits
         `_on_message` inline in its receive loop, and a notify call is an HTTPS
@@ -2471,7 +2493,12 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 continue
             sent_to += 1
-            self.hass.async_create_task(self._async_deliver_one(target, payload))
+            if clear_first is not None and self._target_is_apple(target):
+                self.hass.async_create_task(
+                    self._async_deliver_in_order(target, clear_first, payload)
+                )
+            else:
+                self.hass.async_create_task(self._async_deliver_one(target, payload))
 
         if not sent_to:
             return
@@ -2491,6 +2518,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             targets,
             payload.get("message", ""),
         )
+
+    async def _async_deliver_in_order(
+        self, target: str, first: dict[str, Any], then: dict[str, Any]
+    ) -> None:
+        """Deliver two payloads to one target, the second after the first."""
+        await self._async_deliver_one(target, first)
+        await self._async_deliver_one(target, then)
 
     async def _async_deliver_one(self, target: str, payload: dict[str, Any]) -> None:
         """Deliver one payload to one target, tolerating a dead target."""

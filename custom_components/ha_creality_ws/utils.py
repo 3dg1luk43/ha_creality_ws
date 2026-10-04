@@ -251,7 +251,8 @@ def detect_camera_type(data: Mapping[str, Any] | None, previous: str | None = No
         return previous
     detected = ModelDetection(d)
     if detected.is_k2_family or d.get("webrtcSupport") == 1:
-        return "webrtc"
+        # A printer go2rtc got no video from stays on direct WebRTC (#46).
+        return "webrtc_direct" if previous == "webrtc_direct" else "webrtc"
     if "webrtcSupport" in d or previous is None:
         return "mjpeg_optional" if (detected.is_k1_se or detected.is_ender_v3_family) else "mjpeg"
     return previous

@@ -14,6 +14,7 @@ import asyncio
 import base64
 import json
 import logging
+from collections.abc import Callable
 
 from urllib.parse import urlparse
 
@@ -63,6 +64,15 @@ from .const import (
     CAM_MODE_CUSTOM,
 )
 from .entity import KEntity
+from .utils import ModelDetection
+
+# Failed go2rtc snapshots in a row, each with go2rtc connected to the printer
+# and no video arriving, before an Auto camera moves to direct WebRTC (#46).
+NO_VIDEO_STRIKES = 2
+# How long into a snapshot request go2rtc's counters are read. Before the
+# request ends: Home Assistant cancels a still image at 10 s, and go2rtc lets
+# go of the printer soon after nobody is waiting for a frame.
+NO_VIDEO_CHECK_AFTER = 6.0
 
 class _BaseCamera(KEntity, Camera):
     """Base camera class with common functionality and fallback image support.
@@ -383,6 +393,11 @@ class CrealityWebRTCCamera(_BaseCamera):
         self._stream_config_lock = asyncio.Lock()
         # Frontend ICE candidates queued per session for the non-trickle direct POST.
         self._direct_sessions: dict[str, list] = {}
+        # Set by setup for an Auto camera that may move to direct WebRTC (#46).
+        self._on_no_video: Callable[[], None] | None = None
+        self._silent_snapshots = 0
+        self._fell_back = False
+        self._video_check_pending = False
 
         # Snapshot throttling to avoid hammering go2rtc
         self._last_snapshot_ts: float = 0.0
@@ -762,6 +777,11 @@ class CrealityWebRTCCamera(_BaseCamera):
 
                 # Use go2rtc client to get snapshot
                 _LOGGER.debug("ha_creality_ws: requesting snapshot from go2rtc for stream: %s", self._stream_name)
+                if self._on_no_video is not None and not self._fell_back and not self._video_check_pending:
+                    self._video_check_pending = True
+                    self.hass.async_create_background_task(
+                        self._check_video_soon(now), "ha_creality_ws go2rtc video check"
+                    )
                 
                 image_data = await self._go2rtc_client.get_jpeg_snapshot(
                     name=self._stream_name,
@@ -781,8 +801,73 @@ class CrealityWebRTCCamera(_BaseCamera):
             _LOGGER.warning("ha_creality_ws: go2rtc client error getting snapshot: %s", err)
         except Exception as exc:
             _LOGGER.warning("ha_creality_ws: unexpected error getting snapshot: %s", exc)
-        
+
         return await self._fallback_image()
+
+    async def _check_video_soon(self, started: float) -> None:
+        """Mid-request, look whether the snapshot is getting any video (#46).
+
+        Not after the request: Home Assistant cancels a still image at 10 s,
+        the same moment go2rtc's own snapshot request gives up, so code after
+        a failed snapshot never ran.
+        """
+        try:
+            await asyncio.sleep(NO_VIDEO_CHECK_AFTER)
+            if self._last_snapshot_ts >= started:
+                self._silent_snapshots = 0
+                return
+            await self._note_failed_snapshot()
+        finally:
+            self._video_check_pending = False
+
+    async def _go2rtc_receiving(self) -> bool | None:
+        """Whether go2rtc is getting video from the printer for this stream.
+
+        True or False only while go2rtc is connected to the printer; None when
+        it is not, or the question cannot be asked. Read from the raw
+        `/api/streams` reply: the client library's model drops the counters.
+        """
+        try:
+            resp = await self._go2rtc_client._client.request(  # pylint: disable=protected-access
+                "GET", "/api/streams", params={"src": self._stream_name}
+            )
+            info = await resp.json()
+        except Exception:  # pylint: disable=broad-except
+            return None
+        connected = [p for p in (info or {}).get("producers") or [] if p.get("remote_addr")]
+        if not connected:
+            return None
+        return any(
+            r.get("bytes") or r.get("packets")
+            for p in connected
+            for r in p.get("receivers") or []
+        )
+
+    async def _note_failed_snapshot(self) -> None:
+        """Move an Auto camera to direct WebRTC when go2rtc gets no video (#46).
+
+        The K1C 2025 answers go2rtc's offer with payload types 0 and 96 and
+        then sends 98; go2rtc's WebRTC library drops every packet, so the
+        connection is up and no frame ever arrives. A browser accepts the same
+        stream, which is what direct WebRTC hands it. Only on evidence: go2rtc
+        connected to the printer and not one packet received, twice running.
+        A printer that is off or unreachable is not that.
+        """
+        if self._on_no_video is None or self._fell_back or not self._stream_name:
+            return
+        if await self._go2rtc_receiving() is not False:
+            self._silent_snapshots = 0
+            return
+        self._silent_snapshots += 1
+        if self._silent_snapshots < NO_VIDEO_STRIKES:
+            return
+        self._fell_back = True
+        _LOGGER.warning(
+            "ha_creality_ws: go2rtc is connected to %s but receives no video; "
+            "switching this camera to direct WebRTC (#46)",
+            self._upstream_signaling_url,
+        )
+        self._on_no_video()
 
 
 
@@ -1557,7 +1642,28 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities):
     # WebRTC cameras (K2 family - always present)
     if cached_camera_type == "webrtc":
         _LOGGER.info("ha_creality_ws: using cached WebRTC camera detection for %s", host)
-        async_add_entities([_make_go2rtc_camera()])
+        camera = _make_go2rtc_camera()
+        # Not the K2s: go2rtc is known to work with them, and a fallback set
+        # off by one bad moment would cost them snapshots and recording.
+        if not ModelDetection.from_cache(entry.data, coord.data).is_k2_family:
+            @callback
+            def _use_direct_webrtc() -> None:
+                # The update listener reloads the entry, which builds the
+                # direct camera below; detection keeps the choice (#46).
+                hass.config_entries.async_update_entry(
+                    entry, data={**entry.data, "_cached_camera_type": "webrtc_direct"}
+                )
+
+            camera._on_no_video = _use_direct_webrtc  # pylint: disable=protected-access
+        async_add_entities([camera])
+        return
+
+    # Auto, after go2rtc connected to this printer and never got video (#46).
+    if cached_camera_type == "webrtc_direct":
+        _LOGGER.info("ha_creality_ws: using direct WebRTC for %s (go2rtc got no video from it)", host)
+        async_add_entities([
+            CrealityWebRTCCamera(coord, WEBRTC_URL_TEMPLATE.format(host=host), direct_signaling=True)
+        ])
         return
 
     # MJPEG cameras (default or optional)

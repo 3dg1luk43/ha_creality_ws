@@ -101,3 +101,14 @@ def test_a_correct_camera_is_left_alone():
     coord.data = dict(K1C_FW_1_3_5_22)
     coord._check_camera_type()
     assert updates == []
+
+
+def test_a_printer_go2rtc_got_no_video_from_stays_on_direct_webrtc():
+    """#46: once an Auto camera has moved to direct WebRTC, a restart or the
+    live re-check must not put it back on go2rtc."""
+    frame = {"model": "K1C", "webrtcSupport": 1}
+    assert detect_camera_type(frame, "webrtc_direct") == "webrtc_direct"
+    assert detect_camera_type(frame, "webrtc") == "webrtc"
+    assert detect_camera_type(frame, None) == "webrtc"
+    # A printer that stops offering WebRTC leaves direct mode too.
+    assert detect_camera_type({"model": "K1C", "webrtcSupport": 0}, "webrtc_direct") == "mjpeg"

@@ -1651,3 +1651,55 @@ def test_switching_the_card_off_still_dismisses_it():
     asyncio.get_event_loop().run_until_complete(asyncio.gather(*pending))
 
     assert [c[2]["message"] for c in hass.calls] == [CLEAR_NOTIFICATION_MARKER]
+
+
+# --------------------------------------------------------------------------- #
+# A stale Live Activity token on an iPhone (#125, finding 2)
+# --------------------------------------------------------------------------- #
+
+
+def _as_iphone(coord):
+    """The target is an iPhone; real resolution needs mobile_app's registry."""
+    coord._target_is_apple = lambda target: "iphone" in target
+    coord._target_os = lambda target: "iOS" if "iphone" in target else "Android"
+
+
+def _live_tag_messages(calls):
+    return [c[2]["message"] for c in calls if (c[2].get("data") or {}).get("tag", "").endswith("_live")]
+
+
+def test_a_new_card_on_an_iphone_is_preceded_by_a_clear_of_its_tag():
+    """Home Assistant sends every push to an unexpired stored token as an
+    UPDATE, the START included; a card swiped away left one behind and the
+    next print's card never appeared. The clear ends it and drops the token,
+    and must land before the START, so both go out in one task."""
+    coord, hass = _coordinator(targets=("notify.mobile_app_iphone",))
+    _as_iphone(coord)
+    messages = _live_tag_messages(_frame_calls(coord, hass, **_printing(10)))
+    assert len(messages) == 2
+    assert messages[0] == CLEAR_NOTIFICATION_MARKER
+    assert messages[1] != CLEAR_NOTIFICATION_MARKER
+    # Later pushes update the card; no further clears.
+    hass.loop.advance(400)
+    assert CLEAR_NOTIFICATION_MARKER not in _live_tag_messages(_frame_calls(coord, hass, **_printing(30)))
+
+
+def test_an_android_card_starts_without_a_clear():
+    coord, hass = _coordinator(targets=("notify.mobile_app_pixel",))
+    messages = _live_tag_messages(_frame_calls(coord, hass, **_printing(10)))
+    assert CLEAR_NOTIFICATION_MARKER not in messages and len(messages) == 1
+
+
+def test_a_restart_mid_print_updates_the_iphone_card_in_place():
+    """The stored token is then most likely the card still on screen: clearing
+    it would make the card disappear and come back."""
+    hass = HassStub()
+    coord = _build(hass)
+    coord._notify_targets = ["notify.mobile_app_iphone"]
+    coord._notify_live = True
+    coord._notify_completed = True
+    _as_iphone(coord)
+    assert _frame(coord, hass, **_printing(42)) == []  # the baseline
+    hass.loop.advance(1)
+    messages = _live_tag_messages(_frame_calls(coord, hass, **_printing(42)))
+    assert messages and CLEAR_NOTIFICATION_MARKER not in messages
