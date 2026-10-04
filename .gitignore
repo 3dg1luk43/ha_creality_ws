@@ -1,9 +1,9 @@
 .venv/*
+__pycache__/
+.ruff_cache/
+.claude/settings.local.json
 backups/*
-custom_components/ha_creality_ws/__pycache__/*
 ha_creality_ws.code-workspace
-tools/__pycache__
-tools/tests/__pycache__
 tools/test_files
 .agent
 .issues
@@ -12,7 +12,4 @@ conductor
 .webrtc_test_server.pid
 # Test box state (tools/testbox/README.md); the box itself is committed.
 tools/testbox/config/
-tools/testbox/**/__pycache__/
 tools/testbox/node_modules/
-tools/simulator/**/__pycache__/
-tools/tests_ha/**/__pycache__/

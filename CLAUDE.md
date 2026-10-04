@@ -14,7 +14,7 @@ cards (`www/k_printer_card.js`, `www/k_cfs_card.js`). Minimum HA 2026.7.0, so Py
 ## Commands
 
 ```bash
-.venv/bin/python -m pytest                       # full suite, ~10 s, includes the node card suites
+.venv/bin/python -m pytest                       # full suite, ~90 s, includes the node card suites
 .venv/bin/python -m pytest tools/tests/test_notification_live.py -k name -v
 python -m pytest tools/tests_ha                  # inside a real HA; Python 3.14 + tools/requirements-ha.txt
 node --check custom_components/ha_creality_ws/www/*.js
@@ -25,8 +25,9 @@ python3 tools/creality_printer_test_server.py --help   # simulated printer (tool
 ./webrtc_test_server.sh on|off|status            # mock K2 Plus in the background for camera work
 ```
 
-`.venv` is Python 3.11 and CI runs 3.11/3.13; HA itself needs 3.14 (register R49). A CI-like venv
-(pytest, voluptuous, pyyaml only) shows 6 skips; `.venv` shows 0.
+`.venv` is Python 3.11 (rebuilding it needs a 3.14 interpreter on the host); CI runs 3.13 and 3.14,
+and `tools/tests_ha` needs 3.14. `.venv` shows no skips; a CI-like venv
+(`tools/requirements-test.txt`) skips the simulator tests that need `aiohttp`/`websockets`.
 
 ## What the tests can and cannot prove
 
@@ -61,7 +62,8 @@ verify on the test box (`tools/testbox`) or a real HA, and say which in the comm
 - `const.py` must stay import-free (`test_const_standalone.py`).
 - `.github/copilot-instructions.md` is read by review bots as ground truth and pinned by
   `test_copilot_instructions.py`; keep it consistent with this file.
-- No linter or formatter is configured: do not reformat, match the surrounding style.
+- No formatter, and no lint config: CI runs only `ruff check --isolated --select F,E9`. Do not
+  reformat; match the surrounding style. Keep each file's line endings (`test_line_endings.py`).
 - Commits: conventional, lowercase (`fix: ...`, `ci: ...`). Version bumps in their own commit.
 - CHANGELOG: `## X.Y.Z - Unreleased` heading, TL;DR rewritten as a whole, entries as symptom,
   cause, fix, issue link. The repo-process model is `/root/ha_washdata`; adapt, don't copy.
@@ -79,12 +81,13 @@ verify on the test box (`tools/testbox`) or a real HA, and say which in the comm
   dotted (`v0.9.7`, `v0.9.8`); `v0.98` is not 0.9.8. Push only the one release tag.
 - **GitHub reads issue forms, PR templates, `dependabot.yml` and scheduled /
   `pull_request_target` workflows from `main`.** A workflow change is untested until merged.
-- **`diagnostic_dump` returns nothing.** It logs a "CREALITY DIAGNOSTIC DATA" block at WARNING
-  and posts a persistent notification.
+- **`diagnostic_dump` answers three ways**: the data as its response (redacted unless
+  `include_sensitive_data`), a "CREALITY DIAGNOSTIC DATA" block at WARNING, and a notification.
 - **Telemetry is cumulative:** `ws_client._state` is never cleared, so a key the printer stops
   sending keeps its last value, and a blank `""` persists until re-sent.
-- **Capabilities are cached in `entry.data`** (model, camera type, firmware) and refreshed only
-  when the integration version changes.
+- **Capabilities are cached in `entry.data`** (model, camera type, firmware). The firmware and the
+  camera type follow telemetry (R40, R5); the rest is re-cached on an integration upgrade, a moved
+  printer or a missing key, never mid-session.
 - **Entity unique_ids contain the host** (`entity.py:23`). Changing that needs a registry migration.
 - The simulator (`tools/simulator/`, R77) mimics real ports: MJPEG on `:8080/?action=stream`,
   WebRTC on `:8000`, preview on `:80`, Moonraker on `:7125` (K2 Base). Changing its model on the same
@@ -97,7 +100,7 @@ verify on the test box (`tools/testbox`) or a real HA, and say which in the comm
 - `backups/`, `conductor/`, `.agent/` and `tools/test_files/internal_docs/` are stale scaffolding,
   not guidance.
 - CodeRabbit often claims a fix is needed to "pass the configured lint checks". There is no lint
-  config or job. Judge each finding on its merits; see `.claude/skills/coderabbit-loop/`.
+  config, and the one lint job checks F and E9 only. Judge each finding on its merits; see `.claude/skills/coderabbit-loop/`.
 
 ## Release checklist
 

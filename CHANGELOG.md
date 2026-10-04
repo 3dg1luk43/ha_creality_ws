@@ -3,7 +3,7 @@
 All notable changes to HA Creality WS will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and versions are numbered major.minor.patch, with a fourth number for a hotfix release (0.9.6.1).
 
 
 ## 0.9.9 - Unreleased
@@ -218,7 +218,6 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
 - Log lines carry timestamps, and the offer/answer SDP is dumped under `--debug`.
 
 ## 0.9.7 - 2026-07-28
-> [List of issues (0.9.7)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.7)
 
 ### Added
 - **Localization / i18n support** (#104, thanks @oscfdezdz / Óscar Fernández Díaz):
@@ -251,7 +250,6 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
 
 
 ## 0.9.6.1 - 2026-06-11
-> [List of issues (0.9.6.1)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.6.1)
 
 ### Fixed
 - **CFS sensors stuck unavailable after upgrading to 0.9.6** (#99, regression):
@@ -261,7 +259,6 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
 
 
 ## 0.9.6 - 2026-06-10
-> [List of issues (0.9.6)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.6)
 
 ### Added
 - **Direct WebRTC camera mode** (idea recycled from #95, thanks @erus71an):
@@ -297,7 +294,6 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
 
 
 ## 0.9.5 - 2026-05-22
-> [List of issues (0.9.5)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.5)
 
 ### Fixed
 - **K2 WebRTC Camera Instability after 0.9.4** (#88 follow-up):
@@ -320,7 +316,6 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
 
 
 ## 0.9.4 - 2026-05-21
-> [List of issues (0.9.4)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.4)
 
 ### Fixed
 - **K2 WebRTC Camera Regression** (#87, #88):
@@ -330,7 +325,6 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
 
 
 ## 0.9.3 - 2026-05-20
-> [List of issues (0.9.3)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.3)
 
 ### Added
 - **Active Filament Slot Sensor** (#80):
@@ -375,15 +369,13 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
 
 
 ## 0.9.2 - 2026-01-27
-> [List of issues (0.9.2)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.2
 
 ### Added
 - **CFS Card Enhancement** (#70):
   - **Mini Mode Filament Type**: Added a new valid option to show the filament material type (e.g., PLA, ASA) in the compact "Mini Mode" view.
   - **Improved Rendering**: Enhanced the visual rendering of mini spools and improved click target areas for better usability.
 
-## 0.9.1 - 2026-01-24
-> [List of issues (0.9.1)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.1
+## 0.9.1 - 2026-01-25
 
 ### Added
 - **Manual Reconnect Button**: Added a new `button` entity (`button.*_reconnect`) to force a WebSocket reconnection if the printer becomes unresponsive.
@@ -399,7 +391,6 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
 - **Service Stability**: Fixed crash in `request_cfs_info` when printer disconnected.
 
 ## 0.9.0 - 2026-01-23
-> [List of issues (0.9.0)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.0
 
 ### Added
 - **CFS Support (Creality Filament System)** (@buzato):
@@ -423,8 +414,8 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
   - Resolved merge conflicts and sync issues for reliable state tracking.
 - **Frontend Assets**: Improved resource loading and fixed loading issues for custom card resources.
 
-## 0.8.0 - 2026-01-05
-> [List of issues (0.8.0)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.8.0
+## 0.8.0 - 2026-01-06
+> [List of issues (0.8.0)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.8.0)
 
 ### Added
 - **Diagnostics Service**: Enhanced `diagnostic_dump` service to include WebSocket connection health stats (`reconnect_count`, `msg_count`, `last_error`, `uptime`).
@@ -445,8 +436,7 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
   - Added application-level probes to detect and recover from stale WebSocket connections.
 - **Log Noise**: Connection warnings are now limited to the first 3 failures; subsequent failures are logged as debug only to prevent spam when the printer is intentionally off.
 
-## 0.7.1 - 2026-01-04
-> [List of issues (0.7.1)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.7.1
+## 0.7.1 - 2025-12-17
 
 ### Added
 - **Zeroconf**: Added improved Zeroconf discovery signatures for K2 and K1 series printers.
@@ -454,8 +444,8 @@ Dev tooling only. Several fidelity gaps made the simulator disagree with real ha
 ### Fixed
 - Minor bug fixes and performance improvements.
 
-## 0.7.0 - 2025-12-19
-> [List of issues (0.7.0)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.7.0
+## 0.7.0 - 2025-12-10
+> [List of issues (0.7.0)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.7.0)
 
 ### Added
 - **Robust Network Management**: MAC-based discovery to automatically handle IP changes from DHCP reassignments.

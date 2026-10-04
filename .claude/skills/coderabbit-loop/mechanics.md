@@ -316,7 +316,7 @@ gh pr comment "$pr" --body '@coderabbitai full review'
 python3 -m compileall custom_components/ha_creality_ws tools/tests -q
 node --check custom_components/ha_creality_ws/www/k_printer_card.js   # if card JS changed
 node --check custom_components/ha_creality_ws/www/k_cfs_card.js
-python3 -m pytest -q                              # whole suite, ~3s; 5 skipped, pass count only grows
+python3 -m pytest -q                              # whole suite, ~90 s; pass count only grows
 python3 -m pytest tools/tests/test_<area>.py -q   # targeted
 ```
 
@@ -324,15 +324,15 @@ There is no `run_tests.sh` in this repo; `pyproject.toml` sets
 `testpaths = ["tools/tests"]` and `addopts = "-q"`, so a bare `pytest` collects the
 whole suite.
 
-To reproduce CI exactly, use a venv with only `pytest` and `voluptuous` - the
-workflow installs nothing else, and `tools/tests/conftest.py` stubs the entire
-`homeassistant.*` tree. A suite that passes with the project venv but fails in CI
+To reproduce CI exactly, use a venv with only `tools/requirements-test.txt`
+(pytest, voluptuous, PyYAML) plus node - the workflow installs nothing else, and
+`tools/tests/conftest.py` stubs the entire `homeassistant.*` tree. The real-HA
+tests (`tools/tests_ha`) are a separate job with `tools/requirements-ha.txt`. A suite that passes with the project venv but fails in CI
 usually means a test is reaching something CI does not install.
 
-The 5 expected skips need Node or the CFS simulator (`aiohttp`/`websockets` in
-the interpreter running the tests, which CI does not install). A larger skip
-count means
-missing tooling, not removed tests.
+Skips need the CFS simulator's `aiohttp`/`websockets` in the interpreter running
+the tests (CI does not install them), or node (CI fails without it). A skip count
+that grows in the same environment means missing tooling, not removed tests.
 
 ## Line endings, before every commit
 
