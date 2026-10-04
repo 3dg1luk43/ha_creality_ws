@@ -256,7 +256,7 @@ There are no K2, Hi, CFS or self-test captures.
 - `test_cfs_simulator.py` checks source strings (`"cfsConnect"`, `MATERIAL_WRITABLE_KEYS`, `_make_video_track`, the `modifyMaterial` error texts). It also starts the server on two free ports with `--deterministic --video-source synthetic`, so new listeners must be optional or tolerate a failed bind. And it imports `PrinterState(...)` with `.modify_material` and `.set_cfs_materials`.
 - `test_fan.py` checks `_M106_RE`, `handle_gcode("M106")`, the fan field names, `H264PassthroughTrack`, `keyint=`, and `build_argparser().parse_args([]).prefer_codec == "h264"`.
 
-**Documentation** that describes the current flags: `tools/README.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `webrtc_test_server.sh`.
+**Documentation** that describes the current flags: `tools/README.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `tools/simulator.sh`.
 
 ## 4. Priorities
 1. Fix stop, and add the stop and finish variants, a pause that freezes, and runtime print start and reprint.

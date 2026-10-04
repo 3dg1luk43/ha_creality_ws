@@ -21,6 +21,12 @@ python3 tools/creality_printer_test_server.py --model k1c --simulate-print   # o
 Then open the control UI at `http://<host>:8099/ui/` (on the test box:
 `http://127.0.0.1:8323/ui/`).
 
+To keep it running in the background, `tools/simulator.sh on [model] [flags...]`
+installs, enables and starts it as the systemd unit `creality-simulator.service`
+(k2plus with a one-year print by default, control UI on `:8888`), and `off` stops
+and disables it; `status`, `restart` and `logs` do what they say. The model and
+flags are written into the unit, so it comes back the same after a reboot.
+
 ### Ports
 
 | Port | What | Models |

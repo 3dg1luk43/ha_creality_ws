@@ -8,8 +8,6 @@ tools/test_files
 .agent
 .issues
 conductor
-.webrtc_test_server.log
-.webrtc_test_server.pid
 # Test box state (tools/testbox/README.md); the box itself is committed.
 tools/testbox/config/
 tools/testbox/node_modules/

@@ -278,7 +278,7 @@ Pyright is not useful until a real `homeassistant` package is installed.
 |---|---|---|---|
 | `tools/creality_printer_test_server.py` | yes | WS telemetry :9999, HTTP :8000 with WebRTC signaling, MJPEG at `/stream.mjpeg`, CFS `boxsInfo`/`modifyMaterial`, `reqGcodeFile`, `/test/*` control, `--deterministic`, `--cfs-variant edge` | The integration reads MJPEG from `http://host:8080/?action=stream` (`const.py:20,27`), so an MJPEG model cannot stream from the simulator without a Custom URL. It has no preview image (`/downloads/original/current_print_image.png`), no Moonraker :7125 (K2 Base) and no K1C-2025 `webrtcSupport` variant. Its `k2` model has `box_control: False`, whereas the integration grants control to the whole K2 family. |
 | `tools/h264_timing.py` | yes | clip timestamp maths, split out for testing | tested via the simulator tests |
-| `webrtc_test_server.sh` | yes, **repo root** | starts/stops the simulator as k2plus with a one-year print | writes `.webrtc_test_server.{pid,log}` to the root; tooling is meant to live in `tools/` |
+| `tools/simulator.sh` | yes | installs and enables (`on`) or stops and disables (`off`) the simulator as `creality-simulator.service`, control UI on :8888 | replaced the root `webrtc_test_server.sh` (2026-10-04) |
 | `tools/release_check.sh` | yes | release preflight (section 2.2) | also what CI runs |
 | `tools/requirements.txt` | yes | local work: `-r requirements-test.txt` plus the simulator's runtime (R49) | `requirements-test.txt` is what CI installs, pinned |
 | `tools/test_files/` | **no (ignored)** | `deploy_to_ha.sh`, a 137 MB HA log (2025-11-09), K1C WS captures, a HAR, go2rtc OpenAPI, Go WebRTC clients, `internal_docs/` | `deploy_to_ha.sh:17-18` holds the production HA URL and a **plaintext long-lived token**. It was never committed: `git log --all -S` finds nothing. |
@@ -318,7 +318,6 @@ Pyright is not useful until a real `homeassistant` package is installed.
 | `.vscode/settings.json` | tracked | harmless; `ha_creality_ws.code-workspace` is ignored and points at `../ha_config` |
 | `.venv` | 278 MB, Python 3.11.2, ignored | wrong Python for HA 2026.7 |
 | `backups/` | 215 dirs, 75 MB, ignored | inside the repo; `grep -r` and tools that ignore `.gitignore` index stale copies |
-| `.webrtc_test_server.log` | root, ignored | from `webrtc_test_server.sh` |
 | `.git` | 22 MB | fine |
 | Remotes | `origin` (redirect URL), `RobertJansen1`, `Ahmed-max`, `oscfdezdz` | contributor remotes fetch their tags |
 

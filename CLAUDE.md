@@ -22,7 +22,7 @@ python3 -m compileall -q custom_components/ha_creality_ws
 tools/release_check.sh                           # release preflight (what CI runs)
 tools/release_check.sh --tag v0.9.9              # also require tag == manifest version
 python3 tools/creality_printer_test_server.py --help   # simulated printer (tools/simulator/); control UI :8099/ui/
-./webrtc_test_server.sh on|off|status            # mock K2 Plus in the background for camera work
+tools/simulator.sh on [model]|off|status|logs   # simulator as a systemd service, control UI :8888/ui/
 ```
 
 `.venv` is Python 3.11 (rebuilding it needs a 3.14 interpreter on the host); CI runs 3.13 and 3.14,
