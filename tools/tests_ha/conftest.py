@@ -77,6 +77,8 @@ class FakeClient:
     online = True
     start_error: Exception | None = None
     overrides: dict[str, Any] = {}
+    # Whether a forced reconnect brings the link back.
+    reconnect_succeeds = True
 
     def __init__(self, host: str, on_message):
         self._host = host
@@ -93,6 +95,9 @@ class FakeClient:
         self.uptime_start = 0.0
         self._connected_once = False
         self.waits: list[float] = []
+        # The socket, as opposed to the client's task: False is a client that
+        # is running but between connection attempts.
+        self.link_up = True
         FakeClient.instances.append(self)
 
     @property
@@ -101,10 +106,10 @@ class FakeClient:
 
     @property
     def is_connected(self) -> bool:
-        return self._task is not None and not self._task.done()
+        return self._task is not None and not self._task.done() and self.link_up
 
     def is_task_running(self) -> bool:
-        return self.is_connected
+        return self._task is not None and not self._task.done()
 
     async def start(self) -> None:
         self.started += 1
@@ -131,6 +136,10 @@ class FakeClient:
 
     async def reconnect(self) -> None:
         self.reconnect_count += 1
+        self.link_up = FakeClient.reconnect_succeeds
+
+    async def wait_connected(self, timeout: float) -> bool:
+        return self.is_connected
 
     async def wait_first_connect(self, timeout: float = 5.0) -> bool:
         self.waits.append(timeout)
@@ -173,6 +182,7 @@ def fake_printer():
     FakeClient.online = True
     FakeClient.start_error = None
     FakeClient.overrides = {}
+    FakeClient.reconnect_succeeds = True
     with (
         patch("custom_components.ha_creality_ws.coordinator.KClient", FakeClient),
         patch("custom_components.ha_creality_ws.config_flow._probe_tcp", return_value=True),

@@ -24,7 +24,6 @@ class _KFanEntity(KEntity, FanEntity):
     _attr_supported_features = (
         FanEntityFeature.SET_SPEED | FanEntityFeature.TURN_ON | FanEntityFeature.TURN_OFF
     )
-    _attr_percentage_step = 1
 
     # New native fan entities should be enabled by default; keep old Number entities for BC
     _attr_entity_registry_enabled_default = True

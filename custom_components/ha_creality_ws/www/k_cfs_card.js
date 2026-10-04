@@ -1883,8 +1883,7 @@ class KCFSCard extends HTMLElement {
    * rather than silently resolved to one of them.
    *
    * Reads hass.entities (EntityRegistryDisplayEntry carries device_id, platform
-   * and translation_key), so no WebSocket round trip and no admin permission is
-   * needed -- unlike config/entity_registry/list.
+   * and translation_key), so no WebSocket round trip is needed.
    * @returns {Promise<string|null>}
    */
   async _resolveDeviceId() {
@@ -1904,9 +1903,8 @@ class KCFSCard extends HTMLElement {
     }
 
     // Anything hass.entities could not answer for is asked individually. It is
-    // not a version fallback: hass.entities can be *partially* populated, and it
-    // is absent entirely for a non-admin user, whose browser is not allowed
-    // config/entity_registry/get either.
+    // not a version fallback: hass.entities can be *partially* populated, for
+    // one while the frontend is still loading it.
     //
     // Every unresolved entity is asked, not just enough to find one device.
     // Accepting the first answer resolved a card spanning two printers to
@@ -1926,9 +1924,9 @@ class KCFSCard extends HTMLElement {
           });
           return { deviceId: entry?.device_id || null, failed: false };
         } catch (_) {
-          // config/entity_registry/get is admin-only, so for a non-admin
-          // dashboard user every one of these fails. Treating that as "this
-          // entity has no device" is what let a two-printer card resolve to
+          // A failed lookup (an entity missing from the registry, a dropped
+          // connection) is not "this entity has no device". Treating it so
+          // is what let a two-printer card resolve to
           // whichever printer *was* in hass.entities, and _saveMaterial then
           // sent the other printer's box and slot ids to it.
           return { deviceId: null, failed: true };

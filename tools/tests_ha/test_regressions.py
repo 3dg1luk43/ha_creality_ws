@@ -125,3 +125,35 @@ async def test_a_numeric_current_object_is_shown(hass: HomeAssistant, fake_print
         if e.unique_id == f"{HOST}-current_object"
     )
     assert hass.states.get(sensor).state == "3"
+
+
+def _button(hass: HomeAssistant, entry: MockConfigEntry, uid: str) -> str:
+    return next(
+        e.entity_id for e in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+        if e.unique_id == f"{HOST}-{uid}"
+    )
+
+
+async def test_a_command_between_attempts_reconnects_first(hass: HomeAssistant, fake_printer) -> None:
+    """R66: a client waiting out its backoff counted as connected, so Stop
+    waited for the next attempt, up to five minutes away."""
+    entry = await _add(hass)
+    client = fake_printer.instances[-1]
+    client.link_up = False
+    await hass.services.async_call("button", "press", {"entity_id": _button(hass, entry, "stop_print")}, blocking=True)
+    assert client.reconnect_count == 1
+    assert {"stop": 1} in client.sent
+
+
+async def test_a_command_the_printer_cannot_take_says_so(hass: HomeAssistant, fake_printer) -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    entry = await _add(hass)
+    client = fake_printer.instances[-1]
+    client.link_up = False
+    fake_printer.reconnect_succeeds = False
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            "button", "press", {"entity_id": _button(hass, entry, "stop_print")}, blocking=True
+        )
+    assert {"stop": 1} not in client.sent

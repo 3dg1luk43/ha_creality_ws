@@ -16,9 +16,7 @@
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to printer. Ensure IP is correct and printer is ON.",
-      "not_K": "Connection refused or not a supported Creality K-series printer.",
-      "already_configured": "This printer is already configured."
+      "cannot_connect": "Failed to connect to printer. Ensure IP is correct and printer is ON."
     },
     "abort": {
       "already_configured": "Device is already configured",

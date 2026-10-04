@@ -22,16 +22,19 @@ __all__ = [
 ]
 
 
+# A number written the way the printer writes one: "31.030000", "0", "-2.5".
+# Not "007" or " 42": a leading zero or padding means an identifier that only
+# looks numeric, and int() would quietly strip it (R66).
+_NUMBER_RE = re.compile(r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?")
+
+
 def coerce_numbers(d: dict[str, Any]) -> dict[str, Any]:
     """Convert numeric strings in a dict to numbers where safe."""
     out: dict[str, Any] = {}
     for k, v in d.items():
-        if isinstance(v, str):
-            try:
-                out[k] = float(v) if "." in v else int(v)
-                continue
-            except Exception:
-                pass
+        if isinstance(v, str) and _NUMBER_RE.fullmatch(v):
+            out[k] = float(v) if "." in v else int(v)
+            continue
         out[k] = v
     return out
 
@@ -344,9 +347,11 @@ class ModelDetection:
         )
         
         # Creality Hi - "F018"
+        # "hi" as a word: as a substring it matched any model name that
+        # happened to contain those two letters (R66).
         self.is_creality_hi = (
             ("F018" in self.model) or ("F018" in self.model_ver_u) or
-            ("hi" in self.model_l)
+            bool(re.search(r"\bhi\b", self.model_l))
         )
         
         # Family groupings

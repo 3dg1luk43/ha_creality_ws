@@ -381,7 +381,6 @@ class CrealityWebRTCCamera(_BaseCamera):
         self._force_recreate_stream = False
         # Guards stream creation/recreation; see _ensure_stream_configured.
         self._stream_config_lock = asyncio.Lock()
-        self._last_error: str | None = None
         # Frontend ICE candidates queued per session for the non-trickle direct POST.
         self._direct_sessions: dict[str, list] = {}
 
@@ -1434,8 +1433,6 @@ class CrealityWebRTCCamera(_BaseCamera):
             # Resolved lazily by stream_source(); None until a stream exists.
             "stream_source": self._rtsp_stream_url(),
         }
-        if self._last_error:
-            attrs["error"] = self._last_error
         return attrs
 
     def _is_valid_jpeg(self, data: bytes) -> bool:

@@ -487,15 +487,23 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.client.start()
         
     async def ensure_connected(self) -> bool:
-        """Ensure WebSocket connection is active, restart if needed."""
+        """A live connection for a command about to be sent, or False."""
         if self.power_is_off():
             return False
+        if self.client.is_connected:
+            return True
         # pylint: disable=protected-access
         if not self.client._task or self.client._task.done():
             _LOGGER.info("WebSocket connection lost, restarting...")
             await self.client.start()
-            return await self.client.wait_first_connect(timeout=10.0)
-        return True
+        else:
+            # The loop is alive but between attempts, in a backoff that can
+            # last five minutes. This used to count as connected, so a Stop
+            # pressed then waited the backoff out (R66). Try now instead.
+            await self.client.reconnect()
+        # The live connection, not the first one ever: that is set for good
+        # after the first connect, and answered True during every outage since.
+        return await self.client.wait_connected(timeout=10.0)
         
     def _detect_k2_base(self, payload: Mapping[str, Any]) -> None:
         """Latch whether this is a K2 Base, from what has arrived so far.
@@ -598,17 +606,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self.client.start()
             self._last_power_off = False
 
-    def _notify_listeners_threadsafe(self) -> None:
-        """Always execute listener updates on HA's event loop."""
-        # Pass the callable itself (no parens); the loop invokes it safely.
-        self.hass.loop.call_soon_threadsafe(self.async_update_listeners)
-
     def check_stale(self) -> None:
-        """Called by periodic timer; may run off the event loop."""
+        """Tell the entities when availability flips. From the interval check,
+        a callback, so on the event loop."""
         now_avail = self.available
         if now_avail != getattr(self, "_last_avail", None):
             self._last_avail = now_avail
-            self._notify_listeners_threadsafe()
+            self.async_update_listeners()
 
     @property
     def available(self) -> bool:
@@ -2475,7 +2479,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # user-submitted logs, and entity ids plus print file names are theirs,
         # not ours. DEBUG carries them for anyone debugging their own setup.
         #
-        # Live-card pushes stay at DEBUG: there are ~20 per print, and they would
+        # Live-card pushes stay at DEBUG: there can be a hundred per print, and they would
         # otherwise bury the handful of lines that describe something happening.
         if not kind.startswith("live"):
             _LOGGER.info(

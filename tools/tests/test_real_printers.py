@@ -60,3 +60,11 @@ def test_the_simulator_reports_the_same_identity(printer):
     assert profile.model_version == frame["modelVersion"]
     if "webrtcSupport" in frame:
         assert profile.webrtc_support == (frame["webrtcSupport"] == 1)
+
+
+def test_a_model_name_containing_hi_is_not_a_creality_hi():
+    """R66: "hi" was matched as a substring of any model name."""
+    for model in ("Chimera", "K1 High Speed", "Shield"):
+        assert not utils.ModelDetection({"model": model}).is_creality_hi, model
+    for model in ("Creality Hi", "Hi", "F018"):
+        assert utils.ModelDetection({"model": model}).is_creality_hi, model

@@ -16,9 +16,7 @@
       }
     },
     "error": {
-      "cannot_connect": "Error al conectar con la impresora. Asegúrate de que la dirección IP sea correcta y de que la impresora esté encendida.",
-      "not_K": "Conexión rechazada o no es una impresora Creality de la serie K compatible.",
-      "already_configured": "Esta impresora ya está configurada."
+      "cannot_connect": "Error al conectar con la impresora. Asegúrate de que la dirección IP sea correcta y de que la impresora esté encendida."
     },
     "abort": {
       "already_configured": "El dispositivo ya está configurado",

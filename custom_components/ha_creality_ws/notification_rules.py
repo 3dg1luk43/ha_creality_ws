@@ -429,11 +429,15 @@ def stringify_data(data: Mapping[str, Any] | None) -> dict[str, Any]:
     Nesting is *not* uniformly exempt, which cost a release to learn. Measured
     against a real Galaxy S24, one key at a time:
 
-    * ``actions`` -- a **list** of dicts -- is flattened into the same FCM map,
-      so a bool inside it is rejected exactly like a bool at the top level.
-      ``destructive: True`` on the Stop button was enough to lose every push.
-    * ``push`` and ``content_state`` -- plain **dicts** -- are not flattened.
-      They survive with real ints, and iOS wants them that way.
+    * ``actions`` -- a **list** of dicts -- is flattened into the same FCM map
+      (``action_N_key``, ``action_N_authenticationRequired``, ...), so a bool
+      inside it is rejected exactly like a bool at the top level. The relay
+      copies ``authenticationRequired`` as it is, and the Stop button's
+      ``authenticationRequired: True`` was enough to lose every push.
+      (``destructive`` is not sent to Android at all.)
+    * ``push`` and ``content_state`` -- plain **dicts** -- are not part of the
+      Android message (the relay drops them), so their real ints cost nothing
+      there, and iOS wants them that way.
 
     Hence the rule: scalars are coerced at the top level and inside dicts nested
     in a *list*, while a dict value is passed through whole.

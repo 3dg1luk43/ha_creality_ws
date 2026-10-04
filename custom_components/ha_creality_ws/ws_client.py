@@ -67,7 +67,8 @@ class KClient:
         self._connected_once = asyncio.Event()
         self._send_lock = asyncio.Lock()
         self._last_rx = 0.0
-        self._last_mdns_attempt = 0.0
+        # Set once the current outage has been reported; cleared by data.
+        self._warned_unreachable = False
 
         self._hb_task: asyncio.Task | None = None
         self._tick_task: asyncio.Task | None = None
@@ -369,24 +370,21 @@ class KClient:
             
             power_is_off = bool(self._check_power_status and self._check_power_status())
             if power_is_off:
-                _LOGGER.debug(
-                    "K WS reconnect suppressed mDNS fallback (power OFF) host=%s",
+                _LOGGER.debug("K WS not reconnecting: power is OFF host=%s", self._host)
+            elif (
+                not self._warned_unreachable
+                and (not use_fixed_retry or connect_failures < 5)
+                and backoff >= (RETRY_MAX_BACKOFF * 0.9)
+            ):
+                # Once per outage. This used to announce an mDNS fallback that
+                # never existed, and repeated every five minutes for as long as
+                # the printer stayed unreachable (#84).
+                self._warned_unreachable = True
+                _LOGGER.warning(
+                    "K WS connection failing repeatedly (host=%s); retrying every %.0fs",
                     self._host,
+                    sleep_for,
                 )
-            elif (not use_fixed_retry or connect_failures < 5) and backoff >= (RETRY_MAX_BACKOFF * 0.9):
-                now = time.monotonic()
-                if now - self._last_mdns_attempt > 3.0: # 3 seconds
-                    self._last_mdns_attempt = now
-                    _LOGGER.warning(
-                        "K WS connection failing repeatedly (host=%s). Attempting mDNS fallback...",
-                        self._host
-                    )
-                    _LOGGER.debug(
-                        "K WS mDNS fallback: will retry connection on next loop iteration for host=%s",
-                        self._host,
-                    )
-                else:
-                    _LOGGER.debug("K WS connection failing, but mDNS fallback rate-limited host=%s", self._host)
 
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=sleep_for)
@@ -409,6 +407,7 @@ class KClient:
         if not self._ws_ready.is_set():
             self._ws_ready.set()
             self._connected_once.set()
+            self._warned_unreachable = False
             _LOGGER.info("K WS ready host=%s url=%s", self._host, url)
 
     async def _heartbeat(self):

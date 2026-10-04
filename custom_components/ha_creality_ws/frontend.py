@@ -115,7 +115,7 @@ async def _init_resource(hass: HomeAssistant, url: str, ver: str) -> bool:
         from homeassistant.components.lovelace.resources import ResourceStorageCollection
     except Exception:
         # If imports fail here (tests/local static analysis), skip auto-registration
-        _LOGGER.debug("Lovlace resource helpers unavailable; skipping auto resource init")
+        _LOGGER.debug("Lovelace resource helpers unavailable; skipping auto resource init")
         return False
 
     lovelace = hass.data.get("lovelace")
@@ -235,8 +235,9 @@ class CrealityCardRegistration:
     async def async_register(self) -> None:
         """Register a static path that serves the card from the integration package.
 
-        We do NOT auto-create or modify Lovelace resources to avoid clobbering user
-        dashboards. Instead we log the integration-hosted URL for manual registration.
+        Also adds each card as a Lovelace resource, or moves an existing entry
+        for it to the current version (`_init_resource`). Only the card's own
+        entry is touched; other resources are left alone.
         """
         versions: dict[str, str] = {}
         for card_name in CARDS:

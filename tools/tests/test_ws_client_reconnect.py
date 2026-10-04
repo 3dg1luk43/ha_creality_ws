@@ -525,7 +525,7 @@ def test_the_file_listing_is_delivered_once_not_on_every_later_frame():
 
 def _failed_attempt_warnings(caplog, power_off: bool) -> list[str]:
     """Warnings from one failed connect, the backoff already at its ceiling
-    (where the mDNS fallback warning lives)."""
+    (where the "failing repeatedly" warning lives)."""
 
     async def run():
         async def _on_msg(payload):
@@ -557,6 +557,36 @@ def test_a_failed_attempt_with_the_power_off_says_nothing(caplog):
     """#84: "K WS connection failing repeatedly ... mDNS fallback" was logged
     21 times in an evening while the smart plug said the printer was off."""
     assert _failed_attempt_warnings(caplog, power_off=True) == []
+
+
+def test_an_unreachable_printer_is_reported_once_not_every_retry(caplog):
+    """#84 again: with a power switch saying on, the warning came back at
+    every retry at the backoff ceiling, every five minutes for as long as the
+    printer stayed unreachable, announcing an mDNS fallback that did not
+    exist."""
+
+    async def run():
+        async def _on_msg(payload):
+            """No-op message handler used for testing."""
+
+        client = KClient("192.168.1.99", _on_msg)
+        client._check_power_status = lambda: False
+        attempts: list[int] = []
+        fake_connect = _make_failing_connect(attempts, exc=OSError("connection refused"))
+        with patch.object(ws_client_module.websockets, "connect", fake_connect), \
+                patch.object(ws_client_module, "RETRY_MIN_BACKOFF", 0.01), \
+                patch.object(ws_client_module, "RETRY_MAX_BACKOFF", 0.01):
+            await client.start()
+            await asyncio.sleep(0.3)
+            await client.stop()
+        return attempts
+
+    caplog.set_level(logging.DEBUG)
+    attempts = asyncio.run(run())
+    assert len(attempts) >= 5
+    repeated = [r for r in caplog.records if "failing repeatedly" in r.getMessage()]
+    assert len(repeated) == 1
+    assert "mDNS" not in caplog.text
 
 
 def _gets_on_connect(cfs_connect) -> list[dict]:

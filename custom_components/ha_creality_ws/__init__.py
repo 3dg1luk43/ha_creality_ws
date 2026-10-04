@@ -1018,8 +1018,8 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Take this printer's notifications off every phone as it is deleted.
 
     Unload deliberately leaves them alone, because `options_update_listener`
-    reloads the entry on any options change and dismissing there would make the
-    card flicker every time an unrelated setting is toggled. Removal is the one
+    reloads the entry on most options changes and dismissing there would make
+    the card flicker every time an unrelated setting is toggled. Removal is the one
     teardown that is not a reload, and it is final: nothing will ever push to
     these tags again, so a live card left behind would sit on a phone showing a
     printer that no longer exists in Home Assistant.
