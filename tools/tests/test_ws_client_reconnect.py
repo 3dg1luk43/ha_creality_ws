@@ -131,6 +131,15 @@ def _make_failing_connect(call_counter: list[int], exc: Exception | None = None)
     return _fake_connect
 
 
+async def _until(condition, timeout: float = 5.0) -> None:
+    """Wait for `condition()` to hold, or `timeout` seconds. A fixed short
+    sleep failed on a loaded CI runner: resolving the host goes through the
+    executor before the first connect, and can take longer than 0.2 s."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not condition() and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.02)
+
+
 # ---------------------------------------------------------------------------
 # Test 1 -- force_connect=True, power ON  →  connect IS attempted
 # ---------------------------------------------------------------------------
@@ -158,8 +167,7 @@ def test_force_connect_attempts_connection_when_power_on():
         with patch.object(ws_client_module.websockets, "connect", fake_connect):
             # Start the loop; stop it shortly after so it doesn't retry forever
             await client.start()
-            # Give it enough time to hit the connect call (< 0.3 s)
-            await asyncio.sleep(0.2)
+            await _until(lambda: call_counter)
             await client.stop()
 
         assert len(call_counter) >= 1, (
@@ -194,7 +202,8 @@ def test_force_connect_attempts_connection_even_when_power_off():
 
         with patch.object(ws_client_module.websockets, "connect", fake_connect):
             await client.start()
-            await asyncio.sleep(0.2)
+            await _until(lambda: call_counter)
+            await asyncio.sleep(0.1)  # time for a second attempt, which must not come
             await client.stop()
 
         assert len(call_counter) == 1
@@ -252,7 +261,7 @@ def test_the_first_attempt_after_power_returns_is_prompt():
             await asyncio.sleep(0.2)
             assert call_counter == []
             power_off[0] = False
-            await asyncio.sleep(0.2)
+            await _until(lambda: call_counter)
             await client.stop()
 
         assert len(call_counter) >= 1
@@ -351,7 +360,7 @@ def test_normal_loop_connects_when_power_on():
 
         with patch.object(ws_client_module.websockets, "connect", fake_connect):
             await client.start()
-            await asyncio.sleep(0.2)
+            await _until(lambda: call_counter)
             await client.stop()
 
         assert len(call_counter) >= 1, (
@@ -536,11 +545,13 @@ def _failed_attempt_warnings(caplog, power_off: bool) -> list[str]:
         # Forced, so an attempt is made even with the power off: a manual
         # Reconnect, or the switch lagging behind the plug.
         client._force_connect = True
-        fake_connect = _make_failing_connect([], exc=OSError("connection refused"))
+        attempts: list[int] = []
+        fake_connect = _make_failing_connect(attempts, exc=OSError("connection refused"))
         with patch.object(ws_client_module.websockets, "connect", fake_connect), \
                 patch.object(ws_client_module, "RETRY_MAX_BACKOFF", 1.0):
             await client.start()
-            await asyncio.sleep(0.2)
+            await _until(lambda: attempts)
+            await asyncio.sleep(0.1)  # past the failure, into the warning
             await client.stop()
 
     caplog.set_level(logging.DEBUG)
@@ -577,7 +588,7 @@ def test_an_unreachable_printer_is_reported_once_not_every_retry(caplog):
                 patch.object(ws_client_module, "RETRY_MIN_BACKOFF", 0.01), \
                 patch.object(ws_client_module, "RETRY_MAX_BACKOFF", 0.01):
             await client.start()
-            await asyncio.sleep(0.3)
+            await _until(lambda: len(attempts) >= 6)
             await client.stop()
         return attempts
 
