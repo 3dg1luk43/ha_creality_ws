@@ -70,6 +70,19 @@ test("an icon name cannot break out of its attribute", () => {
   assert.ok(!html.includes('" onmouseover="'), "the quote was not escaped");
 });
 
+test("a button named in hidden_buttons never shows (#37)", () => {
+  const printing = { "sensor.s": { state: "printing", attributes: {} }, "light.l": { state: "on", attributes: {} } };
+  const shown = (config) => {
+    const { c } = card({ light: "light.l", ...config }, printing);
+    return [...c._root.getElementById("chips-container").innerHTML.matchAll(/id="([a-z]+)"/g)].map((m) => m[1]);
+  };
+  const all = shown({});
+  assert.ok(all.includes("pause") && all.includes("stop") && all.includes("light"), `control: ${all}`);
+  const some = shown({ hidden_buttons: ["stop", "light"] });
+  assert.ok(!some.includes("stop") && !some.includes("light"), `hidden: ${some}`);
+  assert.ok(some.includes("pause"), `the rest stay: ${some}`);
+});
+
 const run = async () => {
   let failed = 0;
   for (const [name, fn] of tests) {

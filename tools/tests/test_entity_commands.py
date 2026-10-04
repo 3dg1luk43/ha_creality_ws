@@ -19,6 +19,7 @@ from custom_components.ha_creality_ws.number import (
     BedTargetNumber,
     BoxTargetNumber,
     NozzleTargetNumber,
+    FlowRatePercent,
     PrintTuningPercent,
 )
 
@@ -107,3 +108,21 @@ def test_the_speed_control_reports_a_failed_send():
     entity = PrintTuningPercent(_coordinator(fail=True))
     with pytest.raises(HomeAssistantError):
         _run(entity.async_set_native_value(100))
+
+
+def test_speed_and_flow_are_set_separately():
+    """R26: one control wrote both, so 150% speed was also 150% extrusion."""
+    coord = _coordinator()
+    _run(PrintTuningPercent(coord).async_set_native_value(150))
+    _run(FlowRatePercent(coord).async_set_native_value(95))
+    assert coord.client.sent == [{"setFeedratePct": 150}, {"setFlowratePct": 95}]
+
+
+def test_speed_and_flow_each_read_their_own_field():
+    coord = _coordinator()
+    coord.available = True
+    coord.power_is_off = lambda: False
+    coord.data.update({"curFeedratePct": 150, "curFlowratePct": 95})
+    assert PrintTuningPercent(coord).native_value == 150
+    assert FlowRatePercent(coord).native_value == 95
+    assert FlowRatePercent(coord)._attr_unique_id.endswith("-flow_rate_pct")

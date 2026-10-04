@@ -157,3 +157,47 @@ async def test_a_command_the_printer_cannot_take_says_so(hass: HomeAssistant, fa
             "button", "press", {"entity_id": _button(hass, entry, "stop_print")}, blocking=True
         )
     assert {"stop": 1} not in client.sent
+
+
+def _uids(hass: HomeAssistant, entry: MockConfigEntry) -> set[str]:
+    return {e.unique_id for e in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)}
+
+
+async def test_a_k1c_gets_no_chamber_target(hass: HomeAssistant, fake_printer) -> None:
+    """R71: the K1C reports targetBoxTemp, which promoted a chamber control
+    on a printer with no chamber heater. The chamber sensor stays."""
+    fake_printer.overrides = {"targetBoxTemp": 0}
+    entry = await _add(hass)
+    assert f"{HOST}-box_target" not in _uids(hass, entry)
+    assert entry.data["_cached_has_chamber_control"] is False
+
+
+async def test_a_k1c_chamber_target_from_an_older_version_is_removed(hass: HomeAssistant, fake_printer) -> None:
+    fake_printer.overrides = {"targetBoxTemp": 0}
+    entry = MockConfigEntry(
+        domain=DOMAIN, version=ConfigFlow.VERSION, unique_id=HOST, title="Printer",
+        data=entry_data(_cached_has_chamber_control=True, _cached_has_box_control=True),
+    )
+    entry.add_to_hass(hass)
+    er.async_get(hass).async_get_or_create("number", DOMAIN, f"{HOST}-box_target", config_entry=entry)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert f"{HOST}-box_target" not in _uids(hass, entry)
+
+
+async def test_a_k2_plus_keeps_its_chamber_target(hass: HomeAssistant, fake_printer) -> None:
+    fake_printer.overrides = K2_PLUS
+    entry = await _add(hass)
+    assert f"{HOST}-box_target" in _uids(hass, entry)
+
+
+async def test_the_new_controls_and_sensor_register(hass: HomeAssistant, fake_printer) -> None:
+    """R26 split speed and flow; R69 added Real-Time Speed, off by default."""
+    entry = await _add(hass)
+    reg = {e.unique_id: e for e in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)}
+    assert f"{HOST}-print_tuning_pct" in reg and f"{HOST}-flow_rate_pct" in reg
+    assert reg[f"{HOST}-real_time_speed"].disabled_by is er.RegistryEntryDisabler.INTEGRATION
+    await hass.services.async_call(
+        "number", "set_value", {"entity_id": reg[f"{HOST}-flow_rate_pct"].entity_id, "value": 95}, blocking=True
+    )
+    assert fake_printer.instances[-1].sent[-1] == {"setFlowratePct": 95}

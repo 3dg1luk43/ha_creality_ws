@@ -227,6 +227,19 @@ SPECS: list[dict[str, Any]] = [
         "attrs": lambda d: {},
         "state_class": SensorStateClass.MEASUREMENT,
     },
+    # Streamed by every captured model (R69). Off by default: it changes
+    # many times a second while printing, like the head position.
+    {
+        "uid": "real_time_speed",
+        "name": "Real-Time Speed",
+        "translation_key": "real_time_speed",
+        "field": "realTimeSpeed",
+        "device_class": SensorDeviceClass.SPEED,
+        "unit": "mm/s",
+        "attrs": lambda d: {},
+        "state_class": SensorStateClass.MEASUREMENT,
+        "enabled_default": False,
+    },
 ]
 
 # ----------------- dynamic "mapped" sensors -----------------

@@ -473,6 +473,7 @@ class SensorDeviceClass(_StrEnumStub):
     TEMPERATURE = "temperature"
     HUMIDITY = "humidity"
     DURATION = "duration"
+    SPEED = "speed"
     DISTANCE = "distance"
     WEIGHT = "weight"
     ENUM = "enum"

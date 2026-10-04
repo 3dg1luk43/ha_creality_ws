@@ -55,12 +55,9 @@
     "filament_runout": "{device} se ha quedado sin filamento. Estado de la impresión: {state}. Cambia el filamento.",
     "finishing_soon": "{device} terminará en {minutes} min.",
     "cfs_info_title": "Solicitud de información del CFS",
-    "cfs_info_sent": "Se ha solicitado la información del CFS a {printers}.",
     "cfs_info_failed": "No se ha podido contactar con {printers}.",
     "cfs_material_failed_title": "Material del CFS no cambiado",
     "cfs_material_failed": "{printer} no está conectada, así que no se ha cambiado la ranura {slot} de la caja {box}.",
-    "cfs_material_updated_title": "Material del CFS cambiado",
-    "cfs_material_updated": "Se ha actualizado la ranura {slot} de la caja {box} en {printer}.",
     "diagnostic_title": "Datos de diagnóstico de Creality",
     "diagnostic_collected": "Se han recopilado los datos de diagnóstico (impresoras: {printers}). Están en la respuesta de esta acción y en el registro de Home Assistant."
   },
@@ -246,6 +243,7 @@
       "position_z": { "name": "Posición Z" },
       "feedrate_pct": { "name": "Velocidad de impresión" },
       "flowrate_pct": { "name": "Tasa de flujo" },
+      "real_time_speed": { "name": "Velocidad en tiempo real" },
       "model_info": { "name": "Modelo" },
       "filament_status": {
         "name": "Estado del filamento",
@@ -332,7 +330,8 @@
       "reconnect": { "name": "Reconectar" }
     },
     "number": {
-      "print_tuning_pct": { "name": "Ajuste de impresión" },
+      "print_tuning_pct": { "name": "Factor de velocidad" },
+      "flow_rate_pct": { "name": "Factor de flujo" },
       "nozzle_target": { "name": "Objetivo de la boquilla" },
       "bed_target": { "name": "Objetivo de la cama" },
       "chamber_target": { "name": "Objetivo de la cámara" }

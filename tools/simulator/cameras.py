@@ -27,7 +27,7 @@ from typing import Any
 import av
 import numpy as np
 from aiohttp import web
-from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription
+from aiortc import MediaStreamTrack, RTCConfiguration, RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaBlackhole
 
 from . import media
@@ -450,7 +450,10 @@ class WebRtcSignalling:
             LOGGER.exception("Failed to parse offer: %s", exc)
             return web.Response(status=400, text="bad request")
 
-        pc = RTCPeerConnection()
+        # No ICE servers: aiortc's default asks Google's public STUN server,
+        # which put the host's public address in every answer. A printer on the
+        # LAN offers host candidates only, and a test tool stays local.
+        pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
 
         @pc.on("connectionstatechange")
         def _on_connstate():

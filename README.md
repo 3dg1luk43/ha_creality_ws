@@ -387,7 +387,8 @@ stop_btn: button.k1c_stop_print
   * **Resume** shown when `paused`.
   * **Stop** shown when `printing|paused|self-testing`.
   * **Light** toggles the configured `switch`/`light` entity; shows/hides based on Power state and printer status.
-  * **Power** (optional) offers a snappy, short-lived optimistic toggle; pinned to the far right when configured.
+  * **Power** (optional) offers a snappy, short-lived optimistic toggle.
+  * Chips appear in `button_order`; any chip named in `hidden_buttons` (e.g. `hidden_buttons: [stop, light]`, or *Hidden Buttons* in the editor) never shows.
 
 **Configuration Notes:**
 - `power` is optional; omit it to hide the power chip.

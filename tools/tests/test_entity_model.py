@@ -86,6 +86,8 @@ def test_machine_limits_are_diagnostics():
     assert sensor._attr_entity_category == "diagnostic"
 
 
-def test_only_the_head_position_is_off_for_new_installs():
+def test_only_the_fast_movers_are_off_for_new_installs():
+    """The head position and the real-time speed change many times a second
+    while printing; everything else stays on."""
     off = {spec["uid"] for spec in SPECS if spec.get("enabled_default") is False}
-    assert off == {"position_x", "position_y", "position_z"}
+    assert off == {"position_x", "position_y", "position_z", "real_time_speed"}

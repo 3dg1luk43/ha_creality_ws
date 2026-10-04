@@ -481,6 +481,8 @@ class KPrinterCard extends HTMLElement {
       custom_btn: "",
       custom_btn_icon: "", // Moved to theme editor but stored here
       custom_btn_hidden: false,
+      // Buttons never shown, whatever the printer is doing (#37)
+      hidden_buttons: [],
       // Order of buttons
       button_order: ['pause', 'resume', 'stop', 'light', 'power', 'custom'],
       // Icon overrides
@@ -1312,10 +1314,11 @@ class KPrinterCard extends HTMLElement {
       if (!uniqueOrder.includes(k) && buttons[k]) uniqueOrder.push(k);
     });
 
+    const hiddenByConfig = new Set(Array.isArray(this._cfg.hidden_buttons) ? this._cfg.hidden_buttons : []);
     let chipsHtml = "";
     uniqueOrder.forEach(key => {
       const btn = buttons[key];
-      if (btn && !btn.hidden) {
+      if (btn && !btn.hidden && !hiddenByConfig.has(key)) {
         chipsHtml += `<button class="chip ${btn.class}" id="${key}" title="${attr(btn.title)}" aria-label="${attr(btn.title)}"><ha-icon icon="${attr(btn.icon)}"></ha-icon></button>`;
       }
     });
@@ -1442,6 +1445,7 @@ const CARD_TRANSLATIONS = {
     label_custom_btn: "Custom Action Entity",
     label_custom_btn_icon: "Custom Button Icon",
     label_custom_btn_hidden: "Hide Custom Button",
+    label_hidden_buttons: "Hidden Buttons",
     label_button_order: "Button Order (list)",
     label_hide_box_temp: "Hide Chamber Temperature",
     label_pause_btn_icon: "Pause Icon Override",
@@ -1469,6 +1473,7 @@ const CARD_TRANSLATIONS = {
     helper_custom_btn: "Any entity to trigger (Button, Script, Switch, etc.)",
     helper_custom_btn_icon: "Icon for the custom button",
     helper_custom_btn_hidden: "Hide the custom button",
+    helper_hidden_buttons: "Never shown on the card, whatever the printer is doing",
     helper_button_order: "List of buttons to show in order (pause, resume, stop, light, power, custom)",
     helper_hide_box_temp: "Hide the chamber temperature pill even when a sensor is configured",
     editor_error_title: "Editor Error",
@@ -1580,7 +1585,7 @@ const AUTO_SUFFIX = "_auto";
 
 /** Top-level config keys the theme tab owns, and so the reset button clears. */
 const LAYOUT_RESET_KEYS = [
-  "button_order", "custom_btn_hidden", "hide_box_temp",
+  "button_order", "custom_btn_hidden", "hidden_buttons", "hide_box_temp",
   "pause_btn_icon", "resume_btn_icon", "stop_btn_icon",
   "light_btn_icon", "power_btn_icon", "custom_btn_icon",
 ];
@@ -1669,10 +1674,23 @@ function entitiesSchema() {
   ];
 }
 
-function layoutSchema() {
+/** The chips `hidden_buttons` can name, in their default order. */
+const HIDEABLE_BUTTONS = ["pause", "resume", "stop", "light", "power", "custom"];
+
+function layoutSchema(t = (key) => key) {
   return [
     { name: "button_order", selector: { text: {} } },
     { name: "custom_btn_hidden", selector: { boolean: {} } },
+    {
+      name: "hidden_buttons",
+      selector: {
+        select: {
+          multiple: true,
+          mode: "list",
+          options: HIDEABLE_BUTTONS.map((key) => ({ value: key, label: t(`chip_${key}`) })),
+        },
+      },
+    },
     { name: "hide_box_temp", selector: { boolean: {} } },
     { name: "pause_btn_icon", selector: { icon: {} } },
     { name: "resume_btn_icon", selector: { icon: {} } },
@@ -2026,7 +2044,7 @@ class KPrinterCardEditor extends HTMLElement {
 
     this._applyForm("device-form", deviceSchema(), { device: this._cfg.device || "" });
     this._applyForm("entities-form", entitiesSchema(), entitiesData(this._cfg));
-    this._applyForm("layout-form", layoutSchema(), layoutData(this._cfg));
+    this._applyForm("layout-form", layoutSchema((key) => this._t(key)), layoutData(this._cfg));
 
     THEME_COLOR_GROUPS.forEach((group, index) => {
       this._root.getElementById(`group-color-${index}`).textContent = this._t(group.title);

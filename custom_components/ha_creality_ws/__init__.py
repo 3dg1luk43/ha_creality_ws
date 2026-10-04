@@ -441,7 +441,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 new_data["_cached_has_box_control"] = printermodel.has_box_control
                 # Feature Promotion: Trust telemetry over model defaults
                 # If printer reports chamber targets/temps, ENABLE capabilities
-                if "targetBoxTemp" in d:
+                # -- except control on the K1 family, which has no chamber
+                # heater although a K1C reports `targetBoxTemp` (R71).
+                if "targetBoxTemp" in d and not printermodel.is_k1_family:
                     new_data["_cached_has_chamber_control"] = True
                     new_data["_cached_has_box_control"] = True
                 if "boxTemp" in d or "maxBoxTemp" in d:
@@ -604,6 +606,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # same attributes. Removed rather than left orphaned.
             ("sensor", f"{host}-system"),
         ]
+        # The chamber target a K1 got because it reports targetBoxTemp; no
+        # K1-family printer has a chamber heater, so it never did anything (R71).
+        if ModelDetection.from_cache(entry.data, coord.data).is_k1_family:
+            legacy.append(("number", f"{host}-box_target"))
         for domain_name, unique in legacy:
             ent_id = reg.async_get_entity_id(domain_name, DOMAIN, unique)
             if ent_id:
@@ -699,15 +705,17 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
                 _LOGGER.error("Failed to request CFS info for %s: %s", coord.client.host, exc)
                 failed.append(coord.client.host)
 
+        # Nothing to say on success: the CFS sensors update, and the card that
+        # calls this after every save already shows its own result. A
+        # notification each time left one in the bell per save (R76).
+        if not failed:
+            pn_async_dismiss(hass, "cfs_request_result")
+            return
         strings = await _common_strings(hass)
-        lines = [
-            _fill(strings, "cfs_info_sent", printers=", ".join(asked)) if asked else "",
-            _fill(strings, "cfs_info_failed", printers=", ".join(failed)) if failed else "",
-        ]
         pn_async_create(
             hass,
             title=_fill(strings, "cfs_info_title"),
-            message="\n".join(line for line in lines if line),
+            message=_fill(strings, "cfs_info_failed", printers=", ".join(failed)),
             notification_id="cfs_request_result",
         )
 
@@ -805,15 +813,10 @@ async def _register_custom_services(hass: HomeAssistant) -> None:
                 )
                 continue
 
-            # Clear any earlier failure for this printer, so a successful retry
-            # does not leave "Update Failed" and "Updated" on screen together.
+            # Clear any earlier failure for this printer. Success itself posts
+            # nothing (R76): the card shows its own result, and an automation
+            # learns of a failure from the raise below.
             pn_async_dismiss(hass, f"cfs_material_error_{host}")
-            pn_async_create(
-                hass,
-                title=_fill(strings, "cfs_material_updated_title"),
-                message=_fill(strings, "cfs_material_updated", printer=host, **where),
-                notification_id=f"cfs_material_update_{host}",
-            )
             hass.async_create_task(_log_material_echo(coord, payload))
 
         # After every target has been tried: one unreachable printer must not

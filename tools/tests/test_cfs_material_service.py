@@ -218,6 +218,8 @@ class FakeClient:
         self.sent.append(params)
 
     async def request_boxs_info(self):
+        if self._fail:
+            raise RuntimeError("printer link not available")
         self.boxs_info_requests += 1
 
 
@@ -526,7 +528,7 @@ def test_a_printer_failure_still_writes_the_others_then_raises(integration):
     assert raised.value.translation_placeholders["printers"] == "unreachable"
     assert good.client.sent, "the reachable printer must still be written"
     ids = [n.get("notification_id") for n in notifications]
-    assert ids == ["cfs_material_error_unreachable", "cfs_material_update_reachable"], ids
+    assert ids == ["cfs_material_error_unreachable"], ids
 
 
 @requires_voluptuous
@@ -534,21 +536,57 @@ def test_each_printer_gets_its_own_notification_id(integration):
     """device_id accepts a list; a shared id left only the last result visible."""
     _module, notifications, _ = integration
     notifications.clear()
-    good = FakeCoordinator("reachable", IDLE)
-    bad = FakeCoordinator("unreachable", IDLE, fail=True)
+    first = FakeCoordinator("first", IDLE, fail=True)
+    second = FakeCoordinator("second", IDLE, fail=True)
     hass, services, _ = _make_hass(
-        integration, {"e1": bad, "e2": good}, {"d1": _device("e1"), "d2": _device("e2")}
+        integration, {"e1": first, "e2": second}, {"d1": _device("e1"), "d2": _device("e2")}
     )
     _register(integration, hass)
-    # One write failed, so the call raises (R19), after notifying both.
     with pytest.raises(sys.modules["homeassistant.exceptions"].HomeAssistantError):
         _call_service(integration, hass, services, {
             "device_id": ["d1", "d2"], "box_id": 1, "slot_id": 0, "type": "PLA",
         })
     ids = [n.get("notification_id") for n in notifications]
-    assert len(ids) == len(set(ids)), f"notification ids collide: {ids}"
-    assert "cfs_material_error_unreachable" in ids, ids
-    assert "cfs_material_update_reachable" in ids, ids
+    assert ids == ["cfs_material_error_first", "cfs_material_error_second"], ids
+
+
+@requires_voluptuous
+def test_a_successful_write_posts_no_notification(integration):
+    """The card shows its own result, and every save left one in the bell (R76)."""
+    _module, notifications, _ = integration
+    notifications.clear()
+    coord = FakeCoordinator("printer-a", IDLE)
+    hass, services, _ = _make_hass(integration, {"e": coord}, {"d": _device("e")})
+    _register(integration, hass)
+    _call_service(integration, hass, services, {
+        "device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA",
+    })
+    assert coord.client.sent
+    assert notifications == []
+
+
+@requires_voluptuous
+def test_a_cfs_refresh_notifies_only_when_a_printer_could_not_be_asked(integration):
+    """R76: the refresh the card sends after every save posted a notification
+    each time."""
+    module, notifications, _ = integration
+    good = FakeCoordinator("reachable", IDLE)
+    bad = FakeCoordinator("unreachable", IDLE, fail=True)
+    hass, services, _ = _make_hass(
+        integration, {"e1": good, "e2": bad}, {"d1": _device("e1"), "d2": _device("e2")}
+    )
+    _register(integration, hass)
+    handler, _schema = services["request_cfs_info"]
+
+    notifications.clear()
+    asyncio.run(handler(module.ServiceCall({"device_id": ["d1"]})))
+    assert good.client.boxs_info_requests == 1
+    assert notifications == []
+
+    asyncio.run(handler(module.ServiceCall({"device_id": ["d1", "d2"]})))
+    assert [n.get("notification_id") for n in notifications] == ["cfs_request_result"]
+    assert "unreachable" in notifications[-1]["message"]
+    assert "reachable," not in notifications[-1]["message"]
 
 
 @requires_voluptuous
@@ -578,19 +616,20 @@ def test_a_successful_retry_dismisses_the_earlier_failure(integration):
 
 
 @requires_voluptuous
-def test_the_success_message_numbers_the_slot_as_the_sensors_do(integration):
+def test_the_failure_message_numbers_the_slot_as_the_sensors_do(integration):
     """Slot 0 on the wire is "Slot 1" on every sensor and on the card."""
     _module, notifications, _ = integration
     notifications.clear()
-    coord = FakeCoordinator("printer-a", IDLE)
+    coord = FakeCoordinator("printer-a", IDLE, fail=True)
     hass, services, _ = _make_hass(integration, {"e": coord}, {"d": _device("e")})
     _register(integration, hass)
-    _call_service(integration, hass, services, {
-        "device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA",
-    })
+    with pytest.raises(sys.modules["homeassistant.exceptions"].HomeAssistantError):
+        _call_service(integration, hass, services, {
+            "device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA",
+        })
     message = next(
         n["message"] for n in notifications
-        if n.get("notification_id") == "cfs_material_update_printer-a"
+        if n.get("notification_id") == "cfs_material_error_printer-a"
     )
     assert "slot 1 " in message, message
 
@@ -647,18 +686,19 @@ def test_the_notification_is_in_the_server_language(integration):
     """Typed into the code in English before (R33)."""
     _module, notifications, _ = integration
     notifications.clear()
-    coord = FakeCoordinator("printer-a", IDLE)
+    coord = FakeCoordinator("printer-a", IDLE, fail=True)
     hass, services, _ = _make_hass(integration, {"e": coord}, {"d": _device("e")})
     hass.config = types.SimpleNamespace(language="es")
     _register(integration, hass)
-    _call_service(integration, hass, services, {
-        "device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA",
-    })
+    with pytest.raises(sys.modules["homeassistant.exceptions"].HomeAssistantError):
+        _call_service(integration, hass, services, {
+            "device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA",
+        })
     spanish = json.loads(
         (ROOT / "custom_components/ha_creality_ws/translations/es.json").read_text(encoding="utf-8")
     )["common"]
-    assert notifications[-1]["title"] == spanish["cfs_material_updated_title"]
-    assert notifications[-1]["message"] == spanish["cfs_material_updated"].format(
+    assert notifications[-1]["title"] == spanish["cfs_material_failed_title"]
+    assert notifications[-1]["message"] == spanish["cfs_material_failed"].format(
         box="1", slot="1", printer="printer-a"
     )
 

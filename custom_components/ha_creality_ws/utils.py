@@ -441,6 +441,16 @@ class ModelDetection:
             return can
         return "K by Creality"
 
+    @classmethod
+    def from_cache(cls, entry_data: Mapping[str, Any], live: Mapping[str, Any] | None = None) -> "ModelDetection":
+        """Detection from the model cached in an entry, or live telemetry when
+        nothing is cached yet."""
+        live = live or {}
+        return cls({
+            "model": entry_data.get("_cached_model") or live.get("model"),
+            "modelVersion": entry_data.get("_cached_model_version") or live.get("modelVersion"),
+        })
+
     def display_model(self) -> tuple[str, str | None]:
         """The model name and model id for the device page (R80).
 

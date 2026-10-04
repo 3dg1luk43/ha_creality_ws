@@ -55,12 +55,9 @@
     "filament_runout": "{device} filament ran out. Print status: {state}. Change the filament.",
     "finishing_soon": "{device} will finish in {minutes} min.",
     "cfs_info_title": "CFS information request",
-    "cfs_info_sent": "Asked {printers} to report their CFS.",
     "cfs_info_failed": "Could not reach {printers}.",
     "cfs_material_failed_title": "CFS material not changed",
     "cfs_material_failed": "{printer} is not connected, so box {box} slot {slot} was not changed.",
-    "cfs_material_updated_title": "CFS material changed",
-    "cfs_material_updated": "Box {box} slot {slot} on {printer} updated.",
     "diagnostic_title": "Creality diagnostic data",
     "diagnostic_collected": "Diagnostic data was collected (printers: {printers}). It is in this action's response and in the Home Assistant log."
   },
@@ -246,6 +243,7 @@
       "position_z": { "name": "Position Z" },
       "feedrate_pct": { "name": "Print Speed" },
       "flowrate_pct": { "name": "Flow Rate" },
+      "real_time_speed": { "name": "Real-Time Speed" },
       "model_info": { "name": "Model" },
       "filament_status": {
         "name": "Filament Status",
@@ -332,7 +330,8 @@
       "reconnect": { "name": "Reconnect" }
     },
     "number": {
-      "print_tuning_pct": { "name": "Print Tuning" },
+      "print_tuning_pct": { "name": "Speed Factor" },
+      "flow_rate_pct": { "name": "Flow Factor" },
       "nozzle_target": { "name": "Nozzle Target" },
       "bed_target": { "name": "Bed Target" },
       "chamber_target": { "name": "Chamber Target" }

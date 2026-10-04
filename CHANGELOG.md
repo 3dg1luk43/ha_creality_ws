@@ -18,6 +18,8 @@ and versions are numbered major.minor.patch, with a fourth number for a hotfix r
 - K1C and K1 Max printers on firmware 1.3.5.22 get their camera back: it moved to WebRTC, and the integration now notices.
 - The printer card no longer breaks on names like "Tiskárna č.1", stops rebuilding itself on narrow screens, and stops redrawing on every change in Home Assistant.
 - Diagnostics: the standard **Download diagnostics** now works, and the diagnostic action finally returns what it collects, with addresses, names and tokens hidden.
+- **Check automations that compare raw states**: Active Filament Slot and Current Object now report `box_1_slot_2`, `external` and `not_printing` (details under Changed).
+- Print Tuning is now **Speed Factor** and sets speed only; flow has its own **Flow Factor**. Before, 150% speed also meant 150% extrusion.
 
 ### Fixes
 
@@ -73,8 +75,17 @@ and versions are numbered major.minor.patch, with a fourth number for a hotfix r
 - **A command sent while the printer was unreachable waited for the next retry**, which can be five minutes away: the integration counted a connection that was between attempts as connected. Stop, Pause and the other commands now try to reconnect at once and report an error if that fails.
 - **"Connection failing repeatedly ... Attempting mDNS fallback" every five minutes** while a printer stayed unreachable with its power switch on ([#84](https://github.com/3dg1luk43/ha_creality_ws/issues/84)). There was no mDNS fallback. The warning now says the integration is retrying, once per outage.
 
+### Added
+
+- **Flow Factor**, a number that sets the extrusion flow rate on its own (see Speed Factor under Changed).
+- **Real-Time Speed** sensor (mm/s), the toolhead's current speed as the printer reports it. Off by default, like the position sensors: it changes many times a second while printing.
+- **Hide any button on the printer card**: *Hidden Buttons* in the card editor (`hidden_buttons` in YAML) keeps Pause, Resume, Stop, Light, Power or the custom button off the card whatever the printer is doing ([#37](https://github.com/3dg1luk43/ha_creality_ws/issues/37)).
+
 ### Changed
 
+- **Print Tuning is now Speed Factor, and sets the print speed only.** It used to set the flow rate to the same percentage, so 150% speed also extruded 150%. Flow has its own Flow Factor number now. The entity keeps its id; only its default name changes, so a renamed entity keeps your name.
+- **The K1 family no longer gets a Chamber Target**: a K1C reports a chamber target although no K1-family printer has a chamber heater, so the control did nothing. It is removed at the next start. The chamber temperature sensor stays.
+- **No notification for a CFS change or refresh that worked**: each save in the CFS card left two in the notification list, although the card shows its own result. Failures still notify, and the action still reports them to automations.
 - **Two sensors' raw states changed so they can be translated.** Home Assistant shows the same text as before, in your language now, but a template or automation that compares the raw state needs the new value:
   - Active Filament Slot: `External` is now `external`, and `Box 1 Slot 2` is now `box_1_slot_2`.
   - Current Object: `not printing` is now `not_printing`.
