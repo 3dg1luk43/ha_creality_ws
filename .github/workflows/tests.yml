@@ -69,3 +69,19 @@ jobs:
         run: pip install -r tools/requirements-ha.txt
       - name: Run the tests against Home Assistant
         run: python -m pytest tools/tests_ha
+
+  lint:
+    # Undefined names, unused imports and syntax errors, which the tests miss
+    # in code they do not reach. Not style: nothing here is formatted, and the
+    # line endings are mixed on purpose (test_line_endings.py).
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.14"
+      - run: pip install ruff==0.16.10
+      - run: ruff check --isolated --select F,E9 custom_components tools

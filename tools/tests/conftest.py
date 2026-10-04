@@ -607,21 +607,32 @@ def fake_config_entry(entry_id: str = "entry1", options=None, data=None):
 _ABSENT = object()
 _MODULE_STUBS: dict[str, list] = {}
 _ATTR_STUBS: dict[str, list] = {}
+# What each owner installed, in order, and which owners have been restored.
+# Stubs go in at import time, which happens once, but a run that does not keep
+# a module's tests together (a shuffled one) tears the module down every time
+# it moves on, and the module's later tests then ran without them.
+# `pytest_runtest_setup` below puts them back.
+_REPLAY: dict[str, list] = {}
+_RESTORED: set[str] = set()
 
 
-def install_stub_module(owner: str, name: str, module) -> None:
+def install_stub_module(owner: str, name: str, module, *, _replay: bool = False) -> None:
     """Install `module` at `name`, remembering what `owner` displaced."""
+    if not _replay:
+        _REPLAY.setdefault(owner, []).append(("module", name, module))
     _MODULE_STUBS.setdefault(owner, []).append((name, sys.modules.get(name, _ABSENT)))
     sys.modules[name] = module
 
 
-def drop_stub_module(owner: str, name: str) -> None:
+def drop_stub_module(owner: str, name: str, *, _replay: bool = False) -> None:
     """Remove `name` from sys.modules, remembering it for restore_stubs."""
+    if not _replay:
+        _REPLAY.setdefault(owner, []).append(("drop", name))
     _MODULE_STUBS.setdefault(owner, []).append((name, sys.modules.get(name, _ABSENT)))
     sys.modules.pop(name, None)
 
 
-def install_stub_attr(owner: str, obj, attr: str, value) -> None:
+def install_stub_attr(owner: str, obj, attr: str, value, *, _replay: bool = False) -> None:
     """Set `obj.attr`, remembering what `owner` displaced.
 
     A companion to `install_stub_module` for the *attribute* half of a stub. A
@@ -629,6 +640,8 @@ def install_stub_attr(owner: str, obj, attr: str, value) -> None:
     restoring only the first leaves `from pkg import sub` handing out the stub
     for the rest of the session. That leak has been found in five suites now.
     """
+    if not _replay:
+        _REPLAY.setdefault(owner, []).append(("attr", obj, attr, value))
     _ATTR_STUBS.setdefault(owner, []).append(
         (obj, attr, getattr(obj, attr, _ABSENT))
     )
@@ -637,6 +650,8 @@ def install_stub_attr(owner: str, obj, attr: str, value) -> None:
 
 def restore_stubs(owner: str) -> None:
     """Put back everything `owner` installed or dropped, newest first."""
+    if owner in _REPLAY:
+        _RESTORED.add(owner)
     for obj, attr, old in reversed(_ATTR_STUBS.pop(owner, [])):
         if old is _ABSENT:
             try:
@@ -650,3 +665,23 @@ def restore_stubs(owner: str) -> None:
             sys.modules.pop(name, None)
         else:
             sys.modules[name] = old
+
+
+def reinstall_stubs(owner: str) -> None:
+    """Install again what `owner` installed, if it has been restored since."""
+    if owner not in _RESTORED:
+        return
+    _RESTORED.discard(owner)
+    for action, *args in _REPLAY[owner]:
+        if action == "module":
+            install_stub_module(owner, *args, _replay=True)
+        elif action == "drop":
+            drop_stub_module(owner, *args, _replay=True)
+        else:
+            install_stub_attr(owner, *args, _replay=True)
+
+
+def pytest_runtest_setup(item):
+    module = getattr(item, "module", None)
+    if module is not None:
+        reinstall_stubs(module.__name__)

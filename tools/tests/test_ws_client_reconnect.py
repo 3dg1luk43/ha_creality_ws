@@ -470,6 +470,59 @@ def test_get_url_does_not_resolve():
     assert lookups == []
 
 
+def test_the_file_listing_is_delivered_once_not_on_every_later_frame():
+    """The listing reply (~150 KiB on a K1C) is one-shot. Left in the client's
+    cumulative state it rode on every later frame, and the coordinator
+    rescanned it once per frame on the receive path."""
+    listing_key = ws_client_module.GCODE_FILE_RESPONSE
+    messages = [
+        json.dumps({"nozzleTemp": "210.000000"}),
+        json.dumps({listing_key: [{"name": "a.gcode"}]}),
+        json.dumps({"bedTemp0": "60.000000"}),
+    ]
+
+    @asynccontextmanager
+    async def _connect(url, **kwargs):
+        class _WS:
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if not messages:
+                    raise StopAsyncIteration
+                return messages.pop(0)
+
+            async def send(self, *_a):
+                """Heartbeats and polls go nowhere."""
+
+            async def close(self, *a, **k):
+                """No-op close."""
+
+        yield _WS()
+
+    async def run():
+        received: list[dict] = []
+
+        async def _on_msg(payload):
+            received.append(payload)
+
+        client = KClient("192.0.2.7", _on_msg)
+        with patch.object(ws_client_module.websockets, "connect", _connect):
+            await client.start()
+            for _ in range(40):
+                if len(received) >= 3:
+                    break
+                await asyncio.sleep(0.01)
+            await client.stop()
+        return received
+
+    first, listing, after = asyncio.run(run())[:3]
+    assert listing_key in listing
+    assert listing_key not in after
+    # Still cumulative otherwise: the later frame carries the earlier values.
+    assert after["nozzleTemp"] == 210.0 and after["bedTemp0"] == 60.0
+
+
 def _failed_attempt_warnings(caplog, power_off: bool) -> list[str]:
     """Warnings from one failed connect, the backoff already at its ceiling
     (where the mDNS fallback warning lives)."""

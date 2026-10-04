@@ -56,17 +56,15 @@ JPEG = b"\xff\xd8" + b"\x00" * 64 + b"\xff\xd9"
 
 @pytest.fixture(autouse=True)
 def _loop():
-    try:
-        previous = asyncio.get_event_loop_policy().get_event_loop()
-    except Exception:  # pylint: disable=broad-except
-        previous = None
+    # Cleared afterwards: closing a loop does not uninstall it, and a closed
+    # loop left installed broke whatever later called asyncio.get_event_loop().
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         yield loop
     finally:
         loop.close()
-        asyncio.set_event_loop(previous)
+        asyncio.set_event_loop(None)
 
 
 def test_the_camera_module_uses_the_real_aiohttp():

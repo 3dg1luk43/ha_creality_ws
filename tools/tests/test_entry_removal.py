@@ -9,6 +9,7 @@ Assistant no longer has.
 """
 
 import asyncio
+import importlib.machinery
 import importlib.util
 import sys
 from pathlib import Path
@@ -31,12 +32,13 @@ def _load_package_init():
         / "custom_components/ha_creality_ws/__init__.py"
     )
     name = "custom_components.ha_creality_ws._entry_under_test"
-    spec = importlib.util.spec_from_file_location(name, path)
+    # A plain module inside the real package, whose __path__ conftest already
+    # points at the source: its relative imports then resolve there. Left to
+    # spec_from_file_location, a file named __init__.py makes a package of
+    # its own, and forcing __package__ over that warned on every import.
+    loader = importlib.machinery.SourceFileLoader(name, str(path))
+    spec = importlib.util.spec_from_loader(name, loader, origin=str(path), is_package=False)
     module = importlib.util.module_from_spec(spec)
-    # `__init__.py` uses relative imports, which resolve against __package__
-    # rather than the module's own name -- so it has to be told it belongs to
-    # the real package, whose __path__ conftest already points at the source.
-    module.__package__ = "custom_components.ha_creality_ws"
     sys.modules[name] = module
     try:
         spec.loader.exec_module(module)
@@ -47,21 +49,15 @@ def _load_package_init():
 
 @pytest.fixture(autouse=True)
 def _loop():
-    # Closing does not uninstall it: the policy keeps handing this closed loop to
-    # anything that later calls `asyncio.get_event_loop()`, which makes the rest
-    # of the session depend on collection order. Restore the previous loop rather
-    # than clearing it, so a suite that had one keeps it.
-    try:
-        previous = asyncio.get_event_loop_policy().get_event_loop()
-    except Exception:  # pylint: disable=broad-except
-        previous = None
+    # Cleared afterwards: closing a loop does not uninstall it, and a closed
+    # loop left installed broke whatever later called asyncio.get_event_loop().
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         yield
     finally:
         loop.close()
-        asyncio.set_event_loop(previous)
+        asyncio.set_event_loop(None)
 
 
 class HassStub:

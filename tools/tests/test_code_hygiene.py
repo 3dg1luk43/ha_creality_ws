@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 init_path = ROOT / "custom_components" / "ha_creality_ws" / "__init__.py"
 
-ALLOWED_HOST_SUBSTRINGS = ["localhost", "http://", "ws://"]
+INTEGRATION = ROOT / "custom_components" / "ha_creality_ws"
 
 
 def test_platforms_list_unique():
@@ -42,15 +42,49 @@ def test_platforms_list_unique():
     assert len(items) == len(set(items)), f"duplicate platform entries: {items}"
 
 
+def _url_is_local(url: str) -> bool:
+    """A printer, Home Assistant itself, a placeholder, or this repository."""
+    import ipaddress
+
+    rest = url.split("://", 1)[1]
+    host = re.split(r"[/:?#]", rest, maxsplit=1)[0]
+    if host.startswith(("{", "${")) or host in ("host", "localhost"):
+        return True  # built from the configured address, or a placeholder
+    if rest.startswith("github.com/3dg1luk43/ha_creality_ws"):
+        return True  # documentation and issue links
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return address.is_private or address.is_loopback
+
+
 def test_no_unexpected_cloud_urls():
-    """Confirm no unexpected external (cloud) URLs are hardcoded in the integration source."""
+    """The integration is local only: no URL may name a host on the internet.
+
+    Every text file is scanned, the cards included, since a CDN import in a
+    card would load on every dashboard. This used to scan the top-level Python
+    files only, and allowed any URL containing "http://".
+    """
     suspicious = []
-    for p in (ROOT / "custom_components" / "ha_creality_ws").glob("*.py"):
+    for p in sorted(INTEGRATION.rglob("*")):
+        if p.suffix not in (".py", ".js", ".json", ".yaml") or not p.is_file():
+            continue
         text = p.read_text(encoding="utf-8")
-        for m in re.findall(r"https?://[A-Za-z0-9._:/-]+", text):
-            if not any(sub in m for sub in ALLOWED_HOST_SUBSTRINGS):
-                suspicious.append(m)
-    assert not suspicious, f"Unexpected external URLs found: {suspicious}"
+        for url in re.findall(r"(?:https?|wss?)://[^\s\"'`)<>]+", text):
+            if not _url_is_local(url):
+                suspicious.append(f"{p.relative_to(ROOT)}: {url}")
+    assert not suspicious, "URLs to hosts outside the network:\n" + "\n".join(suspicious)
+
+
+def test_the_url_check_rejects_the_cloud():
+    """The check above, shown to fail where it should."""
+    for url in ("http://cloud.creality.com/api", "https://cdn.jsdelivr.net/npm/x.js",
+                "wss://8.8.8.8:443/", "https://github.com/someone/else"):
+        assert not _url_is_local(url), url
+    for url in ("http://{host}:8080/", "ws://${host}:9999", "http://192.168.1.50:8080/?action=stream",
+                "http://localhost:11984/", "https://github.com/3dg1luk43/ha_creality_ws/issues"):
+        assert _url_is_local(url), url
 
 
 def test_no_em_dashes_anywhere():

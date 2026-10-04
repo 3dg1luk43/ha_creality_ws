@@ -57,19 +57,15 @@ class HassStub:
 
 @pytest.fixture(autouse=True)
 def _loop():
-    # Restore the previous loop: closing does not uninstall it, so the policy
-    # keeps handing this closed loop to any later module without its own fixture.
-    try:
-        previous = asyncio.get_event_loop_policy().get_event_loop()
-    except Exception:  # pylint: disable=broad-except
-        previous = None
+    # Cleared afterwards: closing a loop does not uninstall it, and a closed
+    # loop left installed broke whatever later called asyncio.get_event_loop().
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         yield
     finally:
         loop.close()
-        asyncio.set_event_loop(previous)
+        asyncio.set_event_loop(None)
 
 
 @pytest.fixture

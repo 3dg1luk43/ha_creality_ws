@@ -110,8 +110,8 @@ Run `python -m pytest`, and `tools/release_check.sh`, the preflight the maintain
 
 - **Local only.** No cloud calls and no cloud-backed dependencies; a test rejects unexpected external URLs. Updates stay push-driven, not polled.
 - **No em dash (U+2014) anywhere in the repo**: code, comments, docs, translations. `tools/tests/test_code_hygiene.py` fails on one. Use `-`, `--`, a colon or a comma.
-- **Mixed CRLF/LF line endings**, and no `.gitattributes`. Do not let your editor normalise or reformat whole files; a diff that rewrites every line will be sent back.
-- **No formatter or linter is configured.** Match the surrounding code and leave lines you did not change alone.
+- **Mixed CRLF/LF line endings**, and no `.gitattributes`. Do not let your editor normalise or reformat whole files; `tools/tests/test_line_endings.py` fails on a converted or mixed file.
+- **No formatter.** Match the surrounding code and leave lines you did not change alone. CI runs `ruff check --isolated --select F,E9 custom_components tools` (undefined names, unused imports, syntax errors) and nothing stricter.
 - **Async only.** Never block the event loop.
 - **Keep identifiers stable**: entity unique IDs, option keys and card config keys. Dashboards and automations depend on them.
 - **No fabricated data.** Entities and placeholders expose what the printer or its sliced file actually reports. A feature that needs a value nothing sends will be declined.

@@ -186,4 +186,4 @@ const run = async () => {
   }
   console.log(`\n${tests.length} passed`);
 };
-run();
+await run();

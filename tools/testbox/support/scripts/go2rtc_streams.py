@@ -4,7 +4,7 @@ HA 2026.9 runs go2rtc on a Unix socket with generated credentials (no TCP
 API), so this reads both from HA's managed config. Copied in and run by
 `hactl.py go2rtc`.
 """
-import glob, json, re, socket, base64, http.client, sys
+import glob, json, re, socket, base64, http.client
 import os; d = max(glob.glob('/tmp/go2rtc-*/'), key=os.path.getmtime); cfg = open(glob.glob(d + 'go2rtc_*.yaml')[0]).read()
 user = re.search(r'username: (\S+)', cfg).group(1); pw = re.search(r'password: (\S+)', cfg).group(1)
 sock_path = d + 'go2rtc.sock'

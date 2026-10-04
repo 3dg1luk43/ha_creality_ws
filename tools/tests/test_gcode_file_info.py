@@ -14,7 +14,6 @@ belong to the running job, never to the one before it.
 
 import asyncio
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -450,30 +449,8 @@ def test_a_non_finite_used_length_does_not_reach_the_percentage(bad):
 # --------------------------------------------------------------------------- #
 
 
-def test_the_listing_does_not_ride_along_on_later_frames():
-    """`KClient` accumulates frames into `_state` and hands out a copy of it.
-
-    Left in there, the ~150 KiB listing would be on every subsequent frame and
-    the coordinator would rescan the whole thing once per frame, on the receive
-    path the integration is otherwise careful to keep cheap.
-
-    A source contract because `conftest` stubs `KClient` for the whole suite,
-    so the real receive loop cannot be driven from here.
-    """
-    source = (
-        Path(__file__).resolve().parents[2]
-        / "custom_components" / "ha_creality_ws" / "ws_client.py"
-    ).read_text(encoding="utf-8")
-
-    assert "self._state.pop(GCODE_FILE_RESPONSE, None)" in source, (
-        "the one-shot listing is no longer removed from the cumulative state"
-    )
-    # The snapshot has to be taken before the pop and delivered by name. Going
-    # back to `_on_message(dict(self._state))` would either resurrect the bug
-    # or, after the pop, deliver a frame the listing had already been taken out
-    # of -- so the coordinator would never see it at all.
-    assert "await self._on_message(frame)" in source
-    assert "await self._on_message(dict(self._state))" not in source
+# Driven through the real receive loop in test_ws_client_reconnect.py:
+# test_the_file_listing_is_delivered_once_not_on_every_later_frame.
 
 
 # --------------------------------------------------------------------------- #
@@ -489,7 +466,7 @@ def test_a_failed_static_add_lets_a_later_pass_retry_the_estimates():
     set was cleared in that handler for exactly this reason; the estimate set
     was added later and missed it.
     """
-    from test_late_discovery import _EntryStub, _sensor_platform
+    from test_late_discovery import _EntryStub
 
     _loop()
     coord = SimpleNamespace(

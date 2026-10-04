@@ -241,7 +241,7 @@ def test_malformed_telemetry_does_not_raise_out_of_the_state_derivation(frame, e
     assert derive_activity_state(frame) is not None
 
 
-def test_activity_state_still_reports_error_when_nothing_is_running():
+def test_with_nothing_running_an_error_shows_but_the_activity_is_idle():
     frame = {"err": {"errcode": 521}}
     assert derive_print_state(frame) == "error"
     # No job to fall back to, so it lands on idle rather than pretending to print.

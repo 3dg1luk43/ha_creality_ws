@@ -215,7 +215,7 @@ def _slot(boxes, box_id, slot_id):
 
 async def _read_until(ws, predicate, timeout=15.0):
     """Telemetry snapshots interleave with replies, so filter for what we want."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while loop.time() < deadline:
         raw = await asyncio.wait_for(ws.recv(), timeout=deadline - loop.time())
