@@ -57,6 +57,8 @@ K1C_FRAME: dict[str, Any] = {
     "auxiliaryFanPct": 0,
     "curFeedratePct": 100,
     "curFlowratePct": 100,
+    "realTimeFlow": "0.000000",
+    "realTimeSpeed": "0.000000",
     "materialStatus": 0,
     "layer": 0,
     "TotalLayer": 0,
@@ -88,8 +90,8 @@ class FakeClient:
         self.msg_count = 0
         self.reconnect_count = 0
         self.last_error = None
-        self.uptime_start = None
-        self.has_connected_once = False
+        self.uptime_start = 0.0
+        self._connected_once = False
         self.waits: list[float] = []
         FakeClient.instances.append(self)
 
@@ -118,7 +120,7 @@ class FakeClient:
     async def feed(self, frame: dict[str, Any]) -> None:
         self._last_rx = time.monotonic()
         self.msg_count += 1
-        self.has_connected_once = True
+        self._connected_once = True
         await self._on_message(dict(frame))
 
     async def stop(self) -> None:
@@ -132,7 +134,18 @@ class FakeClient:
 
     async def wait_first_connect(self, timeout: float = 5.0) -> bool:
         self.waits.append(timeout)
-        return self.has_connected_once
+        # Let the run task deliver its first frame, as a real connect would.
+        for _ in range(5):
+            if self._connected_once or not FakeClient.online:
+                break
+            await asyncio.sleep(0)
+        return self._connected_once
+
+    def has_connected_once(self) -> bool:
+        return self._connected_once
+
+    def get_url(self) -> str:
+        return f"ws://{self._host}:9999"
 
     def last_rx_monotonic(self) -> float:
         return self._last_rx

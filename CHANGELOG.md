@@ -69,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The device page kept showing the firmware a printer had when it was first added**: the version was only re-read when the integration itself was updated. It now changes as soon as the printer reports a new one, without reconnecting.
 - **Direct WebRTC sent the printer connection candidates it could not use**: the candidates' tags were read under names Home Assistant does not use, so the filter meant to keep the video's never applied. The printer now gets the video connection's candidates. The connection is also closed properly when Home Assistant shuts down, instead of being retried until it stops.
 - **An MJPEG camera view could hang for good, and a switched-off printer filled the log with camera warnings**: the live view opened the printer's stream with no time limit, so a camera that stopped sending held the connection open indefinitely, and every dashboard refresh of a switched-off printer's camera tried to reach it and logged a warning. The live view now gives up after 10 seconds without a picture, still images ask the printer for one frame instead of opening the whole stream, and a printer that cannot answer shows its last picture without being asked.
+- **A K2 Plus or K2 Pro could stay an on/off light after updating** ([#102](https://github.com/3dg1luk43/ha_creality_ws/issues/102)): an install from before dimming existed learned that the light dims from its saved model only when a power switch said the printer was off. With no switch and the printer off, the light stayed on/off until Home Assistant started with the printer on. It now dims either way.
 
 ### Changed
 
@@ -94,6 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   The camera picture is a short loop stored with it, so nothing is encoded while it runs. It is what found the K2 Base chamber target never arriving.
 - **Tests inside a real Home Assistant** (`tools/tests_ha`, its own CI job). They cover setup, unload and reload, the config and options flows, a printer moving to a new address, and the power switch. Until now every test ran against a stub of Home Assistant.
+- **Regression tests for eleven closed bugs that had none** (#11, #28, #29, #31, #40, #53, #84, #99, #102, #103, #106), and a record of what eight real printers report about themselves, which the model detection and the simulator are checked against.
 
 ## 0.9.8 - 2026-09-26
 > [List of issues (0.9.8)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.8)

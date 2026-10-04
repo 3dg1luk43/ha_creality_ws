@@ -239,6 +239,26 @@ def _async_follow_host(hass: HomeAssistant, entry: ConfigEntry, host: str) -> No
         hass.config_entries.async_update_entry(entry, unique_id=host)
 
 
+def _derive_led_pin(data: dict[str, Any]) -> bool:
+    """Fill in whether the light dims from the cached model, if not cached yet.
+
+    For an entry cached before LED dimming existed (#102), set up while the
+    printer is offline: the model alone says whether the light can dim, so it
+    need not wait for the printer to come online. True if `data` changed.
+    """
+    if not data.get("_cached_model") or (
+        "_cached_has_brightness_control" in data and "_cached_led_pin" in data
+    ):
+        return False
+    cached_model = ModelDetection({
+        "model": data.get("_cached_model"),
+        "modelVersion": data.get("_cached_model_version"),
+    })
+    data["_cached_has_brightness_control"] = cached_model.has_brightness_control
+    data["_cached_led_pin"] = cached_model.led_pin
+    return True
+
+
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Register the actions once, whatever happens to the entries (R34).
 
@@ -454,6 +474,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 
                 # Migrate go2rtc settings if needed
                 _migrate_go2rtc_settings(hass, entry)
+            else:
+                # Offline with no power switch to say so. Nothing is learnt
+                # live, but a cached model still says whether the light dims
+                # (#102); the rest is re-cached once the printer answers.
+                new_data = dict(entry.data)
+                if _derive_led_pin(new_data):
+                    hass.config_entries.async_update_entry(entry, data=new_data)
         else:
             # Printer is off - update version only, keep existing cached data if available
             _LOGGER.info(
@@ -476,21 +503,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 new_data["_cached_has_box_sensor"] = False
                 new_data["_cached_has_box_control"] = False
                 new_data["_cached_camera_type"] = "mjpeg"
-            elif (
-                "_cached_has_brightness_control" not in new_data
-                or "_cached_led_pin" not in new_data
-            ):
-                # Migration from before LED-dimming support: the printer is
-                # offline so we can't read live telemetry, but the model was
-                # cached on a previous online run. Derive the brightness
-                # capability from that cached model so the light exposes dimming
-                # without waiting for the printer to be online again.
-                cached_model = ModelDetection({
-                    "model": new_data.get("_cached_model"),
-                    "modelVersion": new_data.get("_cached_model_version"),
-                })
-                new_data["_cached_has_brightness_control"] = cached_model.has_brightness_control
-                new_data["_cached_led_pin"] = cached_model.led_pin
+            else:
+                _derive_led_pin(new_data)
             
             hass.config_entries.async_update_entry(entry, data=new_data)
             

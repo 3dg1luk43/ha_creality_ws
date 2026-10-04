@@ -6,6 +6,7 @@ These tests import the *real* KClient (not the conftest stub) and patch
 from __future__ import annotations
 
 import asyncio
+import logging
 import pytest
 import json
 import importlib
@@ -467,6 +468,91 @@ def test_get_url_does_not_resolve():
     with patch.object(ws_client_module.socket, "gethostbyname", _lookup):
         assert KClient("printer.local", _on_msg).get_url() == "ws://printer.local:9999"
     assert lookups == []
+
+
+def _failed_attempt_warnings(caplog, power_off: bool) -> list[str]:
+    """Warnings from one failed connect, the backoff already at its ceiling
+    (where the mDNS fallback warning lives)."""
+
+    async def run():
+        async def _on_msg(payload):
+            """No-op message handler used for testing."""
+
+        client = KClient("192.168.1.99", _on_msg)
+        client._check_power_status = lambda: power_off
+        # Forced, so an attempt is made even with the power off: a manual
+        # Reconnect, or the switch lagging behind the plug.
+        client._force_connect = True
+        fake_connect = _make_failing_connect([], exc=OSError("connection refused"))
+        with patch.object(ws_client_module.websockets, "connect", fake_connect), \
+                patch.object(ws_client_module, "RETRY_MAX_BACKOFF", 1.0):
+            await client.start()
+            await asyncio.sleep(0.2)
+            await client.stop()
+
+    caplog.set_level(logging.DEBUG)
+    asyncio.run(run())
+    return [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_a_failed_attempt_with_the_power_on_warns(caplog):
+    """The control for the test below: the same failure, power on."""
+    assert any("failing repeatedly" in m for m in _failed_attempt_warnings(caplog, power_off=False))
+
+
+def test_a_failed_attempt_with_the_power_off_says_nothing(caplog):
+    """#84: "K WS connection failing repeatedly ... mDNS fallback" was logged
+    21 times in an evening while the smart plug said the printer was off."""
+    assert _failed_attempt_warnings(caplog, power_off=True) == []
+
+
+def _gets_on_connect(cfs_connect) -> list[dict]:
+    """What the poller asks for in its first few passes after a connect."""
+
+    async def run():
+        async def _on_msg(payload):
+            """No-op message handler used for testing."""
+
+        client = KClient("192.168.1.99", _on_msg)
+        sent: list[dict] = []
+
+        async def _send_json(payload):
+            sent.append(payload)
+
+        client._send_json = _send_json
+        client._ws = object()
+        client._ws_ready.set()
+        if cfs_connect is not None:
+            client._state["cfsConnect"] = cfs_connect
+        real_sleep = asyncio.sleep
+
+        async def _no_wait(_seconds):
+            await real_sleep(0)
+
+        with patch.object(ws_client_module.asyncio, "sleep", _no_wait):
+            task = asyncio.ensure_future(client._periodic_gets())
+            for _ in range(10):
+                await real_sleep(0)
+            client._stop.set()
+            await task
+        return sent
+
+    return asyncio.run(run())
+
+
+BOXS_INFO = {"method": "get", "params": {"boxsInfo": 1}}
+
+
+def test_the_cfs_is_asked_for_on_connect():
+    """#99: boxsInfo only comes on request, and the first request waited out
+    the full 5-minute interval after every connect, so the CFS sensors sat
+    unavailable for that long each time. It regressed once already."""
+    assert BOXS_INFO in _gets_on_connect(cfs_connect=None)
+    assert BOXS_INFO in _gets_on_connect(cfs_connect=1)
+
+
+def test_no_cfs_is_not_asked_for():
+    assert BOXS_INFO not in _gets_on_connect(cfs_connect=0)
 
 
 def teardown_module(_module):

@@ -298,15 +298,21 @@ def test_initialization_records_the_stored_defaults_as_ha_managed():
     import asyncio
 
     cam = _camera(go2rtc_url="localhost", go2rtc_port=11984)
+    go2rtc = MagicMock(url="http://localhost:11984/")
+    cam.hass.data = {"go2rtc": go2rtc}
     client = MagicMock()
     client.validate_server_version = AsyncMock(return_value="1.9.11")
 
     with patch(
         "custom_components.ha_creality_ws.camera.Go2RtcRestClient",
         return_value=client,
-    ):
+    ) as rest_client:
         assert asyncio.run(cam._initialize_go2rtc_client()) is True
 
+    # #40: HA's own session and URL, which reach go2rtc over its socket. Home
+    # Assistant 2025.12 closed go2rtc's HTTP port, so a client of our own
+    # pointed at localhost:11984 found nothing there.
+    rest_client.assert_called_once_with(go2rtc.session, go2rtc.url)
     assert cam._go2rtc_is_ha_managed is True, (
         "HA's own go2rtc, arriving as the camera step's default, was recorded "
         "as a stand-alone server"
