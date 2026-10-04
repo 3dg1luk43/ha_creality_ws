@@ -50,6 +50,7 @@ cd tools/testbox
 | `hactl.py` | the driver: REST, WebSocket, flows, registry, pushes, mock control |
 | `smoke.py` | the end-to-end checks; exit code is the number of failures |
 | `card_check.mjs`, `package.json` | the bundled cards in headless Chromium against the box |
+| `editor_check.mjs` | each card's editor opened through HA's edit dialog; reports page errors (run after `card_check.mjs`) |
 | `support/configuration.yaml` | baseline HA config, copied into `config/` on first start |
 | `support/custom_components/testbox_tools/` | push capture endpoint + zeroconf injection |
 | `support/custom_components/testbox_notify/` | `notify.plain_testbox`, a non-mobile target that records payloads |
