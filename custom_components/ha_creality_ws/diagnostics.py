@@ -50,6 +50,9 @@ TO_REDACT = {
     "web_ui_urls",
     "configuration_url",
     "go2rtc_url",
+    # Custom mode takes rtsp://user:password@host/...; the host is usually an
+    # NVR or a camera, which the address scrub below never sees.
+    "custom_camera_url",
     # Entity attributes: the device is named after the printer's hostname, and
     # the camera and preview attributes carry its address.
     "friendly_name",

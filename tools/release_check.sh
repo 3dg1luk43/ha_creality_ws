@@ -76,9 +76,16 @@ MF_VER=$(sed -n 's/^manifest=//p' <<<"$VERSION_REPORT")
 if [[ $VERSION_RC -eq 0 ]]; then
   pass "version agrees everywhere (${MF_VER})"
 else
+  REPORTED=0
   while IFS= read -r line; do
-    [[ "$line" == PROBLEM:* ]] && fail "${line#PROBLEM:}" "fix $COMPONENT/manifest.json and/or the top CHANGELOG.md heading"
+    if [[ "$line" == PROBLEM:* ]]; then
+      fail "${line#PROBLEM:}" "fix $COMPONENT/manifest.json and/or the top CHANGELOG.md heading"
+      REPORTED=1
+    fi
   done <<<"$VERSION_REPORT"
+  # A crash (no manifest version, an unreadable CHANGELOG) prints a traceback
+  # and no PROBLEM line; it is still a failure, not a pass by silence.
+  [[ $REPORTED -eq 1 ]] || fail "version check could not run (exit $VERSION_RC)" "see the Python traceback above"
 fi
 
 # ── 2. shipped files parse ───────────────────────────────────────────────────

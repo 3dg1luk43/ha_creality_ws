@@ -927,8 +927,13 @@ class KActiveFilamentSensor(KEntity, SensorEntity):
                     # translations; the English text was the raw state (R33).
                     if box_type == 1:
                         return "external"
-                    slot_id = slot.get("id", 0)
-                    box_id = box.get("id", 0)
+                    # Ints from the printer; normalised rather than trusted,
+                    # since `slot_id + 1` on a text id failed every update.
+                    try:
+                        slot_id = int(slot.get("id", 0))
+                        box_id = int(box.get("id", 0))
+                    except (TypeError, ValueError):
+                        return None
                     return f"box_{box_id}_slot_{slot_id + 1}"
         return None
 

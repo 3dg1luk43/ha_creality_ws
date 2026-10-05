@@ -312,10 +312,12 @@ jobs:
             // Headings match at ANY level: the form renders `### Label`, a body
             // written by hand or over the API commonly uses `##`.
             const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            // First non-empty line under the heading (single-line fields).
+            // First non-empty line under the heading (single-line fields). CRLF
+            // too: GitHub stores a body edited on the web that way, and `\n+`
+            // alone let the `\r` of the blank line pass for the value.
             const fieldLine = label => {
               const m = body.match(new RegExp(
-                '^ {0,3}#{1,6}[ \\t]+' + escapeRe(label) + '[ \\t]*\\r?\\n+([^\\n#]+)', 'im'));
+                '^ {0,3}#{1,6}[ \\t]+' + escapeRe(label) + '[ \\t]*(?:\\r?\\n)+([^\\r\\n#]+)', 'im'));
               return m ? m[1].trim() : '';
             };
             // Everything up to the next heading (multi-line fields). End of input is

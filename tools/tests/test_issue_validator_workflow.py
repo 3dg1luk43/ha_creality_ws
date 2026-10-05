@@ -173,6 +173,17 @@ def test_fields_are_read_at_any_heading_level(heading):
 
 
 @requires_node
+def test_a_body_edited_in_the_browser_is_read_like_any_other():
+    """GitHub stores a body edited on the web with CRLF line ends, and the
+    bot's own comment asks reporters to edit in the missing fields. The blank
+    line under each heading then read as the value, so every filled-in field
+    was reported missing and the issue closed as unanswered."""
+    validate = _validate_one(_bug_body("###").replace("\n", "\r\n"))
+    assert validate["comments"] == [], validate["comments"]
+    assert validate["addedLabels"] == []
+
+
+@requires_node
 @pytest.mark.parametrize("indent", ["", " ", "   "])
 def test_an_indented_heading_is_still_a_heading(indent):
     """CommonMark allows up to three spaces before an ATX heading, and GitHub

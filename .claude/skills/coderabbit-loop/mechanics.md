@@ -36,8 +36,9 @@ How the bot actually behaves, and the exact commands.
   conceded a fabricated "configured lint checks" premise. Pushing back works.
 - **It falsely cites lint config.** This repo has **no ruff, flake8 or pylint
   configuration at all** - no `ruff.toml`, no `[tool.ruff]` in `pyproject.toml`
-  (which holds only `[tool.pytest.ini_options]`), and no linter in
-  `.github/workflows/`. A stray `.ruff_cache/` directory from someone's ad-hoc run
+  (which holds only `[tool.pytest.ini_options]`). CI's `lint` job runs
+  `ruff check --isolated --select F,E9` only (undefined names, unused imports,
+  syntax errors). A stray `.ruff_cache/` directory from someone's ad-hoc run
   is not configuration. So any `Ruff (x.y.z)` tool note attached to a finding comes
   from CodeRabbit's own run, not from a repo rule, and "needed to pass the
   configured lint checks" is false on its face here. Verify before accepting.

@@ -149,3 +149,40 @@ def test_numbers_must_be_finite_and_a_bad_call_changes_nothing():
         return sim.settings.frames, sim.state.phase.value
 
     assert _run(scenario) == ("delta", "idle")
+
+
+def test_power_off_and_a_model_switch_asked_on_the_printer_port_complete():
+    """Asked over :8000, power_off cleaned up the runner serving the request,
+    which waited for that request until aiohttp cancelled it: the simulator
+    stayed "powered" with its ports closed, and a switch never powered back on
+    (CodeRabbit on #126, reproduced on the test box)."""
+    import aiohttp
+
+    async def scenario(sim):
+        port = sim._runners["http"].addresses[0][1]
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
+            async with s.post(f"http://127.0.0.1:{port}/api/action", json={"action": "power_off"}) as r:
+                assert (await r.json())["scheduled"] is True
+            for _ in range(50):
+                if not sim.powered:
+                    break
+                await asyncio.sleep(0.1)
+            assert sim.powered is False and not sim._runners
+            await sim.act("power_on", {})
+            assert sim.powered is True
+            port = sim._runners["http"].addresses[0][1]
+            async with s.post(f"http://127.0.0.1:{port}/api/action",
+                              json={"action": "switch_profile", "key": "k1c"}) as r:
+                assert (await r.json())["scheduled"] is True
+            for _ in range(50):
+                if sim.state.profile.key == "k1c" and sim.powered:
+                    break
+                await asyncio.sleep(0.1)
+            # Still checked before the reply: a bad key is a 400, not a dead task.
+            port = sim._runners["http"].addresses[0][1]
+            async with s.post(f"http://127.0.0.1:{port}/api/action",
+                              json={"action": "switch_profile", "key": "nope"}) as r:
+                assert r.status == 400
+        return sim.state.profile.key, sim.powered
+
+    assert _run(scenario) == ("k1c", True)

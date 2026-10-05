@@ -168,6 +168,8 @@ class Simulator:
         self._webrtc = None
         self._mjpeg = None
         self._warm: asyncio.Task | None = None
+        # Lifecycle actions asked for over a printer port, run after the reply.
+        self._background_actions: set[asyncio.Task] = set()
 
     # ================================================================ lifecycle
     async def start(self) -> None:
@@ -379,7 +381,7 @@ class Simulator:
             web.get("/call/webrtc_local", probe),
             web.get("/stream.mjpeg", legacy_mjpeg),
         ])
-        self._add_control_routes(app)
+        self._add_control_routes(app, detach_lifecycle=True)
         return app
 
     def _mjpeg_app(self) -> web.Application:
@@ -475,7 +477,13 @@ class Simulator:
         app.add_routes([web.get("/", root)])
         return app
 
-    def _add_control_routes(self, app: web.Application) -> None:
+    # Shut down the printer's own ports. Asked for over one of them, the action
+    # cleans up the runner serving the request, which waits for that request,
+    # until aiohttp cancels it and power_off stops halfway: still "powered",
+    # ports closed (CodeRabbit on #126, reproduced on the test box).
+    LIFECYCLE_ACTIONS = frozenset({"power_off", "switch_profile"})
+
+    def _add_control_routes(self, app: web.Application, *, detach_lifecycle: bool = False) -> None:
         async def test_set(request):
             try:
                 payload = await request.json()
@@ -533,7 +541,15 @@ class Simulator:
             if not isinstance(payload, dict) or "action" not in payload:
                 return web.json_response({"ok": False, "error": "expected {\"action\": ...}"}, status=400)
             try:
-                result = await self.act(str(payload.pop("action")), payload)
+                action = str(payload.pop("action"))
+                if detach_lifecycle and action in self.LIFECYCLE_ACTIONS:
+                    if action == "switch_profile" and str(payload.get("key")) not in PROFILES:
+                        raise ValueError(f"unknown model {payload.get('key')!r}")
+                    task = asyncio.create_task(self.act(action, payload))
+                    self._background_actions.add(task)
+                    task.add_done_callback(self._background_action_done)
+                    return web.json_response({"ok": True, "scheduled": True})
+                result = await self.act(action, payload)
             except (KeyError, TypeError, ValueError) as exc:
                 return web.json_response({"ok": False, "error": str(exc)}, status=400)
             except Exception as exc:  # pylint: disable=broad-except
@@ -606,6 +622,11 @@ class Simulator:
                 setattr(self.settings, key, value)
             else:
                 setattr(self.state, key, value)
+
+    def _background_action_done(self, task: asyncio.Task) -> None:
+        self._background_actions.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            LOGGER.error("background action failed", exc_info=task.exception())
 
     async def switch_profile(self, key: str) -> None:
         """Become another printer: power off, swap the model, power on clean."""

@@ -111,6 +111,21 @@ def test_the_download_hides_addresses_names_and_tokens(setup):
     assert out["connection"]["last_error"] == f"[Errno 111] Connect call failed ('{REDACTED}', 9999)"
 
 
+def test_a_custom_camera_url_is_hidden_with_its_credentials(setup):
+    """Custom mode takes rtsp://user:password@host/...; the host is usually an
+    NVR, not the printer, so the address scrub never touched it."""
+    import asyncio
+
+    hass, entry = setup
+    entry.options = {**entry.options, "camera_mode": "custom",
+                     "custom_camera_url": "rtsp://viewer:hunter2@nvr.lan:554/printer"}
+    out = asyncio.run(diag.async_get_config_entry_diagnostics(hass, entry))
+    text = _flatten(out)
+    assert "hunter2" not in text and "nvr.lan" not in text
+    assert out["entry"]["options"]["custom_camera_url"] == REDACTED
+    assert out["entry"]["options"]["camera_mode"] == "custom"
+
+
 def test_the_download_still_carries_what_triage_needs(setup):
     import asyncio
 

@@ -335,3 +335,10 @@ def test_a_box_sensor_says_which_unit_it_is():
 
     sensor = KCFSBoxSensor(_coordinator(GENERIC_SLOT), box_id=2, sensor_type="temp")
     assert sensor.extra_state_attributes == {"box_id": 2}
+
+
+def test_an_active_slot_id_sent_as_text_is_read_or_dropped():
+    """The printer sends ints, but a text id used to raise TypeError on
+    `slot_id + 1` and fail the sensor's every update."""
+    assert _active_slot("1", 0, "1") == "box_1_slot_2"
+    assert _active_slot(1, 0, "?") is None
