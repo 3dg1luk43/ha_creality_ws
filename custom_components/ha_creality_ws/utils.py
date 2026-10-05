@@ -672,7 +672,13 @@ def derive_print_state(
             return "stopped"
         if state == 1:
             return "printing"
-        if state == 0:
+        # 7 while a cancel finishes the move under way: the K1C kept probing for
+        # 30 s, raised Z, then reported 4, and read "idle" meanwhile (R29).
+        # Busy, not an end: from one capture 7 cannot be ruled out elsewhere in
+        # a print, and calling it "stopped" would announce a stop that did not
+        # happen. (9, for half a second as a job starts, stays idle: mapping it
+        # only added a live push 90 ms before the "printing" one.)
+        if state in (0, 7):
             return "processing"
 
     return "idle"

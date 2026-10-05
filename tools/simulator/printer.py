@@ -57,10 +57,13 @@ class Phase(str, Enum):
     PAUSED = "paused"
     SWAP = "swap"  # a CFS swap: state 0 mid-print (R29)
     COMPLETED = "completed"
+    STOPPING = "stopping"  # a cancel finishing the move under way: state 7 (R29)
     STOPPED = "stopped"
 
 
 ACTIVE_PHASES = {Phase.STARTING, Phase.SELF_TEST, Phase.PRINTING, Phase.FINISHING, Phase.PAUSED, Phase.SWAP}
+# Still busy for deviceState, but past the point where a stop or a finish means anything.
+BUSY_PHASES = ACTIVE_PHASES | {Phase.STOPPING}
 
 
 @dataclass
@@ -80,6 +83,10 @@ class SimOptions:
     finished_reset_seconds: float = 0.0
     # Heating before the first layer gives up waiting after this long.
     max_preheat_seconds: float = 20.0
+    # How long a `state4` stop reports state 7 first. A K1C cancelled while
+    # homing in its self-test finished the move, reported self-test 100, and
+    # reported 4 about 45 s after the cancel (R29). 0 stops at once.
+    stop_tail_seconds: float = 15.0
 
 
 @dataclass
@@ -185,6 +192,8 @@ class PrinterState:
         self.self_test_style = "withSelfTest"  # or "state2" (R29)
         self.stop_style = self.profile.stop_style
         self._stop_style_used = self.stop_style
+        self._stop_until = 0.0
+        self._stopping_from_self_test = False
         self._self_test_pending = False
         self._self_test_started = 0.0
         self.gcode_listing = self.profile.gcode_listing
@@ -294,6 +303,15 @@ class PrinterState:
             raise ValueError(f"stop style is one of {self.STOP_STYLES}")
         if self.phase not in ACTIVE_PHASES:
             return False
+        if style == "state4" and self.sim.stop_tail_seconds > 0:
+            self.phase = Phase.STOPPING
+            self._stop_until = self.clock.now() + float(self.sim.stop_tail_seconds)
+            self._stopping_from_self_test = 1 <= self.with_self_test <= 99
+            self._log("stopping: state 7 until the move under way ends")
+            return True
+        return self._stopped(style)
+
+    def _stopped(self, style: str) -> bool:
         self.phase = Phase.STOPPED
         self.nozzle_target = self.bed_target = 0.0
         self.real_time_flow = self.real_time_speed = 0.0
@@ -565,6 +583,16 @@ class PrinterState:
 
     def _tick_job(self, now: float, dt: float) -> None:
         job = self.job
+        if self.phase == Phase.STOPPING:
+            left = self._stop_until - now
+            # The self-test runs to its end first; the real K1C reported 100
+            # about halfway between the cancel and state 4.
+            if self._stopping_from_self_test and left <= self.sim.stop_tail_seconds / 2:
+                self.with_self_test = 100
+                self.nozzle_target = self.bed_target = 0.0
+            if left <= 0:
+                self._stopped("state4")
+            return
         if job is None or self.phase not in ACTIVE_PHASES:
             if self.phase == Phase.COMPLETED and self.sim.finished_reset_seconds and self.finished_at:
                 if now - self.finished_at >= self.sim.finished_reset_seconds and self.progress:
@@ -670,12 +698,14 @@ class PrinterState:
             return 5
         if self.phase == Phase.STOPPED and self._stop_style_used == "state4":
             return 4
+        if self.phase == Phase.STOPPING:
+            return 7
         return 0
 
     def device_state(self) -> int:
         if self._homing():
             return 7
-        return 1 if self.phase in ACTIVE_PHASES else 0
+        return 1 if self.phase in BUSY_PHASES else 0
 
     def values(self) -> dict[str, Any]:
         """Every field as a real printer reports it, before formatting and

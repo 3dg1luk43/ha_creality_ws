@@ -112,11 +112,29 @@ def test_the_three_shapes_of_a_stop(style, code, progress, file_kept):
     _run(state, clock, 40.4)
     assert state.values()["printProgress"] == 40
     state.stop(style)
-    _run(state, clock, 5)
+    _run(state, clock, 20)  # past the state-7 tail of a state4 stop
     v = state.values()
     assert (v["state"], v["printProgress"], bool(v["printFileName"])) == (code, progress, file_kept)
     assert v["targetNozzleTemp"] == 0
     assert state.phase == Phase.STOPPED
+
+
+def test_a_cancel_during_self_test_goes_the_way_the_real_k1c_did():
+    """R29's capture: state 7 from the cancel, self-test 100 about halfway,
+    then state 4, with the printer busy (deviceState 1) until then."""
+    state, clock = _printer(seconds=100)
+    state.sim.self_test_seconds = 60
+    state.start_print(self_test=True)
+    _run(state, clock, 2)
+    assert 1 <= state.values()["withSelfTest"] <= 99
+    state.stop()
+    seen = _run(state, clock, 20)
+    states = [(sig[1], sig[3]) for sig in seen]
+    first_7 = next(i for i, (code, _st) in enumerate(states) if code == 7)
+    assert states[first_7][1] < 100
+    assert (7, 100) in states
+    assert states[-1] == (4, 100)
+    assert state.values()["deviceState"] == 0
 
 
 def test_a_pause_freezes_progress_and_the_time_left():
