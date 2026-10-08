@@ -3,7 +3,8 @@
 # simulator's live tests skip without these.
 -r requirements-test.txt
 aiohttp>=3.8
-websockets>=12.0
+# 13.0 brought websockets.asyncio, which the simulator's server is built on.
+websockets>=13.0
 # Cameras. Upper bound on aiortc is deliberate: the codec preference reorders
 # the private transceiver._codecs list, which no compatibility promise covers.
 aiortc>=1.7,<2

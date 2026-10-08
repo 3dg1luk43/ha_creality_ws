@@ -68,3 +68,14 @@ def test_a_model_name_containing_hi_is_not_a_creality_hi():
         assert not utils.ModelDetection({"model": model}).is_creality_hi, model
     for model in ("Creality Hi", "Hi", "F018"):
         assert utils.ModelDetection({"model": model}).is_creality_hi, model
+
+
+def test_the_setup_placeholder_model_lets_the_live_model_decide():
+    """An entry set up with the printer off caches "K by Creality". Taken for a
+    model, it hid the live one: a K1C coming online then got the chamber
+    target R71 removes, and a K2 the direct-WebRTC fallback (CodeRabbit, #126)."""
+    placeholder = {"_cached_model": utils.ModelDetection({}).resolved_model()}
+    assert utils.ModelDetection.from_cache(placeholder, {"model": "K1C"}).is_k1_family
+    assert utils.ModelDetection.from_cache(placeholder, {"model": "F012"}).is_k2_family
+    # A real cached model still wins over live telemetry.
+    assert utils.ModelDetection.from_cache({"_cached_model": "K1C"}, {"model": "F012"}).is_k1_family

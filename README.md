@@ -876,8 +876,9 @@ helps find the camera or preview path on a new model.
 Both hide the printer's IP address and network name, notify target names (they
 are often a person's phone), entity names, camera and preview URLs, and access
 tokens, so the output can be attached to a public issue. Entity ids are kept,
-since they are needed to make sense of the rest; they start with the device
-name, which is the printer's network name unless you renamed the device. The action has an
+since they are needed to make sense of the rest, with the printer's network
+name in them hidden too. A name you gave the device yourself is not: if you
+renamed it to something personal, check the entity ids before posting. The action has an
 `include_sensitive_data` option that turns the hiding off; leave it off for
 anything you post.
 

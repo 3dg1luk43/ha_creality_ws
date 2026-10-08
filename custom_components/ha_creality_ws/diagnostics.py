@@ -103,6 +103,11 @@ def _identifying_strings(hass: HomeAssistant) -> list[str]:
             text = str(data.get(key) or "").strip()
             if len(text) >= 4:
                 found.add(text)
+        # The device is named after the hostname, so entity ids carry it
+        # slugified: "K1C-C627" is "k1c_c627" in sensor.k1c_c627_nozzle_temperature.
+        slug = re.sub(r"[^a-z0-9]+", "_", str(data.get("_cached_hostname") or "").lower()).strip("_")
+        if len(slug) >= 4:
+            found.add(slug)
     return sorted(found, key=len, reverse=True)
 
 

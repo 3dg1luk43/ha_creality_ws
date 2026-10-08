@@ -138,7 +138,7 @@ class Cfs:
     def info(self) -> dict[str, Any]:
         """The `boxsInfo` reply."""
         same = [
-            ["001001", (m.get("color") or "")[1:], [{"boxId": box["id"], "materialId": m["id"]}], m.get("type")]
+            ["001001", str(m.get("color") or "")[1:], [{"boxId": box["id"], "materialId": m["id"]}], m.get("type")]
             for box in self.boxes if box.get("type") == 0
             for m in box.get("materials", [])[:2]
             if isinstance(m, Mapping) and "id" in m

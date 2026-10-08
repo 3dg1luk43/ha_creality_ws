@@ -126,6 +126,23 @@ def test_a_custom_camera_url_is_hidden_with_its_credentials(setup):
     assert out["entry"]["options"]["camera_mode"] == "custom"
 
 
+def test_entity_ids_keep_their_shape_without_the_printers_name(setup, monkeypatch):
+    """Entity ids carry the device name slugified ("k1c_c627"), which the
+    hostname scrub ("K1C-C627") never matched (CodeRabbit, #126)."""
+    import asyncio
+
+    hass, entry = setup
+    entities = [SimpleNamespace(entity_id="sensor.k1c_c627_nozzle_temperature",
+                                unique_id="192.168.0.90-nozzle_temperature", disabled_by=None)]
+    monkeypatch.setattr(diag, "er", SimpleNamespace(
+        async_get=lambda hass: None,
+        async_entries_for_config_entry=lambda reg, entry_id: entities,
+    ))
+    out = asyncio.run(diag.async_get_config_entry_diagnostics(hass, entry))
+    assert "k1c_c627" not in _flatten(out)
+    assert out["entities"][0]["entity_id"] == f"sensor.{REDACTED}_nozzle_temperature"
+
+
 def test_the_download_still_carries_what_triage_needs(setup):
     import asyncio
 

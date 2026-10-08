@@ -371,3 +371,15 @@ def test_cfs_units_come_and_go():
     state.cfs.detach()
     assert state.values()["cfsConnect"] == 0
     assert [b["type"] for b in state.cfs.boxes] == [1]
+
+
+def test_a_colour_written_as_a_number_does_not_break_boxs_info():
+    """`(color or "")[1:]` raised on a number, and every boxsInfo reply and
+    /api/state failed until the slot was reset (CodeRabbit, #126)."""
+    from simulator.cfs import Cfs
+
+    cfs = Cfs(attached=True, deterministic=True)
+    box_id = next(b["id"] for b in cfs.boxes if b.get("type") == 0)
+    cfs.modify_material({"boxId": box_id, "id": 0, "color": 5})
+    same = cfs.info()["boxsInfo"]["same_material"]
+    assert same and same[0][1] == ""

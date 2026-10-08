@@ -272,6 +272,11 @@ def normalize_printer_hostname(value: Any) -> str | None:
     return name or None
 
 
+# What setup caches as the model when the printer has not said (off at first
+# setup, or `model` late). Not a model: never let it decide one.
+PLACEHOLDER_MODEL = "K by Creality"
+
+
 class ModelDetection:
     """Detect printer model and capabilities from telemetry data.
 
@@ -440,15 +445,18 @@ class ModelDetection:
         can = self.canonical_model()
         if can:
             return can
-        return "K by Creality"
+        return PLACEHOLDER_MODEL
 
     @classmethod
     def from_cache(cls, entry_data: Mapping[str, Any], live: Mapping[str, Any] | None = None) -> "ModelDetection":
         """Detection from the model cached in an entry, or live telemetry when
         nothing is cached yet."""
         live = live or {}
+        cached = entry_data.get("_cached_model")
+        if cached == PLACEHOLDER_MODEL:
+            cached = None  # the printer had not said; the live model decides
         return cls({
-            "model": entry_data.get("_cached_model") or live.get("model"),
+            "model": cached or live.get("model"),
             "modelVersion": entry_data.get("_cached_model_version") or live.get("modelVersion"),
         })
 

@@ -58,6 +58,7 @@ from .const import (
 from .coordinator import KCoordinator
 from .frontend import CrealityCardRegistration
 from .utils import (
+    PLACEHOLDER_MODEL,
     core_version_supported,
     BUSY_PRINT_STATES,
     MaterialValueError,
@@ -422,7 +423,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 # Store device info in entry data
                 d = coord.data or {}
                 printermodel = ModelDetection(d)
-                model = printermodel.resolved_model() or entry.data.get("_cached_model") or "K by Creality"
+                model = printermodel.resolved_model() or entry.data.get("_cached_model") or PLACEHOLDER_MODEL
                 hostname = d.get("hostname") or entry.data.get("_cached_hostname")
                 model_version = d.get("modelVersion") or entry.data.get("_cached_model_version")
                 
@@ -495,7 +496,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             
             # Only set defaults if this is first-time setup (no cached model exists)
             if not new_data.get("_cached_model"):
-                new_data["_cached_model"] = "K by Creality"
+                new_data["_cached_model"] = PLACEHOLDER_MODEL
                 new_data["_cached_has_light"] = True
                 # No brightness control until we can detect the model online.
                 new_data["_cached_has_brightness_control"] = False
