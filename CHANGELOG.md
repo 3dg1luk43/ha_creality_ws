@@ -6,20 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and versions are numbered major.minor.patch, with a fourth number for a hotfix release (0.9.6.1).
 
 
-## 0.9.9 - Unreleased
+## 0.9.9 - 2026-10-08
+> [List of issues (0.9.9)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.9)
 
 ### TL;DR
 
-- A K2 that self-tests at the start of a print no longer reports it as stopped at 0%.
-- iPhones get the live print card in a form the iOS app can read, and Stop on iOS asks for confirmation.
-- With a power switch configured, the printer reconnects within seconds of being switched on instead of up to five minutes later.
-- Temperature and other sensors no longer stay "unavailable" after a printer boots and sends blank values.
-- A printer that gets a new IP address keeps its entities and their history, and a discovered printer is offered for confirmation instead of being added silently.
-- K1C and K1 Max printers on firmware 1.3.5.22 get their camera back: it moved to WebRTC, and the integration now notices.
-- The printer card no longer breaks on names like "Tiskárna č.1", stops rebuilding itself on narrow screens, and stops redrawing on every change in Home Assistant.
-- Diagnostics: the standard **Download diagnostics** now works, and the diagnostic action finally returns what it collects, with addresses, names and tokens hidden.
 - **Check automations that compare raw states**: Active Filament Slot and Current Object now report `box_1_slot_2`, `external` and `not_printing` (details under Changed).
-- Print Tuning is now **Speed Factor** and sets speed only; flow has its own **Flow Factor**. Before, 150% speed also meant 150% extrusion.
+- **Print Tuning is now Speed Factor** and sets the speed only; flow has its own **Flow Factor**. Before, 150% speed also meant 150% extrusion.
+- K1-family printers lose the Chamber Target number: none of them has a chamber heater, so it never did anything.
+- A K2 that self-tests at the start of a print is no longer announced as stopped at 0%, and a cancelled print reads "Processing" until the printer has actually stopped.
+- iPhones get the live print card in a form the iOS app can read, every print's card starts fresh, and Stop on iOS asks for confirmation.
+- K1C and K1 Max on firmware 1.3.5.22 get their camera back: it moved to WebRTC, and the integration now notices. A K1C 2025 camera that connects without a picture switches itself to direct WebRTC.
+- With a power switch, the printer reconnects within seconds of power-on, and a command sent while it is unreachable reconnects at once instead of waiting for the next retry.
+- Sensors no longer stay "unavailable" after a printer boots and sends blank values.
+- A printer that gets a new IP address keeps its entities and their history, and a discovered printer is offered for confirmation instead of being added silently.
+- The printer card works with any name, stops rebuilding itself on narrow screens, redraws only when its printer changes, and can hide any of its buttons.
+- Diagnostics: **Download diagnostics** works, and the diagnostic action returns what it collects, for administrators, with addresses, names and tokens hidden.
 
 ### Fixes
 
