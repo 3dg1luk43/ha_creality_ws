@@ -242,3 +242,31 @@ async def test_a_k2_never_leaves_go2rtc_on_its_own(hass: HomeAssistant, fake_pri
     entry = await _add(hass)
     assert entry.data["_cached_camera_type"] == "webrtc"
     assert _camera_entity(hass, entry)._on_no_video is None
+
+
+async def test_the_diagnostic_action_is_for_admins_only(
+    hass: HomeAssistant, fake_printer, hass_admin_user, hass_read_only_user
+) -> None:
+    """Its response can be unredacted and carries every printer's camera URLs
+    and tokens; any user could ask for it (CodeRabbit on #126)."""
+    from unittest.mock import AsyncMock, patch
+
+    from homeassistant.core import Context
+    from homeassistant.exceptions import Unauthorized
+
+    await _add(hass)
+    # Who may ask is the question here; what is collected has its own test.
+    collected = {"printers": {"e1": {"model": "K1C"}}}
+    stack = patch("custom_components.ha_creality_ws.diagnostics.async_collect", AsyncMock(return_value=collected))
+    stack.start()
+    with pytest.raises(Unauthorized):
+        await hass.services.async_call(
+            DOMAIN, "diagnostic_dump", {"include_sensitive_data": True}, blocking=True,
+            return_response=True, context=Context(user_id=hass_read_only_user.id),
+        )
+    response = await hass.services.async_call(
+        DOMAIN, "diagnostic_dump", {}, blocking=True,
+        return_response=True, context=Context(user_id=hass_admin_user.id),
+    )
+    stack.stop()
+    assert response["printers"] == {"e1": {"model": "K1C"}}

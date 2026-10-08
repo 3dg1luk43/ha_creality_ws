@@ -359,6 +359,18 @@ event_mod = types.ModuleType("homeassistant.helpers.event")
 event_mod.async_track_time_interval = lambda *a, **k: (lambda: None)
 event_mod.async_track_state_change_event = lambda *a, **k: (lambda: None)
 sys.modules["homeassistant.helpers.event"] = event_mod
+
+# --- MOCK helpers.service ---
+service_helpers_mod = types.ModuleType("homeassistant.helpers.service")
+
+
+def _async_register_admin_service(hass, domain, service, service_func, schema=None, supports_response=None, **_kw):
+    """The real one wraps the handler in an admin check; here it registers it."""
+    hass.services.async_register(domain, service, service_func, schema=schema, supports_response=supports_response)
+
+
+service_helpers_mod.async_register_admin_service = _async_register_admin_service
+sys.modules["homeassistant.helpers.service"] = service_helpers_mod
 helpers_mod.event = event_mod
 
 pn_mod = types.ModuleType("homeassistant.components.persistent_notification")

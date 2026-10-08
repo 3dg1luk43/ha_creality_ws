@@ -32,6 +32,7 @@ from homeassistant.helpers.event import (  # type: ignore[import]
 )
 import voluptuous as vol  # type: ignore[import]
 from homeassistant.helpers import config_validation as cv, entity_registry as er, device_registry as dr # type: ignore[import]
+from homeassistant.helpers.service import async_register_admin_service  # type: ignore[import]
 from homeassistant.helpers.translation import async_get_translations  # type: ignore[import]
 from .notification_rules import (
     build_clear_payload,
@@ -959,10 +960,14 @@ async def _register_diagnostic_service(hass: HomeAssistant) -> None:
         vol.Optional("include_sensitive_data", default=False): bool,
     })
     
-    hass.services.async_register(
-        DOMAIN, 
-        "diagnostic_dump", 
-        diagnostic_dump, 
+    # Admins only: the response can be unredacted (`include_sensitive_data`),
+    # and carries camera URLs and tokens for every printer. Automations run
+    # without a user and are unaffected.
+    async_register_admin_service(
+        hass,
+        DOMAIN,
+        "diagnostic_dump",
+        diagnostic_dump,
         schema=schema,
         supports_response=SupportsResponse.OPTIONAL,
     )

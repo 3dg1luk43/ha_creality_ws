@@ -864,7 +864,8 @@ that printer.
 ### The `ha_creality_ws.diagnostic_dump` action
 
 **Developer Tools** > **Actions** > `ha_creality_ws.diagnostic_dump` >
-**Perform action**. The response appears below the button; it covers every
+**Perform action**, as an administrator: the action refuses other users. The
+response appears below the button; it covers every
 printer, one section each under `printers`. The same data is also written to the
 Home Assistant log between `CREALITY DIAGNOSTIC DATA START` and `END`. The
 action additionally lists the links the printer's own web page contains, which
