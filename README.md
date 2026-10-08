@@ -2,6 +2,7 @@
 ![Latest](https://img.shields.io/github/v/release/3dg1luk43/ha_creality_ws)
 ![Hassfest](https://img.shields.io/github/actions/workflow/status/3dg1luk43/ha_creality_ws/hassfest.yml?label=hassfest)
 ![HACS](https://img.shields.io/github/actions/workflow/status/3dg1luk43/ha_creality_ws/validate.yaml?label=HACS)
+![Tests](https://img.shields.io/github/actions/workflow/status/3dg1luk43/ha_creality_ws/tests.yml?label=tests)
 [![](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://ko-fi.com/3dg1luk43)
 
 # Creality WebSocket Integration for Home Assistant
@@ -14,12 +15,12 @@ This custom [Home Assistant](https://www.home-assistant.io/) integration provide
 
 * **Direct WebSocket** connection (local, no cloud).
 * **Push updates**; no polling.
-* **States:** `idle`, `printing`, `paused`, `stopped`, `completed`, `error`, `self-testing`.
+* **States:** `idle`, `processing`, `printing`, `paused`, `stopped`, `completed`, `error`, `self-testing`.
 * **Optional power switch binding** to a `switch` entity for accurate "Off" handling.
 * **Entities:** status, progress, time left, temperatures (nozzle/bed/chamber), current layer/total layers, etc.
 * **Image (print preview):** shows the current model image for all supported printers when available; falls back to a tiny placeholder when not applicable.
 * **Controls:** pause, resume, stop, light toggle, fan speeds (model / case / side), temperature targets.
-* **Camera:** auto-detects stream type by model (MJPEG or WebRTC).
+* **Camera:** auto-detects stream type (MJPEG or WebRTC) from the model and what the printer reports.
 * **Lovelace card**: dependency-free, uses HA fonts, progress ring, contextual chips, telemetry pills.
 * **Style Editor**: Built-in theme customization for every card element, with a device picker
   that wires up all the entities in one go.
@@ -78,7 +79,7 @@ Notification settings are applied **without reloading the integration**: the Web
 
 ### 2) Optional: bind a power switch
 
-If your printer power is controlled by a smart plug/switch, enable power detection so the integration can accurately reflect "Off" status and zero sensors when power is disabled.
+If your printer power is controlled by a smart plug/switch, enable power detection so the integration knows when the printer is off: its entities go unavailable at once and it stops dialling the printer until power returns.
 
 * **Settings → Devices & Services →** your printer **→ Configure**
 * Enable the **Power Switch** toggle
@@ -86,7 +87,7 @@ If your printer power is controlled by a smart plug/switch, enable power detecti
 * Submit
 
 **Behavior:**
-- When **enabled**: The integration monitors your switch entity. If it's OFF, the printer status shows as "Off" and all sensors zero out. Reconnection attempts use adaptive backoff (respects power state).
+- When **enabled**: The integration monitors your switch entity. If it's OFF, the printer's entities become unavailable (the model and max-temperature sensors, the Reconnect button and the print preview stay). While it stays OFF the integration checks the switch every 10 seconds instead of dialling the printer, and connects as soon as it turns on.
 - When **disabled**: The integration doesn't monitor any switch. All sensors update normally based on WebSocket telemetry.
 - **Safe defaults**: Existing users will auto-migrate on first load. If you previously had a power switch configured, it will be re-enabled automatically.
 
@@ -95,9 +96,11 @@ If your printer power is controlled by a smart plug/switch, enable power detecti
 If auto-detection doesn't choose your preferred stream, you can force it under the integration's Configure dialog:
 
 - **Camera Mode**: 
-  - `auto` (default) - Automatically detect based on printer model
+  - `auto` (default) - Detect from the printer model and the `webrtcSupport` flag it reports
   - `mjpeg` - Force direct MJPEG stream
-  - `webrtc` - Force WebRTC streaming
+  - `webrtc` - Force WebRTC streaming via go2rtc
+  - `webrtc_direct` - WebRTC signalled to the printer directly, without go2rtc; an alternative to try when `webrtc` shows no video
+  - `custom` - Your own camera URL: an http(s) MJPEG/snapshot URL, or an `rtsp://`, `rtmp://` or `srt://` stream served through go2rtc
 
 Native WebRTC works out of the box on the installation types that ship go2rtc -- Home Assistant OS, Supervised and Container -- where the bundled binary in every supported core (2026.7+) is new enough for Creality's streams. **On a Home Assistant Core install there is no bundled binary**, so Home Assistant only manages go2rtc if you give it one (`go2rtc: url:` in `configuration.yaml`); until then use the go2rtc host/port fields in the options to point the integration at your own. Those fields also exist for pointing at a stand-alone go2rtc on any install, and for the RTSP port its stream pipeline uses.
 
@@ -110,8 +113,8 @@ The integration automatically installs the following Python packages:
 - `go2rtc-client>=0.1.0` - For WebRTC camera stream coordination
 
 **Camera Dependencies:**
-- **K1 family & Ender 3 V3 family cameras**: No additional dependencies required (MJPEG streaming)
-- **K2 family cameras (WebRTC):**
+- **MJPEG cameras** (K1 family on older firmware, Ender 3 V3 family): No additional dependencies required
+- **WebRTC cameras** (K2 family, and the others listed under [Camera](#camera)):
   - Native WebRTC is available on every supported core that ships go2rtc (OS, Supervised, Container), since the 2026.7 minimum is already past the 2025.11 release that bundled a Creality-compatible go2rtc. A Core install has no bundled binary and needs one configured, as above.
   - Pointing the integration at a stand-alone **go2rtc >= 1.9.11** is still possible via the Options dialog (host/port). On the installation types that ship the binary it is no longer required; on a Core install it remains the way to get WebRTC, either through the Options dialog or by giving Home Assistant a `go2rtc: url:` to manage.
 
@@ -169,9 +172,11 @@ Color picker
     resources:
       - url: /ha_creality_ws/k_printer_card.js
         type: module
+      - url: /ha_creality_ws/k_cfs_card.js
+        type: module
   ```
   
-  The card is served from the integration's own `www/` directory, not from `<config>/www/`.
+  The cards are served from the integration's own `www/` directory, not from `<config>/www/`.
 
 ### Forcing Storage mode (if you previously used YAML)
 
@@ -363,10 +368,10 @@ progress: sensor.k1c_print_progress
 time_left: sensor.k1c_print_time_left
 nozzle: sensor.k1c_nozzle_temperature
 bed: sensor.k1c_bed_temperature
-box: sensor.k1c_box_temperature
+box: sensor.k1c_chamber_temperature
 layer: sensor.k1c_working_layer
 total_layers: sensor.k1c_total_layers
-light: switch.k1c_light
+light: light.k1c_light
 power: switch.printer_power  # Optional
 pause_btn: button.k1c_pause_print
 resume_btn: button.k1c_resume_print
@@ -378,11 +383,12 @@ stop_btn: button.k1c_stop_print
 * Header icon color + conic progress ring reflect state and progress.
 * Chips:
 
-  * **Pause** shown when `printing|resuming|pausing`.
+  * **Pause** shown when `printing`.
   * **Resume** shown when `paused`.
   * **Stop** shown when `printing|paused|self-testing`.
   * **Light** toggles the configured `switch`/`light` entity; shows/hides based on Power state and printer status.
-  * **Power** (optional) offers a snappy, short-lived optimistic toggle; pinned to the far right when configured.
+  * **Power** (optional) offers a snappy, short-lived optimistic toggle.
+  * Chips appear in `button_order`; any chip named in `hidden_buttons` (e.g. `hidden_buttons: [stop, light]`, or *Hidden Buttons* in the editor) never shows.
 
 **Configuration Notes:**
 - `power` is optional; omit it to hide the power chip.
@@ -722,19 +728,19 @@ The theme data is stored per card instance, so each card can have its own unique
 
 ## Camera
 
-The integration auto-detects the printer model and creates the appropriate camera entity. Camera support varies by model:
+The integration detects the camera type from the printer model and the `webrtcSupport` flag the printer reports, and creates the matching camera entity. Camera support varies by model:
 
 ### Camera Support by Model
 
 **MJPEG Cameras:**
-- **K1/K1C/K1 Max**: Camera included. Works with all Home Assistant camera cards.
+- **K1/K1C/K1 Max**: Camera included. Works with all Home Assistant camera cards. K1C and K1 Max firmware 1.3.5.22 switches to WebRTC (below).
 - **K1 SE**: Camera is optional accessory (gracefully handles when not present).
 - **Ender 3 V3 family**: Camera is optional accessory (gracefully handles when not present).
-- **Creality Hi**: Camera included. Works with all Home Assistant camera cards.
 - **K1C (Classic)**: MJPEG camera included.
 
 **WebRTC Cameras:**
-- **K1C (2025)**: Native WebRTC streaming (auto-detected via telemetry).
+- **K1C (2025), and K1C / K1 Max on firmware 1.3.5.22**: WebRTC via go2rtc, auto-detected from `webrtcSupport`. Some K1C 2025 units connect but show no video ([#46](https://github.com/3dg1luk43/ha_creality_ws/issues/46)).
+- **Creality Hi**: users report a WebRTC camera ([#60](https://github.com/3dg1luk43/ha_creality_ws/issues/60)). Detected as WebRTC when the firmware reports `webrtcSupport`, MJPEG otherwise.
 - **K2 family** (K2, K2 Pro, K2 Plus): Native WebRTC streaming using Home Assistant's built-in go2rtc service.
   - Uses go2rtc for WebRTC streaming
   - Configures go2rtc to connect to the printer's WebRTC signaling endpoint
@@ -763,28 +769,28 @@ go2rtc, `8554` for a stand-alone one. If your go2rtc listens elsewhere, set
 * **Controls do nothing**
   Confirm the `pause_btn`, `resume_btn`, `stop_btn` entities exist and are `button.*`. The card calls `button.press`.
   Confirm the light entity domain is `switch` or `light`.
-* **Sensors stay zeroed when printer is on**
-  Enable the **Power Switch** in the integration's Configure dialog. If power is OFF but your printer is actually on, disable the power switch to stop the integration from zeroing sensors.
-* **Connection takes too long when power is OFF**
-  If you have **Power Switch** enabled and the printer is OFF, the integration waits 60 seconds between connection attempts (to save resources). This is intentional. Enable power detection so the integration can react immediately when power returns.
+* **Entities stay unavailable when printer is on**
+  Entities are unavailable while the bound power switch reports OFF. If the switch says OFF but your printer is actually on, fix the switch or disable the **Power Switch** in the integration's Configure dialog.
+* **Connection takes too long after power returns**
+  Without a power switch, the integration retries every 60 seconds once five attempts in a row have failed (to save resources). This is intentional. Enable power detection so the integration connects as soon as the switch turns on.
 * **Resource missing in storage mode**
-  Remove + re-add the integration or add the resource manually under **Dashboards → Resources** pointing to `/ha_creality_ws/k_printer_card.js`.
+  Remove + re-add the integration or add the resources manually under **Dashboards → Resources** pointing to `/ha_creality_ws/k_printer_card.js` and `/ha_creality_ws/k_cfs_card.js`.
 * **WebRTC camera not working**
   If K2 family cameras show fallback images instead of live video:
   1. Check go2rtc is there at all. On OS, Supervised and Container installs the bundled binary ships with every supported core (2026.7+); a Core install has none, so go2rtc is whatever you pointed Home Assistant or the integration at. (A stand-alone go2rtc must be **>= 1.9.11**.)
   2. To query it, note that **Home Assistant's managed go2rtc serves no HTTP API by default** -- it talks to it over a unix socket and only opens port `11984` when you set `go2rtc: debug_ui: true` in `configuration.yaml`, which also requires a `username` and `password`. So a `curl` of `11984` failing is the expected result, not a fault. With `debug_ui` on, the API answers **on the Home Assistant host itself** -- from your laptop, `localhost` is your laptop -- and your printer's stream should be listed under `/api/streams`. Turn it back off when you are done. A stand-alone go2rtc you run yourself has its API open already.
   3. Ensure the printer's WebRTC signaling endpoint is accessible from go2rtc.
-  4. Verify the printer supports WebRTC (K2 family only).
+  4. Verify the printer supports WebRTC (K2 family, or a printer that reports `webrtcSupport`; see [Camera](#camera)).
   5. Check Home Assistant logs for WebRTC negotiation errors.
 * **K2 camera shows no image**
   - Check that the printer's WebRTC endpoint is accessible
-  - Verify the printer model is correctly detected (check logs for "detected K2 family printer")
+  - Verify the camera was detected as WebRTC (check logs for "using cached WebRTC camera detection")
   - Ensure Home Assistant's built-in go2rtc service is running
   - Check for WebRTC message format errors in logs
 * **Manual camera mode not working**
   - Check logs for "user forced [mode] mode" messages
   - Verify the camera mode is set correctly in the integration's Configure dialog
-  - Restart Home Assistant after changing camera mode settings
+  - Saving the Camera page reloads the integration; no restart is needed
   - For `webrtc` mode: ensure Home Assistant's built-in go2rtc service is running
 
 ---
@@ -793,10 +799,10 @@ go2rtc, `8554` for a stand-alone one. If your go2rtc listens elsewhere, set
 
 ### K1 Family
 - **K1** - Box temperature sensor only (no control), light, MJPEG camera
-- **K1C** - Box temperature sensor only (no control), light, MJPEG camera  
-- **K1C (2025)** - Box temperature sensor only (no control), light. **Camera currently NOT supported** (dependency issues with go2rtc).  
+- **K1C** - Box temperature sensor only (no control), light, MJPEG camera (WebRTC on firmware 1.3.5.22)  
+- **K1C (2025)** - Box temperature sensor only (no control), light, WebRTC camera (auto-detected; some units show no video, see [Camera](#camera))  
 - **K1 SE** - No box temperature, no light, optional MJPEG camera
-- **K1 Max** - Box temperature sensor only (no control), light, MJPEG camera
+- **K1 Max** - Box temperature sensor only (no control), light, MJPEG camera (WebRTC on firmware 1.3.5.22)
 
 ### K2 Family
 - **K2** - Box temperature sensor & control, light, WebRTC camera
@@ -809,7 +815,7 @@ go2rtc, `8554` for a stand-alone one. If your go2rtc listens elsewhere, set
 - **Ender 3 V3 Plus** - No box temperature, no light, optional MJPEG camera
 
 ### Other Models
-- **Creality Hi** - No box temperature, light, MJPEG camera
+- **Creality Hi** - No box temperature, light, WebRTC camera where the firmware reports it, MJPEG otherwise
 
 Other K-series models may work but are unverified.
 
@@ -842,56 +848,39 @@ Currently verified on:
 
 ---
 
-## Diagnostic Service
+## Diagnostics
 
-The integration provides a diagnostic service to help with troubleshooting and understanding what data different printer models send via WebSocket.
+Two ways to collect what is needed to look into a problem. Both carry the same
+data: the raw telemetry from the printer, how its model and features were
+detected, the camera type, the connection state, the notification settings and
+every entity's state.
 
-### Usage
+### Download diagnostics (recommended)
 
-1. Go to **Developer Tools** → **Services**
-2. Select service: `ha_creality_ws.diagnostic_dump`
-3. Click **Call Service**
-4. **Copy the diagnostic data** from the service response in the UI
+**Settings** > **Devices & services** > **Creality WebSocket Integration** >
+the printer's **⋮** menu > **Download diagnostics**. This saves a JSON file for
+that printer.
 
-The service will return the complete diagnostic data in the response that you can copy and paste directly. The data is also saved to a file in your Home Assistant config directory as a backup.
+### The `ha_creality_ws.diagnostic_dump` action
 
-**Service Response includes:**
+**Developer Tools** > **Actions** > `ha_creality_ws.diagnostic_dump` >
+**Perform action**, as an administrator: the action refuses other users. The
+response appears below the button; it covers every
+printer, one section each under `printers`. The same data is also written to the
+Home Assistant log between `CREALITY DIAGNOSTIC DATA START` and `END`. The
+action additionally lists the links the printer's own web page contains, which
+helps find the camera or preview path on a new model.
 
-- **Complete WebSocket telemetry data** from all connected printers
-- **Model detection results** showing how each printer is classified
-- **Feature detection results** showing which features are enabled/disabled
-- **Printer status information** (availability, power state, etc.)
-- **Home Assistant and integration version information**
-- **Printer‑local HTTP URLs accessed** (e.g., preview fetch attempts) for support diagnostics
+### What is hidden
 
-### What's Included
-
-The diagnostic file contains:
-- All raw telemetry data received from the printer
-- Model detection logic results (K1, K2, Ender 3 V3, etc.)
-- Feature detection results (camera type, light, box temperature, etc.)
-- Connection status and timing information
-- Integration configuration details
- - Cache of local HTTP(S) URLs the integration accessed (no cloud)
-
-### Sharing Diagnostic Data
-
-The diagnostic data can be safely shared with developers for troubleshooting. It contains only telemetry data and configuration information - no sensitive personal data.
-
-**How to share:**
-1. Call the service as described above
-2. Copy the `diagnostic_data` field from the service response
-3. Paste it into a text file or share directly with developers
-
-**Service Response Format:**
-```json
-{
-  "diagnostic_data": "{...complete JSON data...}",
-  "file_path": "/config/creality_diagnostic_20241220_143022.json",
-  "data_size": 12345,
-  "printers_count": 1
-}
-```
+Both hide the printer's IP address and network name, notify target names (they
+are often a person's phone), entity names, camera and preview URLs, and access
+tokens, so the output can be attached to a public issue. Entity ids are kept,
+since they are needed to make sense of the rest, with the printer's network
+name in them hidden too. A name you gave the device yourself is not: if you
+renamed it to something personal, check the entity ids before posting. The action has an
+`include_sensitive_data` option that turns the hiding off; leave it off for
+anything you post.
 
 ---
 

@@ -238,8 +238,8 @@ test("a partially populated registry does not resolve a mixed card", async () =>
 });
 
 test("a failed registry lookup fails closed rather than assuming one printer", async () => {
-  // config/entity_registry/get is admin-only, so for a non-admin dashboard user
-  // every fallback lookup throws. Treating that as "this entity has no device"
+  // A fallback lookup can throw (an entity missing from the registry, a
+  // dropped connection). Treating that as "this entity has no device"
   // let a two-printer card resolve to whichever printer hass.entities happened to
   // know, and _saveMaterial then sent the other printer's ids to it.
   const { KCFSCard } = loadCard();

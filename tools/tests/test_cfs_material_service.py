@@ -13,6 +13,7 @@ tests.yml), so in practice this only skips in a local venv without it.
 
 import asyncio
 import importlib.util
+import json
 import sys
 import types
 from pathlib import Path
@@ -101,7 +102,13 @@ def _load_integration():
     state.set_attr(core, "ServiceCall", ServiceCall)
 
     class HomeAssistantError(Exception):
-        pass
+        # Home Assistant's takes the translation keywords; a bare Exception
+        # would turn a translated raise into a TypeError.
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args)
+            self.translation_domain = kwargs.get("translation_domain")
+            self.translation_key = kwargs.get("translation_key")
+            self.translation_placeholders = kwargs.get("translation_placeholders")
 
     class ServiceValidationError(HomeAssistantError):
         pass
@@ -211,6 +218,8 @@ class FakeClient:
         self.sent.append(params)
 
     async def request_boxs_info(self):
+        if self._fail:
+            raise RuntimeError("printer link not available")
         self.boxs_info_requests += 1
 
 
@@ -253,7 +262,7 @@ def _make_hass(integration, coordinators, devices=None):
         def has_service(self, _domain, name):
             return name in services
 
-        def async_register(self, _domain, name, handler, schema=None):
+        def async_register(self, _domain, name, handler, schema=None, **_kw):
             services[name] = (handler, schema)
 
     tasks = _SCHEDULED
@@ -380,10 +389,11 @@ def test_writing_is_refused_while_printing(integration):
     coord = FakeCoordinator(state=PRINTING)
     hass, services, _ = _make_hass(integration, {"e": coord}, {"d": _device("e")})
     _register(integration, hass)
-    with pytest.raises(ServiceValidationError, match="printing"):
+    with pytest.raises(ServiceValidationError) as err:
         _call_service(integration, hass, services, {
             "device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA",
         })
+    assert err.value.translation_key == "cfs_material_printer_busy"
     assert coord.client.sent == [], "nothing may reach the printer"
 
 
@@ -423,10 +433,11 @@ def test_a_stale_error_code_does_not_unlock_a_printing_printer(integration):
         integration, {"e1": coord}, {"d": _device("e1")},
     )
     _register(integration, hass)
-    with pytest.raises(ServiceValidationError, match="printing"):
+    with pytest.raises(ServiceValidationError) as err:
         _call_service(integration, hass, services, {
             "device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA",
         })
+    assert err.value.translation_key == "cfs_material_printer_busy"
     assert coord.client.sent == [], "nothing may reach a printing printer"
 
 
@@ -457,10 +468,11 @@ def test_an_unresolvable_device_raises(integration):
     module, _, ServiceValidationError = integration
     hass, services, _ = _make_hass(integration, {"e": FakeCoordinator(state=IDLE)}, {})
     _register(integration, hass)
-    with pytest.raises(ServiceValidationError, match="No Creality printer"):
+    with pytest.raises(ServiceValidationError) as err:
         _call_service(integration, hass, services, {
             "device_id": ["ghost"], "box_id": 1, "slot_id": 0, "type": "PLA",
         })
+    assert err.value.translation_key == "no_printer_matched"
 
 
 @requires_voluptuous
@@ -483,17 +495,22 @@ def test_an_inverted_temperature_range_raises(integration):
     coord = FakeCoordinator(state=IDLE)
     hass, services, _ = _make_hass(integration, {"e": coord}, {"d": _device("e")})
     _register(integration, hass)
-    with pytest.raises(ServiceValidationError, match="max_temp"):
+    with pytest.raises(ServiceValidationError) as err:
         _call_service(integration, hass, services, {
             "device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA",
             "min_temp": 240, "max_temp": 200,
         })
+    # Translated, with the values the user typed (R33).
+    assert err.value.translation_key == "material_temp_order"
+    assert err.value.translation_placeholders == {"high": "200", "low": "240"}
     assert coord.client.sent == []
 
 
 @requires_voluptuous
-def test_a_printer_failure_notifies_and_does_not_raise(integration):
-    """One unreachable printer must not abort the whole service call."""
+def test_a_printer_failure_still_writes_the_others_then_raises(integration):
+    """One unreachable printer must not stop the others being written, but the
+    caller has to learn of the failure. Returning normally made the CFS card
+    report "Saved" for a write that never reached the printer (R19)."""
     _module, notifications, _ = integration
     notifications.clear()
     good = FakeCoordinator("reachable", IDLE)
@@ -502,13 +519,16 @@ def test_a_printer_failure_notifies_and_does_not_raise(integration):
         integration, {"e1": bad, "e2": good}, {"d1": _device("e1"), "d2": _device("e2")}
     )
     _register(integration, hass)
-    _call_service(integration, hass, services, {
-        "device_id": ["d1", "d2"], "box_id": 1, "slot_id": 0, "type": "PLA",
-    })
+    error_cls = sys.modules["homeassistant.exceptions"].HomeAssistantError
+    with pytest.raises(error_cls) as raised:
+        _call_service(integration, hass, services, {
+            "device_id": ["d1", "d2"], "box_id": 1, "slot_id": 0, "type": "PLA",
+        })
+    assert raised.value.translation_key == "cfs_material_write_failed"
+    assert raised.value.translation_placeholders["printers"] == "unreachable"
     assert good.client.sent, "the reachable printer must still be written"
-    titles = [n.get("title") for n in notifications]
-    assert any("Failed" in str(t) for t in titles), titles
-    assert any("Updated" in str(t) for t in titles), titles
+    ids = [n.get("notification_id") for n in notifications]
+    assert ids == ["cfs_material_error_unreachable"], ids
 
 
 @requires_voluptuous
@@ -516,19 +536,57 @@ def test_each_printer_gets_its_own_notification_id(integration):
     """device_id accepts a list; a shared id left only the last result visible."""
     _module, notifications, _ = integration
     notifications.clear()
+    first = FakeCoordinator("first", IDLE, fail=True)
+    second = FakeCoordinator("second", IDLE, fail=True)
+    hass, services, _ = _make_hass(
+        integration, {"e1": first, "e2": second}, {"d1": _device("e1"), "d2": _device("e2")}
+    )
+    _register(integration, hass)
+    with pytest.raises(sys.modules["homeassistant.exceptions"].HomeAssistantError):
+        _call_service(integration, hass, services, {
+            "device_id": ["d1", "d2"], "box_id": 1, "slot_id": 0, "type": "PLA",
+        })
+    ids = [n.get("notification_id") for n in notifications]
+    assert ids == ["cfs_material_error_first", "cfs_material_error_second"], ids
+
+
+@requires_voluptuous
+def test_a_successful_write_posts_no_notification(integration):
+    """The card shows its own result, and every save left one in the bell (R76)."""
+    _module, notifications, _ = integration
+    notifications.clear()
+    coord = FakeCoordinator("printer-a", IDLE)
+    hass, services, _ = _make_hass(integration, {"e": coord}, {"d": _device("e")})
+    _register(integration, hass)
+    _call_service(integration, hass, services, {
+        "device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA",
+    })
+    assert coord.client.sent
+    assert notifications == []
+
+
+@requires_voluptuous
+def test_a_cfs_refresh_notifies_only_when_a_printer_could_not_be_asked(integration):
+    """R76: the refresh the card sends after every save posted a notification
+    each time."""
+    module, notifications, _ = integration
     good = FakeCoordinator("reachable", IDLE)
     bad = FakeCoordinator("unreachable", IDLE, fail=True)
     hass, services, _ = _make_hass(
-        integration, {"e1": bad, "e2": good}, {"d1": _device("e1"), "d2": _device("e2")}
+        integration, {"e1": good, "e2": bad}, {"d1": _device("e1"), "d2": _device("e2")}
     )
     _register(integration, hass)
-    _call_service(integration, hass, services, {
-        "device_id": ["d1", "d2"], "box_id": 1, "slot_id": 0, "type": "PLA",
-    })
-    ids = [n.get("notification_id") for n in notifications]
-    assert len(ids) == len(set(ids)), f"notification ids collide: {ids}"
-    assert "cfs_material_error_unreachable" in ids, ids
-    assert "cfs_material_update_reachable" in ids, ids
+    handler, _schema = services["request_cfs_info"]
+
+    notifications.clear()
+    asyncio.run(handler(module.ServiceCall({"device_id": ["d1"]})))
+    assert good.client.boxs_info_requests == 1
+    assert notifications == []
+
+    asyncio.run(handler(module.ServiceCall({"device_id": ["d1", "d2"]})))
+    assert [n.get("notification_id") for n in notifications] == ["cfs_request_result"]
+    assert "unreachable" in notifications[-1]["message"]
+    assert "reachable," not in notifications[-1]["message"]
 
 
 @requires_voluptuous
@@ -543,8 +601,9 @@ def test_a_successful_retry_dismisses_the_earlier_failure(integration):
     _register(integration, hass)
     call = {"device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA"}
 
-    _call_service(integration, hass, services, call)
-    assert any("Failed" in str(n.get("title")) for n in notifications)
+    with pytest.raises(sys.modules["homeassistant.exceptions"].HomeAssistantError):
+        _call_service(integration, hass, services, call)
+    assert any(n.get("notification_id") == "cfs_material_error_printer-a" for n in notifications)
     assert notifications.dismissed == [], "nothing to dismiss yet"
 
     # The printer comes back and the user retries.
@@ -554,6 +613,25 @@ def test_a_successful_retry_dismisses_the_earlier_failure(integration):
     assert "cfs_material_error_printer-a" in notifications.dismissed, (
         "the stale failure must be cleared on success"
     )
+
+
+@requires_voluptuous
+def test_the_failure_message_numbers_the_slot_as_the_sensors_do(integration):
+    """Slot 0 on the wire is "Slot 1" on every sensor and on the card."""
+    _module, notifications, _ = integration
+    notifications.clear()
+    coord = FakeCoordinator("printer-a", IDLE, fail=True)
+    hass, services, _ = _make_hass(integration, {"e": coord}, {"d": _device("e")})
+    _register(integration, hass)
+    with pytest.raises(sys.modules["homeassistant.exceptions"].HomeAssistantError):
+        _call_service(integration, hass, services, {
+            "device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA",
+        })
+    message = next(
+        n["message"] for n in notifications
+        if n.get("notification_id") == "cfs_material_error_printer-a"
+    )
+    assert "slot 1 " in message, message
 
 
 @requires_voluptuous
@@ -601,3 +679,63 @@ def test_the_schema_rejects_out_of_range_and_missing_fields(integration):
     ):
         with pytest.raises(vol.Invalid):
             schema(bad)
+
+
+@requires_voluptuous
+def test_the_notification_is_in_the_server_language(integration):
+    """Typed into the code in English before (R33)."""
+    _module, notifications, _ = integration
+    notifications.clear()
+    coord = FakeCoordinator("printer-a", IDLE, fail=True)
+    hass, services, _ = _make_hass(integration, {"e": coord}, {"d": _device("e")})
+    hass.config = types.SimpleNamespace(language="es")
+    _register(integration, hass)
+    with pytest.raises(sys.modules["homeassistant.exceptions"].HomeAssistantError):
+        _call_service(integration, hass, services, {
+            "device_id": ["d"], "box_id": 1, "slot_id": 0, "type": "PLA",
+        })
+    spanish = json.loads(
+        (ROOT / "custom_components/ha_creality_ws/translations/es.json").read_text(encoding="utf-8")
+    )["common"]
+    assert notifications[-1]["title"] == spanish["cfs_material_failed_title"]
+    assert notifications[-1]["message"] == spanish["cfs_material_failed"].format(
+        box="1", slot="1", printer="printer-a"
+    )
+
+
+
+@requires_voluptuous
+def test_the_actions_exist_before_any_printer_is_set_up(integration):
+    """Registered by the first entry's setup, they were missing while that
+    entry failed to load (R34)."""
+    module, _, _ = integration
+    hass, services, _ = _make_hass(integration, {})
+    del hass.data[module.DOMAIN]
+    assert asyncio.run(module.async_setup(hass, {})) is True
+    assert set(services) == {"diagnostic_dump", "request_cfs_info", "set_cfs_material"}
+
+
+@requires_voluptuous
+def test_request_cfs_info_validates_its_input(integration):
+    """It had no schema, so a typo such as `devide_id` was silently ignored and
+    every printer was asked instead (R34)."""
+    module, _, _ = integration
+    hass, services, _ = _make_hass(integration, {})
+    _register(integration, hass)
+    _handler, schema = services["request_cfs_info"]
+    assert schema is not None
+    assert schema({"device_id": ["d"]}) == {"device_id": ["d"]}
+    with pytest.raises(Exception):
+        schema({"devide_id": ["d"]})
+
+
+@requires_voluptuous
+def test_an_action_called_with_no_printer_loaded_does_not_crash(integration):
+    module, notifications, _ = integration
+    hass, services, _ = _make_hass(integration, {})
+    del hass.data[module.DOMAIN]
+    _register(integration, hass)
+    notifications.clear()
+    handler, _schema = services["request_cfs_info"]
+    asyncio.run(handler(module.ServiceCall({})))
+    assert notifications == []

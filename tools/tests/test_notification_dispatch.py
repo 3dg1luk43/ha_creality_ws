@@ -37,7 +37,14 @@ class HassStub:
         self.tasks: list = []
         self.entries: dict[str, SimpleNamespace] = {}
         self.config = SimpleNamespace(language="en")
-        self.config_entries = SimpleNamespace(async_get_entry=self.entries.get)
+        # `mobile_app` registrations, which is how a target's platform is found.
+        self.mobile_entries: list[SimpleNamespace] = []
+        self.config_entries = SimpleNamespace(
+            async_get_entry=self.entries.get,
+            async_entries=lambda domain=None: (
+                self.mobile_entries if domain == "mobile_app" else []
+            ),
+        )
 
     async def _async_call(self, domain, service, data, **_kw):
         target = data.get("entity_id") or f"{domain}.{service}"
@@ -86,19 +93,15 @@ def _flush(hass):
 
 @pytest.fixture(autouse=True)
 def _loop():
-    # Restore the previous loop: closing does not uninstall it, so the policy
-    # keeps handing this closed loop to any later module without its own fixture.
-    try:
-        previous = asyncio.get_event_loop_policy().get_event_loop()
-    except Exception:  # pylint: disable=broad-except
-        previous = None
+    # Cleared afterwards: closing a loop does not uninstall it, and a closed
+    # loop left installed broke whatever later called asyncio.get_event_loop().
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         yield
     finally:
         loop.close()
-        asyncio.set_event_loop(previous)
+        asyncio.set_event_loop(None)
 
 
 RICH = {
@@ -133,6 +136,146 @@ def test_a_legacy_mobile_service_receives_the_full_payload():
             },
         )
     ]
+
+
+# A live-card payload as the builder makes it: native bools and ints at the top
+# level and inside the Stop action, a None that must not arrive as "None".
+LIVE_SHAPED = {
+    "title": "K1C",
+    "message": "42%",
+    "data": {
+        "tag": "ha_creality_ws_abc_live",
+        "live_update": True,
+        "silent": True,
+        "chronometer": False,
+        "when": 1790962603,
+        "progress": 42,
+        "icon_url": None,
+        "actions": [
+            {"action": "CREALITY_STOP_AB", "title": "Stop", "destructive": True}
+        ],
+    },
+}
+
+
+def _register(hass, device_name, os_name, manufacturer):
+    hass.mobile_entries.append(
+        SimpleNamespace(
+            data={
+                "device_name": device_name,
+                "os_name": os_name,
+                "manufacturer": manufacturer,
+            }
+        )
+    )
+
+
+def test_an_iphone_receives_native_types():
+    """#125. The iOS app decodes `chronometer` as a Bool and `countdown_end`
+    (the relay's name for `when`) as a Double, so the strings Android needs
+    made every Live Activity push throw and vanish. `silent` must be a real
+    bool for the relay, and the Stop action's `destructive` for the app."""
+    coord, hass = _coordinator(["notify.mobile_app_iphone_15_pro"])
+    _register(hass, "iPhone 15 PRO", "iOS", "Apple")
+    coord._notify_dispatch(LIVE_SHAPED)
+    [(_, service, sent)] = _flush(hass)
+    assert service == "mobile_app_iphone_15_pro"
+    data = sent["data"]
+    assert data["live_update"] is True
+    assert data["silent"] is True
+    assert data["chronometer"] is False
+    assert data["when"] == 1790962603 and isinstance(data["when"], int)
+    assert data["progress"] == 42 and isinstance(data["progress"], int)
+    assert data["actions"][0]["destructive"] is True
+    assert "icon_url" not in data
+
+
+def test_an_android_phone_still_receives_strings():
+    """The FCM relay rejects the whole push over one native scalar, at the top
+    level or inside the flattened `actions` list."""
+    coord, hass = _coordinator(["notify.mobile_app_s24"])
+    _register(hass, "S24", "Android", "samsung")
+    coord._notify_dispatch(LIVE_SHAPED)
+    [(_, _, sent)] = _flush(hass)
+    data = sent["data"]
+    assert data["live_update"] == "true"
+    assert data["chronometer"] == "false"
+    assert data["when"] == "1790962603"
+    assert data["actions"][0]["destructive"] == "true"
+    assert "icon_url" not in data
+
+
+def test_an_apple_registration_is_recognised_by_manufacturer_alone():
+    """Core decides on `manufacturer == "Apple"`; `os_name` is only a fallback."""
+    coord, hass = _coordinator(["notify.mobile_app_ipad"])
+    _register(hass, "iPad", None, "Apple")
+    coord._notify_dispatch(LIVE_SHAPED)
+    [(_, _, sent)] = _flush(hass)
+    assert sent["data"]["live_update"] is True
+
+
+def test_an_unidentified_target_gets_the_android_safe_strings():
+    """A wrong guess towards native types loses every Android push; a wrong
+    guess towards strings is what the typed `content_state` copy is for."""
+    coord, hass = _coordinator(["notify.mobile_app_mystery"])
+    _register(hass, "Someone else", "iOS", "Apple")
+    coord._notify_dispatch(LIVE_SHAPED)
+    [(_, _, sent)] = _flush(hass)
+    assert sent["data"]["live_update"] == "true"
+
+
+def test_the_dismissal_lands_before_the_banner_that_replaces_it():
+    """R13. Core's async_call without blocking=True only schedules the call and
+    returns, so the dismissal and the banner on the same tag were in flight at
+    once; a dismissal slower than the banner arrived second and took the banner
+    down with it. Modelled the way core behaves, with a slow relay for the
+    dismissal: non-blocking calls run as their own tasks, blocking ones are
+    awaited."""
+    coord, hass = _coordinator(["notify.mobile_app_pixel"])
+    arrived: list[str] = []
+
+    async def _relay(service_data):
+        slow = service_data["message"] == CLEAR_NOTIFICATION_MARKER
+        await asyncio.sleep(0.05 if slow else 0.01)
+        arrived.append("clear" if slow else "banner")
+
+    async def _core_like_call(domain, service, data, blocking=False, **_kw):
+        if blocking:
+            await _relay(data)
+        else:
+            asyncio.get_running_loop().create_task(_relay(data))
+
+    hass.services.async_call = _core_like_call
+    coord._replace_card_with(
+        {"title": "K1C", "message": "Finished", "data": {"tag": "ha_creality_ws_x_live"}},
+        kind="completed",
+    )
+
+    async def _settle():
+        await asyncio.gather(*hass.tasks)
+        await asyncio.sleep(0.1)
+
+    _run(_settle())
+    assert arrived == ["clear", "banner"]
+
+
+def test_a_refused_notification_is_one_warning_not_a_traceback(caplog):
+    """With the call blocking, the platform's refusal now reaches us."""
+    import logging
+
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, hass = _coordinator(["notify.mobile_app_pixel"])
+
+    async def _refuse(*_a, **_kw):
+        raise HomeAssistantError("rate limit exceeded")
+
+    hass.services.async_call = _refuse
+    with caplog.at_level(logging.WARNING):
+        coord._notify_dispatch(RICH)
+        _run(asyncio.gather(*hass.tasks))
+    assert "was refused: rate limit exceeded" in caplog.text
+    assert "Traceback" not in caplog.text
 
 
 def test_a_notify_entity_routes_to_send_message_without_data():

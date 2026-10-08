@@ -1,6 +1,8 @@
 # Copilot Instructions for this repository
 
-These instructions tell GitHub Copilot Chat how to work in this repo. Assume changes target a Home Assistant custom integration that talks to Creality printers over a local WebSocket, plus a bundled Lovelace card.
+These instructions tell GitHub Copilot Chat how to work in this repo. Assume changes target a Home Assistant custom integration that talks to Creality printers over a local WebSocket, plus two bundled Lovelace cards.
+
+The maintained references are `CLAUDE.md` (rules and traps) and `docs/internal/INTEGRATION_REFERENCE.md` with its deep-dives (how it works, open findings). Where this file and those disagree, they win.
 
 ## Project overview
 
@@ -8,7 +10,7 @@ These instructions tell GitHub Copilot Chat how to work in this repo. Assume cha
 - Purpose: Low-latency local WebSocket telemetry and control for Creality K-series and compatible printers. Bundles a dependency-free Lovelace card.
 - Connectivity: Local WebSocket (default ws://<host>:9999) with push updates; no polling.
 - Discovery: Zeroconf matches for names containing creality/k1/k2.
-- Python target: 3.11, matching the CI workflow. No formatter or linter is configured; see "Dev quick checks".
+- Python target: 3.14 (Home Assistant 2026.7, the minimum, needs it); the Tests workflow runs 3.13 and 3.14. No formatter; CI's only lint is `ruff --select F,E9`, see "Dev quick checks".
 
 ## Repo layout quick map
 
@@ -23,7 +25,7 @@ These instructions tell GitHub Copilot Chat how to work in this repo. Assume cha
 - `custom_components/ha_creality_ws/image.py` – Image platform exposing current print preview (attempted for every model; see the Image section)
 - `custom_components/ha_creality_ws/fan.py` – Fan platform (model/case/side fans)
 - `custom_components/ha_creality_ws/config_flow.py` – UI config + Options (power switch binding, camera mode, go2rtc)
-- `custom_components/ha_creality_ws/entity.py` – Base entity with zeroing rules and device info
+- `custom_components/ha_creality_ws/entity.py` – Base entity: availability and device info
 - `custom_components/ha_creality_ws/utils.py` – Helpers (numeric coercion, parsing, model detection)
 - `custom_components/ha_creality_ws/services.yaml` – Custom HA services
 - `custom_components/ha_creality_ws/manifest.json` – HA manifest (requirements, version, zeroconf)
@@ -31,22 +33,21 @@ These instructions tell GitHub Copilot Chat how to work in this repo. Assume cha
 
 ## Design anchors to preserve
 
-- Coordinator availability model: an entity stays available and zeros when the power switch is OFF or the link is stale. Use `KEntity._should_zero()`.
-- Power switch awareness: `KCoordinator.power_is_off()` drives UI zeroing and WS client start/stop.
+- Availability: an entity is unavailable when the power switch is OFF or the link is stale (`KEntity.available`). A few stay available on purpose (model, max temperatures, Reconnect, the print preview); `KEntity._should_zero()` is what those use to show nothing.
+- Power switch awareness: the switch's own state decides power edges (`KCoordinator._switch_reports_off()`) and starts and stops the WS client.
 - Pause/resume pipeline: queued actions in coordinator (`request_pause`, `request_resume`, `_flush_pending`) with non-optimistic UI.
 - Status derivation: `PrintStatusSensor` maps telemetry to human-readable status. Don’t regress this mapping.
 - Resilient WS client: `KClient` owns heartbeat, jittered backoff, reconnect, and periodic GETs.
 - Local-first, no cloud: Never introduce cloud calls. Keep latency low and updates push-driven.
 - Model-specific feature detection: conditional features by model (box temp sensor/control, light, camera type).
-- Sensor zeroing when printer off: Layer sensors show 0, text sensors show "N/A", status shows "off" when power is off.
-- Lovelace card behavior: chips/buttons render instantly with optimistic UI; Power chip pinned far-right and only visible when configured; Light chip visibility reacts to power state and status without reload.
+- Lovelace card behavior: chips/buttons render instantly with optimistic UI; chip order follows the `button_order` config; the Power chip is only visible when configured; Light chip visibility reacts to power state and status without reload.
 
 ## Home Assistant specifics
 
 - Entities subclass `KEntity`; follow CoordinatorEntity pattern; no polling.
 - Use `selector` in config flow options; respect existing option keys.
 - For new services: declare in `services.yaml` and implement async-safe handlers in platform or `__init__.py`.
-- For new simple sensors: prefer adding to `SPECS` in `sensor.py`; ensure `_should_zero()`.
+- For new simple sensors: prefer adding to `SPECS` in `sensor.py`, with a `translation_key` and its strings in every locale.
 - Prefer HA unit constants with compatibility fallbacks.
 - Image platform: subclass `ImageEntity`; call `ImageEntity.__init__(self, hass)`; set `image_last_updated` when new bytes fetched; return placeholder bytes when content is unavailable.
 
@@ -55,24 +56,24 @@ These instructions tell GitHub Copilot Chat how to work in this repo. Assume cha
 Use `ModelDetection` which reads both `model` and `modelVersion` codes.
 
 - Detection helpers:
-  - K1 family: K1, K1C, K1 Max (not K1 SE)
+  - K1 family: K1, K1C, K1 Max, K1 SE
   - K2 family: codes F021 (K2), F012 (K2 Pro), F008 (K2 Plus)
   - Ender 3 V3 family: F001 (V3), F002 (V3 Plus), F005 (V3 KE)
   - Creality Hi: F018
 - Capabilities by model:
   - Box temperature sensor: K1 (except K1 SE), K2; not present on Creality Hi
-  - Box temperature control: K2 Pro and K2 Plus only; not present on Creality Hi
-  - Light: All except K1 SE and Ender 3 V3 family
-  - Camera types: WebRTC (K2); MJPEG optional (K1 SE, Ender 3 V3); MJPEG default (others)
-- `resolved_model()` provides a stable model name for device info caching when the friendly name is missing.
+  - Box temperature control: K2 family (K2, K2 Pro, K2 Plus); not present on Creality Hi
+  - Light: All except K1 SE and Ender 3 V3 family; dimmable on K2 Pro and K2 Plus
+  - Camera types (`detect_camera_type`): WebRTC for the K2 family and any printer reporting `webrtcSupport: 1` (K1C/K1 Max firmware 1.3.5.22); MJPEG optional (K1 SE, Ender 3 V3); MJPEG otherwise
+- `resolved_model()` is the cached model (what the Model sensor shows); `display_model()` is the device page's name and model id ("K2 Pro", "F012").
 
 ## Camera implementation
 
 - MJPEG (K1 family):
   - Snapshot extraction from MJPEG stream; fallback tiny JPEG when unavailable
   - Live streaming via `handle_async_mjpeg_stream`
-- WebRTC (K2 family):
-  - Uses HA built-in go2rtc (default http://localhost:11984)
+- WebRTC (K2 family, and printers reporting `webrtcSupport: 1`):
+  - Uses HA's own go2rtc through its session and URL (`hass.data["go2rtc"]`); since HA 2025.12 that is a Unix socket, not a TCP port
   - Auto-configure go2rtc stream and forward WebRTC offer/answer
   - Must use HA WebRTC message format: `{ "type": "answer", "answer": "...SDP..." }`
   - Snapshot via go2rtc snapshot API when available
@@ -93,14 +94,14 @@ Use `ModelDetection` which reads both `model` and `modelVersion` codes.
 
 ## Startup and caching
 
-- On setup, if power isn’t OFF, wait for first connect and briefly for `model`, `modelVersion`, `hostname` using `KCoordinator.wait_for_fields`.
-- Cache device info and feature flags in `ConfigEntry.data`. Re-detect camera type only when missing.
+- Setup does not wait for the printer when the cache is complete; it waits (up to 15 s, then `wait_for_fields`) only on a first setup, an integration upgrade or a moved printer.
+- Cache device info and feature flags in `ConfigEntry.data`. The camera type is re-detected from telemetry at every start and rebuilt live when the printer reports the other kind; the firmware version follows telemetry.
 - Heuristics: if live telemetry exposes `boxTemp/targetBoxTemp/maxBoxTemp` or `lightSw`, promote those capabilities in cache and enable entities immediately. **Except chamber *control*:** that comes only from the cached `ModelDetection.has_chamber_control` or a live `targetBoxTemp`, never from `maxBoxTemp`, which sensor-only K1-family chambers also report -- promoting on it creates a `boxTempControl` entity for a printer that cannot use one. `maxBoxTemp` promotes the chamber *sensor* only. See the note above `LATE_DISCOVERY_FIELDS` in `const.py`.
 - Cache of accessed HTTP URLs: record printer-local HTTP endpoints we hit (e.g., preview image) for diagnostics; never call cloud.
 
 ## Coding conventions
 
-- Python 3.11 with type hints; async for I/O; no blocking
+- Python 3.14 with type hints; async for I/O; no blocking
 - Logging: concise; DEBUG for detail, WARNING for visible diagnostics
 - Keep public identifiers stable (unique_id/name formats)
 - Don’t add heavy dependencies or cloud calls
@@ -113,21 +114,23 @@ Use `ModelDetection` which reads both `model` and `modelVersion` codes.
 
 ## Dev quick checks
 
-- Lint: **nothing is configured**. `pyproject.toml` holds only `[tool.pytest.ini_options]`, there is no `ruff.toml`/`.flake8`/`.pylintrc`, and no workflow runs a linter. A `.ruff_cache/` directory is someone's ad-hoc run, not repo configuration. Do not describe a formatting change as needed to pass a lint check.
+- Lint: CI's `lint` job runs `ruff check --isolated --select F,E9 custom_components tools`: undefined names, unused imports, syntax errors, nothing else. There is no lint configuration (`pyproject.toml` holds only `[tool.pytest.ini_options]`; no `ruff.toml`/`.flake8`/`.pylintrc`) and no formatter. Do not describe a formatting or import-order change as needed to pass a lint check.
+- Tests: `python -m pytest` (stubbed Home Assistant, `tools/tests`) and `python -m pytest tools/tests_ha` (a real one; Python 3.14, `tools/requirements-ha.txt`).
 - Manual validation: run HA with the component and observe logs/telemetry
+- Release: `tools/release_check.sh` is the preflight (version in `manifest.json` == top `CHANGELOG.md` heading == tag). The top heading reads `## X.Y.Z - Unreleased` until release day. Pushing a `v*` tag runs it and drafts the GitHub release from that CHANGELOG section.
 - Deployment: `tools/test_files/deploy_to_ha.sh --run` syncs to the HA test instance. `tools/test_files/` is gitignored, so this script is a local maintainer helper and is not present in a clone.
  - Diagnostic samples: sample WebSocket diagnostic JSONs are stored under `tools/test_files/ws_diagnostic_dumps/` for reference when adding or validating fields
 
 ## PR checklist (for Copilot-generated changes)
 
-- Code imports and runs under Python 3.11
+- Code imports and runs under Python 3.14
 - Async-safe; no blocking calls; uses HA helpers
-- Entities zero out correctly when off/unavailable
+- Entities go unavailable when the printer is off or silent
 - Logging not noisy; hot paths are quiet
 - No breaking changes to entity IDs or options
 - Model detection consistent and capabilities match spec
 - Update README when user-facing behavior changes
-- Expose new values via sensors: add a spec to `SPECS` or a dedicated sensor class. Ensure zeroing respects `_should_zero()` and that attributes/units are correct.
+- Expose new values via sensors: add a spec to `SPECS` or a dedicated sensor class, with a translation key, and correct attributes/units.
 - For image/preview features: gate content by status; use placeholders when unavailable; update diagnostics with accessed URLs.
 - For new controls: add an entity on one of the platforms in `PLATFORMS` (sensor, camera, button, number, fan, light, image), and call `KCoordinator.request_*` or `KClient.send_set_retry()` as appropriate.
 - For options: wire through `OptionsFlowHandler` using `selector` and have the coordinator consume the option.
@@ -137,8 +140,8 @@ Use `ModelDetection` which reads both `model` and `modelVersion` codes.
 
 Do
 - Keep async, typed, minimal changes.
-- Reuse helpers in `utils.py` and zeroing via `KEntity`.
-- Match the surrounding file's existing import order and line length. Do not reformat untouched lines: with no linter configured there is no standard to converge on, and long signature lines are the norm across the platform modules.
+- Reuse helpers in `utils.py` and availability via `KEntity`.
+- Match the surrounding file's existing import order and line length. Do not reformat untouched lines: there is no formatter and no style rule to converge on, and long signature lines are the norm across the platform modules. Keep each file's line endings (`test_line_endings.py`).
 - Include concise docstrings for public classes/methods.
 
 Don’t
@@ -147,21 +150,6 @@ Don’t
 - Don’t alter entity unique_id/name formats.
 - Don’t remove heartbeat or periodic GET scheduling.
 
-
-## Recent updates (2025-11-12)
-
-- Lovelace card
-  - Added optional Power chip (config: `power`, `show_power_button`); resolves entity across domains; optimistic toggle; pinned to far right.
-  - Light chip now responds instantly to Power changes (show/hide) without reload; uses optimistic overrides.
-  - Ensured Power chip styling reflects actual entity state only when state is known.
-- Image platform
-  - New `image.py` exposing "Current Print Preview". The fetch is attempted for every model; the K1-only gate it shipped with was removed in 43c6668.
-  - Returns placeholder when not printing or the fetch fails; records `http_urls_accessed` for diagnostics.
-  - Fixed ImageEntity initialization (`ImageEntity.__init__(self, hass)`) and updates `image_last_updated` on new bytes.
-- Diagnostics
-  - Expanded diagnostic dump with accessed HTTP URLs to help confirm model-specific paths.
-- Terminology/compat
-  - Continued preserving back-compat for "box" → "chamber" by keeping stable unique IDs and protocol fields while updating labels.
 
 
 If in doubt, prefer small, incremental changes and point to where the feature hooks into Coordinator/Client/Entity. Keep the integration simple and local-first.

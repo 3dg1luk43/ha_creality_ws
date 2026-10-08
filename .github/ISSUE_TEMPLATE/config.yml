@@ -1,0 +1,17 @@
+# Blank issues are disabled: a report without a template cannot be triaged and
+# is closed automatically by issue_validator.yml, so the option is removed.
+blank_issues_enabled: false
+
+contact_links:
+  - name: Questions, ideas and setup help
+    url: https://github.com/3dg1luk43/ha_creality_ws/discussions
+    about: >
+      Not sure it is a bug, or want to float an idea first? Ask in Discussions
+      rather than opening an issue.
+
+  - name: Want to submit code? Read this first
+    url: https://github.com/3dg1luk43/ha_creality_ws/blob/main/CONTRIBUTING.md#contributor-pr-flow-non-translation-prs
+    about: >
+      Open a Bug Report or Feature Request and wait for the maintainer to add
+      the `accepted` label before writing code. PRs without an accepted issue
+      are closed automatically.

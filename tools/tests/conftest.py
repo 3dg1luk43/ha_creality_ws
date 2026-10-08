@@ -45,6 +45,49 @@ class ServiceCall:  # pragma: no cover - a type only
 
 core_mod.ServiceCall = ServiceCall
 
+
+class SupportsResponse(enum.StrEnum):
+    NONE = "none"
+    OPTIONAL = "optional"
+    ONLY = "only"
+
+
+core_mod.SupportsResponse = SupportsResponse
+core_mod.ServiceResponse = dict
+
+# --- MOCK components.diagnostics ---
+# `async_redact_data` copied from Home Assistant (components/diagnostics/util.py)
+# rather than stubbed: what it redacts is the behaviour under test.
+diagnostics_mod = types.ModuleType("homeassistant.components.diagnostics")
+REDACTED = "**REDACTED**"
+
+
+def async_redact_data(data, to_redact):
+    from collections.abc import Mapping as _Mapping
+
+    if not isinstance(data, (_Mapping, list)):
+        return data
+    if isinstance(data, list):
+        return [async_redact_data(val, to_redact) for val in data]
+    redacted = {**data}
+    for key, value in redacted.items():
+        if value is None:
+            continue
+        if isinstance(value, str) and not value:
+            continue
+        if key in to_redact:
+            redacted[key] = REDACTED
+        elif isinstance(value, _Mapping):
+            redacted[key] = async_redact_data(value, to_redact)
+        elif isinstance(value, list):
+            redacted[key] = [async_redact_data(item, to_redact) for item in value]
+    return redacted
+
+
+diagnostics_mod.REDACTED = REDACTED
+diagnostics_mod.async_redact_data = async_redact_data
+sys.modules["homeassistant.components.diagnostics"] = diagnostics_mod
+
 setattr(ha_mod, "core", core_mod)
 setattr(ha_mod, "helpers", helpers_mod)
 setattr(ha_mod, "components", components_mod)
@@ -91,6 +134,12 @@ class CoordinatorEntity:
     def __init__(self, coordinator):
         self.coordinator = coordinator
 
+    def _handle_coordinator_update(self):
+        # As Home Assistant's: write the state on every coordinator update.
+        writer = getattr(self, "async_write_ha_state", None)
+        if writer is not None:
+            writer()
+
 setattr(uc_mod, "DataUpdateCoordinator", DataUpdateCoordinator)
 setattr(uc_mod, "CoordinatorEntity", CoordinatorEntity)
 setattr(helpers_mod, "update_coordinator", uc_mod)
@@ -122,6 +171,15 @@ aiohttp_client_mod = types.ModuleType("homeassistant.helpers.aiohttp_client")
 def async_get_clientsession(hass):
     return None
 setattr(aiohttp_client_mod, "async_get_clientsession", async_get_clientsession)
+
+
+async def async_aiohttp_proxy_web(hass, request, web_coro, buffer_size=102400, timeout=10):
+    """Home Assistant's MJPEG proxy; tests that exercise it patch in their own."""
+    web_coro.close()
+    return None
+
+
+setattr(aiohttp_client_mod, "async_aiohttp_proxy_web", async_aiohttp_proxy_web)
 sys.modules["homeassistant.helpers.aiohttp_client"] = aiohttp_client_mod
 setattr(helpers_mod, "aiohttp_client", aiohttp_client_mod)
 
@@ -187,6 +245,29 @@ entity_registry_mod.async_get = MagicMock(
 )
 sys.modules["homeassistant.helpers.entity_registry"] = entity_registry_mod
 helpers_mod.entity_registry = entity_registry_mod
+
+# --- MOCK helpers.issue_registry ---
+# Records what was raised and withdrawn, so a test can assert on Repairs.
+issue_registry_mod = types.ModuleType("homeassistant.helpers.issue_registry")
+
+
+class IssueSeverity(enum.StrEnum):
+    CRITICAL = "critical"
+    ERROR = "error"
+    WARNING = "warning"
+
+
+issue_registry_mod.IssueSeverity = IssueSeverity
+issue_registry_mod.created = []
+issue_registry_mod.deleted = []
+issue_registry_mod.async_create_issue = (
+    lambda hass, domain, issue_id, **kw: issue_registry_mod.created.append((domain, issue_id, kw))
+)
+issue_registry_mod.async_delete_issue = (
+    lambda hass, domain, issue_id: issue_registry_mod.deleted.append((domain, issue_id))
+)
+sys.modules["homeassistant.helpers.issue_registry"] = issue_registry_mod
+helpers_mod.issue_registry = issue_registry_mod
 
 # --- MOCK util.dt ---
 # Home Assistant's timezone-aware clock helpers. The integration uses
@@ -278,6 +359,18 @@ event_mod = types.ModuleType("homeassistant.helpers.event")
 event_mod.async_track_time_interval = lambda *a, **k: (lambda: None)
 event_mod.async_track_state_change_event = lambda *a, **k: (lambda: None)
 sys.modules["homeassistant.helpers.event"] = event_mod
+
+# --- MOCK helpers.service ---
+service_helpers_mod = types.ModuleType("homeassistant.helpers.service")
+
+
+def _async_register_admin_service(hass, domain, service, service_func, schema=None, supports_response=None, **_kw):
+    """The real one wraps the handler in an admin check; here it registers it."""
+    hass.services.async_register(domain, service, service_func, schema=schema, supports_response=supports_response)
+
+
+service_helpers_mod.async_register_admin_service = _async_register_admin_service
+sys.modules["homeassistant.helpers.service"] = service_helpers_mod
 helpers_mod.event = event_mod
 
 pn_mod = types.ModuleType("homeassistant.components.persistent_notification")
@@ -392,8 +485,10 @@ class SensorDeviceClass(_StrEnumStub):
     TEMPERATURE = "temperature"
     HUMIDITY = "humidity"
     DURATION = "duration"
+    SPEED = "speed"
     DISTANCE = "distance"
     WEIGHT = "weight"
+    ENUM = "enum"
 
 
 class SensorStateClass(_StrEnumStub):
@@ -410,6 +505,7 @@ setattr(components_mod, "sensor", components_sensor_mod)
 
 const_mod_ha = types.ModuleType("homeassistant.const")
 const_mod_ha.PERCENTAGE = "%"
+const_mod_ha.EVENT_HOMEASSISTANT_STOP = "homeassistant_stop"
 const_mod_ha.EntityCategory = EntityCategory
 # Not what the version gate reads -- see MAJOR/MINOR below, which is what
 # `_core_version()` imports and what a gate test has to patch. Kept here because
@@ -524,21 +620,32 @@ def fake_config_entry(entry_id: str = "entry1", options=None, data=None):
 _ABSENT = object()
 _MODULE_STUBS: dict[str, list] = {}
 _ATTR_STUBS: dict[str, list] = {}
+# What each owner installed, in order, and which owners have been restored.
+# Stubs go in at import time, which happens once, but a run that does not keep
+# a module's tests together (a shuffled one) tears the module down every time
+# it moves on, and the module's later tests then ran without them.
+# `pytest_runtest_setup` below puts them back.
+_REPLAY: dict[str, list] = {}
+_RESTORED: set[str] = set()
 
 
-def install_stub_module(owner: str, name: str, module) -> None:
+def install_stub_module(owner: str, name: str, module, *, _replay: bool = False) -> None:
     """Install `module` at `name`, remembering what `owner` displaced."""
+    if not _replay:
+        _REPLAY.setdefault(owner, []).append(("module", name, module))
     _MODULE_STUBS.setdefault(owner, []).append((name, sys.modules.get(name, _ABSENT)))
     sys.modules[name] = module
 
 
-def drop_stub_module(owner: str, name: str) -> None:
+def drop_stub_module(owner: str, name: str, *, _replay: bool = False) -> None:
     """Remove `name` from sys.modules, remembering it for restore_stubs."""
+    if not _replay:
+        _REPLAY.setdefault(owner, []).append(("drop", name))
     _MODULE_STUBS.setdefault(owner, []).append((name, sys.modules.get(name, _ABSENT)))
     sys.modules.pop(name, None)
 
 
-def install_stub_attr(owner: str, obj, attr: str, value) -> None:
+def install_stub_attr(owner: str, obj, attr: str, value, *, _replay: bool = False) -> None:
     """Set `obj.attr`, remembering what `owner` displaced.
 
     A companion to `install_stub_module` for the *attribute* half of a stub. A
@@ -546,6 +653,8 @@ def install_stub_attr(owner: str, obj, attr: str, value) -> None:
     restoring only the first leaves `from pkg import sub` handing out the stub
     for the rest of the session. That leak has been found in five suites now.
     """
+    if not _replay:
+        _REPLAY.setdefault(owner, []).append(("attr", obj, attr, value))
     _ATTR_STUBS.setdefault(owner, []).append(
         (obj, attr, getattr(obj, attr, _ABSENT))
     )
@@ -554,6 +663,8 @@ def install_stub_attr(owner: str, obj, attr: str, value) -> None:
 
 def restore_stubs(owner: str) -> None:
     """Put back everything `owner` installed or dropped, newest first."""
+    if owner in _REPLAY:
+        _RESTORED.add(owner)
     for obj, attr, old in reversed(_ATTR_STUBS.pop(owner, [])):
         if old is _ABSENT:
             try:
@@ -567,3 +678,23 @@ def restore_stubs(owner: str) -> None:
             sys.modules.pop(name, None)
         else:
             sys.modules[name] = old
+
+
+def reinstall_stubs(owner: str) -> None:
+    """Install again what `owner` installed, if it has been restored since."""
+    if owner not in _RESTORED:
+        return
+    _RESTORED.discard(owner)
+    for action, *args in _REPLAY[owner]:
+        if action == "module":
+            install_stub_module(owner, *args, _replay=True)
+        elif action == "drop":
+            drop_stub_module(owner, *args, _replay=True)
+        else:
+            install_stub_attr(owner, *args, _replay=True)
+
+
+def pytest_runtest_setup(item):
+    module = getattr(item, "module", None)
+    if module is not None:
+        reinstall_stubs(module.__name__)

@@ -36,6 +36,19 @@ def test_coerce_numbers():
     assert out["d"] == 3
 
 
+def test_coerce_numbers_reads_the_k1_number_format():
+    out = coerce_numbers({"nozzleTemp": "31.030000", "z": "0.000000", "neg": "-2.5", "zero": "0"})
+    assert out == {"nozzleTemp": 31.03, "z": 0.0, "neg": -2.5, "zero": 0}
+
+
+def test_coerce_numbers_keeps_identifiers_that_only_look_numeric():
+    """R66: int() stripped the zeros. Printers do use such ids ("01001" for a
+    material, "00001" for an RFID), so far only nested where nothing is
+    coerced."""
+    for value in ("01001", "00001", "007", " 42", "1e5", "1.2.3", "nan", "inf", "+3", ""):
+        assert coerce_numbers({"v": value}) == {"v": value}, value
+
+
 def test_parse_model_version_printer_and_dwin():
     s = "Printer HW Ver: 1.0; Printer SW Ver: 2.0; DWIN HW Ver: 3"
     hw, sw = parse_model_version(s)
@@ -241,7 +254,7 @@ def test_malformed_telemetry_does_not_raise_out_of_the_state_derivation(frame, e
     assert derive_activity_state(frame) is not None
 
 
-def test_activity_state_still_reports_error_when_nothing_is_running():
+def test_with_nothing_running_an_error_shows_but_the_activity_is_idle():
     frame = {"err": {"errcode": 521}}
     assert derive_print_state(frame) == "error"
     # No job to fall back to, so it lands on idle rather than pretending to print.

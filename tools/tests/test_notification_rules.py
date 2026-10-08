@@ -610,6 +610,33 @@ def _live(**kw):
     return build_live_payload(**kw)
 
 
+def test_the_content_state_carries_the_typed_keys_the_relay_reads():
+    """The relay builds the Live Activity state from the top level and lets
+    `content_state` override it. A dict survives `stringify_data` whole, so an
+    iPhone whose platform could not be identified still gets a Bool and a
+    number where the app's strict decode requires them (#125)."""
+    from custom_components.ha_creality_ws.notification_rules import stringify_data
+
+    data = _live()["data"]
+    assert data["content_state"] == {
+        "progress": 42,
+        "progress_max": 100,
+        "chronometer": True,
+        "countdown_end": 1_700_003_600,
+    }
+    wire = stringify_data(data)
+    assert wire["chronometer"] == "true"
+    assert wire["content_state"]["chronometer"] is True
+    assert wire["content_state"]["countdown_end"] == 1_700_003_600
+
+
+def test_a_paused_card_stops_the_timer_in_the_content_state_too():
+    data = _live(phase="paused", status_text="Paused")["data"]
+    assert data["content_state"]["chronometer"] is False
+    assert data["content_state"]["critical_text"] == "Paused"
+    assert "countdown_end" not in data["content_state"]
+
+
 def test_live_payload_shape():
     payload = _live(group="ha_creality_ws_abc123")
     assert payload["title"] == "K1C"
@@ -1152,6 +1179,33 @@ def test_a_lost_connection_is_not_a_stopped_print():
         assert watch.observe(
             **STOP_AS_REPORTED, now_mono=1.0 + NOTIFY_END_CONFIRM_SECS
         ) is None, blind
+
+
+def test_a_self_test_after_the_first_printing_frame_is_not_a_stop():
+    """#124: the K2 reports "printing" at 0% for a frame, then self-tests for
+    minutes before the print actually starts."""
+    watch = _watching(progress=0)
+
+    for tick in range(1, 300):
+        assert watch.observe(
+            state="self-testing", progress=0, filename="3DBenchy.gcode",
+            now_mono=float(tick),
+        ) is None, tick
+    assert watch.pending() is False
+    assert watch.observe(
+        state="printing", progress=0, filename="3DBenchy.gcode", now_mono=300.0
+    ) is None
+
+
+def test_a_self_test_with_no_job_seen_printing_does_not_arm_the_watch():
+    """It derives from `withSelfTest` alone, so it can be a calibration with no
+    job behind it, and the idle that follows must not read as a stop."""
+    watch = JobEndWatch()
+    watch.observe(state="self-testing", progress=0, filename="", now_mono=0.0)
+
+    assert watch.observe(
+        state="idle", progress=0, filename="", now_mono=1.0
+    ) is None
 
 
 def test_a_finished_print_is_never_a_stopped_one():

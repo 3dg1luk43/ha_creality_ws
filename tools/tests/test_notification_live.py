@@ -78,19 +78,15 @@ class HassStub:
 
 @pytest.fixture(autouse=True)
 def _loop():
-    # Restore the previous loop: closing does not uninstall it, so the policy
-    # keeps handing this closed loop to any later module without its own fixture.
-    try:
-        previous = asyncio.get_event_loop_policy().get_event_loop()
-    except Exception:  # pylint: disable=broad-except
-        previous = None
+    # Cleared afterwards: closing a loop does not uninstall it, and a closed
+    # loop left installed broke whatever later called asyncio.get_event_loop().
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         yield
     finally:
         loop.close()
-        asyncio.set_event_loop(previous)
+        asyncio.set_event_loop(None)
 
 
 def _build(hass):
@@ -482,14 +478,16 @@ def test_a_stale_error_code_does_not_pin_the_card_to_error():
     one the printer never clears -- which would freeze the card for a whole
     print and stop every later progress push."""
     coord, hass = _coordinator()
+    # The print is under way when the fault appears (a fault already present
+    # when a job's file first shows up is that job's baseline, R12).
+    assert len(_live(_frame(coord, hass, **_printing(10)))) == 1
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
     frame = _printing(20, err={"errcode": 521, "key": 1})
     payloads = _frame(coord, hass, **frame)
 
     # The alert still fires, once, off the code *changing*.
     alerts = [p for p in payloads if p["data"]["tag"].endswith("_alert")]
     assert len(alerts) == 1
-    # ...and the card still tracks the print.
-    assert len(_live(payloads)) == 1
 
     coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
     later = _live(_frame(coord, hass, **_printing(40, err={"errcode": 521, "key": 1})))
@@ -1043,6 +1041,23 @@ def test_no_dismissal_is_sent_when_there_was_never_a_reminder():
     assert f"{coord._notify_tag_base()}_soon" not in tags
 
 
+def test_no_dismissal_for_a_reminder_that_was_switched_off():
+    """R28. With the reminder off, the job still passes through its window and
+    the near-end latch is still set (detection is deliberately not gated), and
+    the dismissal keyed off that latch: every completion sent a clear for a
+    reminder that never existed (the "soon:clear" in #125's log)."""
+    coord, hass = _coordinator()
+    coord._notify_minutes_to_end = False
+    coord._minutes_to_end_value = 30
+    _frame(coord, hass, **_printing(80, printLeftTime=600))
+    assert coord._notified_minutes_to_end is True
+    coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+
+    payloads = _frame(coord, hass, **_printing(100, printLeftTime=0))
+    tags = {c["data"]["tag"] for c in _clears(payloads)}
+    assert f"{coord._notify_tag_base()}_soon" not in tags
+
+
 def test_the_reminder_is_cleared_even_with_completion_notifications_off():
     """The soon-clear used to live inside the terminal-banner path, so a user
     who wanted the reminder but not the completion ping kept a stale
@@ -1121,6 +1136,8 @@ def test_a_recovered_printer_has_its_alert_taken_away():
     """A lock screen still reading "filament runout" after the user reloaded is
     actively misleading, and nothing else shares that tag to supersede it."""
     coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(39))
+    coord.hass.loop.advance(1)
     _frame(coord, hass, **_printing(40, materialStatus=1))
     assert coord._alert_showing is True
 
@@ -1135,6 +1152,8 @@ def test_one_condition_resolving_does_not_dismiss_the_others_alert():
     """Errors and runouts share a tag, so clearing on the first to resolve
     would take away an alert that is still true."""
     coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(39))
+    coord.hass.loop.advance(1)
     _frame(coord, hass, **_printing(40, materialStatus=1, err={"errcode": 521, "key": 1}))
     coord.hass.loop.advance(1)
 
@@ -1317,6 +1336,21 @@ def test_one_idle_frame_mid_print_costs_no_notification():
     assert coord._notified_stopped is False
 
 
+def test_a_self_test_at_the_start_of_a_print_is_not_a_stopped_print():
+    """#124: the K2 reports one "printing" frame at 0%, then self-tests for
+    minutes. That arrived on the phone as "stopped at 0%"."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(0))
+
+    for _ in range(3):
+        hass.loop.advance(NOTIFY_END_CONFIRM_SECS + 1)
+        assert _events(_frame(coord, hass, **_printing(0, withSelfTest=50))) == []
+
+    hass.loop.advance(1)
+    assert _events(_frame(coord, hass, **_printing(1))) == []
+    assert coord._notified_stopped is False
+
+
 def test_a_dropped_connection_is_not_a_stopped_print():
     """Every entity goes unavailable when telemetry stops, and the derived state
     is "unknown" -- which says nothing about the job. Announcing a stop off it
@@ -1377,6 +1411,141 @@ def test_a_finished_print_is_not_announced_as_stopped_as_well():
 
     payloads = _confirm(coord, hass, frames=3)
     assert _events(payloads) == []
+
+
+def test_the_progress_reset_after_a_finished_print_starts_nothing():
+    """R10. After the completion the printer keeps the file name, sits in state
+    0 and, a while later, resets the progress to 0: "processing", busy by the
+    dashboard's reckoning. Taking that for a reprint re-armed every latch,
+    fired print_started for a print that never began and pushed a "0%
+    Starting" live card that stayed up while the file stayed selected."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(50))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    _frame(coord, hass, **_printing(100, printLeftTime=0))
+    hass.events.clear()
+
+    payloads = []
+    for _ in range(3):
+        hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+        payloads.extend(_frame(coord, hass, **_stopped_as_reported()))
+
+    assert _live(payloads) == [], "a card was stood up for a print that never started"
+    assert [e for e, _ in hass.events if e.endswith("print_started")] == []
+    assert coord._notified_completed is True
+
+
+def test_reprinting_the_same_file_after_a_finished_print_is_a_new_job():
+    """The other half: once the reprint actually runs, everything re-arms."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(50))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    _frame(coord, hass, **_printing(100, printLeftTime=0))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    _frame(coord, hass, **_stopped_as_reported())
+    hass.events.clear()
+
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    payloads = _frame(coord, hass, **_printing(1, printJobTime=5))
+
+    assert len(_live(payloads)) == 1, "the reprint got no live card"
+    assert [e for e, _ in hass.events if e.endswith("print_started")]
+    assert coord._notified_completed is False
+
+
+def test_a_stop_reported_with_its_clock_reset_is_announced_once():
+    """R11. A printer that reports state 4 on the same frame its job clock goes
+    back to 0 produced "stopped at 40%", then "stopped at 0%": the clock reset
+    satisfied is_new_job_cycle, which re-armed the stop latch, and the state-4
+    branch announced the stop again (and fired print_started besides)."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(40, printJobTime=1000))
+    hass.events.clear()
+
+    payloads = []
+    for _ in range(3):
+        hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+        payloads.extend(_frame(coord, hass, **_printing(40, state=4, printJobTime=0)))
+
+    stopped = [e for e, _ in hass.events if e.endswith("print_stopped")]
+    started = [e for e, _ in hass.events if e.endswith("print_started")]
+    assert len(stopped) == 1, f"stop announced {len(stopped)} times"
+    assert started == []
+    assert len(_events(payloads)) == 1
+
+
+def test_a_self_test_at_the_start_reads_starting_not_finishing():
+    """R25, #125's log: "0% - 0s" with "Finishing" while the printer heated and
+    self-tested. No estimate yet is not an estimate that ran out."""
+    coord, hass = _coordinator()
+    push = _live(_frame(coord, hass, **_printing(0, printLeftTime=0, withSelfTest=50)))[0]
+    assert push["data"]["critical_text"] == "Starting"
+    assert "0s" not in push["message"]
+
+
+def test_a_print_with_no_estimate_reads_printing():
+    coord, hass = _coordinator()
+    frame = _printing(40)
+    frame.pop("printLeftTime")
+    push = _live(_frame(coord, hass, **frame))[0]
+    assert push["data"]["critical_text"] == "Printing"
+
+
+def test_an_estimate_that_ran_out_late_reads_finishing():
+    coord, hass = _coordinator()
+    push = _live(_frame(coord, hass, **_printing(97, printLeftTime=0)))[0]
+    assert push["data"]["critical_text"] == "Finishing"
+    assert "0s" not in push["message"]
+
+
+def _alerts(payloads):
+    return [p for p in payloads if p["data"]["tag"].endswith("_alert")]
+
+
+STUCK = {"err": {"errcode": 500, "key": 116}}
+
+
+def test_an_error_the_printer_never_clears_alerts_once_not_every_print():
+    """R12, #125 finding 3. A Hi reported error 116 [500] for two days, through
+    every print. Each new file reset the baseline to "no error", so every print
+    start alerted (with a snapshot) and fired print_error again."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(19))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    first = _frame(coord, hass, **_printing(20, **STUCK))
+    assert len(_alerts(first)) == 1
+    hass.events.clear()
+
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    second = _frame(coord, hass, **_printing(1, printFileName="/usr/data/printer_data/gcodes/next.gcode", printJobTime=5, **STUCK))
+    assert _alerts(second) == []
+    assert [e for e, _ in hass.events if e.endswith("print_error")] == []
+
+
+def test_an_error_that_appears_during_the_next_print_still_alerts():
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(19))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    _frame(coord, hass, **_printing(20, **STUCK))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    _frame(coord, hass, **_printing(1, printFileName="/usr/data/printer_data/gcodes/next.gcode", printJobTime=5, **STUCK))
+    # It clears, then a different fault arrives mid-print.
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    _frame(coord, hass, **_printing(5, printFileName="/usr/data/printer_data/gcodes/next.gcode", printJobTime=50))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    fresh = _frame(coord, hass, **_printing(6, printFileName="/usr/data/printer_data/gcodes/next.gcode", printJobTime=60, err={"errcode": 521, "key": 1}))
+    assert len(_alerts(fresh)) == 1
+
+
+def test_a_runout_flag_left_set_does_not_alert_at_the_next_print():
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(19))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    first = _frame(coord, hass, **_printing(20, materialStatus=1))
+    assert len(_alerts(first)) == 1
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    second = _frame(coord, hass, **_printing(1, printFileName="/usr/data/printer_data/gcodes/next.gcode", printJobTime=5, materialStatus=1))
+    assert _alerts(second) == []
 
 
 # --------------------------------------------------------------------------- #
@@ -1482,3 +1651,55 @@ def test_switching_the_card_off_still_dismisses_it():
     asyncio.get_event_loop().run_until_complete(asyncio.gather(*pending))
 
     assert [c[2]["message"] for c in hass.calls] == [CLEAR_NOTIFICATION_MARKER]
+
+
+# --------------------------------------------------------------------------- #
+# A stale Live Activity token on an iPhone (#125, finding 2)
+# --------------------------------------------------------------------------- #
+
+
+def _as_iphone(coord):
+    """The target is an iPhone; real resolution needs mobile_app's registry."""
+    coord._target_is_apple = lambda target: "iphone" in target
+    coord._target_os = lambda target: "iOS" if "iphone" in target else "Android"
+
+
+def _live_tag_messages(calls):
+    return [c[2]["message"] for c in calls if (c[2].get("data") or {}).get("tag", "").endswith("_live")]
+
+
+def test_a_new_card_on_an_iphone_is_preceded_by_a_clear_of_its_tag():
+    """Home Assistant sends every push to an unexpired stored token as an
+    UPDATE, the START included; a card swiped away left one behind and the
+    next print's card never appeared. The clear ends it and drops the token,
+    and must land before the START, so both go out in one task."""
+    coord, hass = _coordinator(targets=("notify.mobile_app_iphone",))
+    _as_iphone(coord)
+    messages = _live_tag_messages(_frame_calls(coord, hass, **_printing(10)))
+    assert len(messages) == 2
+    assert messages[0] == CLEAR_NOTIFICATION_MARKER
+    assert messages[1] != CLEAR_NOTIFICATION_MARKER
+    # Later pushes update the card; no further clears.
+    hass.loop.advance(400)
+    assert CLEAR_NOTIFICATION_MARKER not in _live_tag_messages(_frame_calls(coord, hass, **_printing(30)))
+
+
+def test_an_android_card_starts_without_a_clear():
+    coord, hass = _coordinator(targets=("notify.mobile_app_pixel",))
+    messages = _live_tag_messages(_frame_calls(coord, hass, **_printing(10)))
+    assert CLEAR_NOTIFICATION_MARKER not in messages and len(messages) == 1
+
+
+def test_a_restart_mid_print_updates_the_iphone_card_in_place():
+    """The stored token is then most likely the card still on screen: clearing
+    it would make the card disappear and come back."""
+    hass = HassStub()
+    coord = _build(hass)
+    coord._notify_targets = ["notify.mobile_app_iphone"]
+    coord._notify_live = True
+    coord._notify_completed = True
+    _as_iphone(coord)
+    assert _frame(coord, hass, **_printing(42)) == []  # the baseline
+    hass.loop.advance(1)
+    messages = _live_tag_messages(_frame_calls(coord, hass, **_printing(42)))
+    assert messages and CLEAR_NOTIFICATION_MARKER not in messages

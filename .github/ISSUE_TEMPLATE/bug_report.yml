@@ -1,0 +1,181 @@
+name: Bug Report
+description: Something in the integration or the cards does not work
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        Please fill in **every required field**. Where a field genuinely does not apply, enter `N/A` rather than skipping it. Reports missing key information are flagged automatically and closed if it never arrives.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before You Submit
+      options:
+        - label: I searched the [existing issues](https://github.com/3dg1luk43/ha_creality_ws/issues) and this is not a duplicate.
+          required: true
+        - label: I am on the [latest release](https://github.com/3dg1luk43/ha_creality_ws/releases), or I say below why I cannot update.
+          required: true
+        - label: The problem survives a Home Assistant restart and a hard browser refresh (Ctrl+F5).
+          required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the Bug
+      description: What happened, and when.
+      placeholder: "Right after a print starts I get a 'stopped at 0%' notification, but the print carries on."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: printer_model
+    attributes:
+      label: Printer Model
+      options:
+        - K1
+        - K1C
+        - K1C (2025)
+        - K1 SE
+        - K1 Max
+        - K2
+        - K2 Pro
+        - K2 Plus
+        - Ender 3 V3
+        - Ender 3 V3 KE
+        - Ender 3 V3 Plus
+        - Creality Hi
+        - Other (say which in Additional Context)
+        - Not printer-specific
+    validations:
+      required: true
+
+  - type: input
+    id: model_code
+    attributes:
+      label: Board / modelVersion Code
+      description: Shown in the diagnostic dump as `modelVersion`, for example `F012`. Leave blank if you do not know it.
+      placeholder: "F012"
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Integration Version
+      description: From HACS, or `version` in `manifest.json`. Bugs already fixed in a newer release are not re-investigated.
+      placeholder: "0.9.9"
+    validations:
+      required: true
+
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant Version
+      description: Settings → About.
+      placeholder: "2026.9.3"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Installation Method
+      options:
+        - HACS
+        - Manual
+    validations:
+      required: true
+
+  - type: dropdown
+    id: camera_mode
+    attributes:
+      label: Camera Mode
+      description: Reported by the integration, or forced in its options.
+      options:
+        - Not camera-related
+        - auto
+        - mjpeg
+        - webrtc
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction Steps
+      placeholder: |
+        1. Enable notifications
+        2. Start a print from Creality Print
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Diagnostics
+      description: |
+        **Required.** Any evidence of what went wrong. Best is both of:
+
+        1. **Diagnostics**: Settings → Devices & services → Creality WebSocket Integration → the printer's ⋮ menu → **Download diagnostics**, then attach the file. Or Developer Tools → Actions → `ha_creality_ws.diagnostic_dump` and copy the `printers` section of the response. Addresses, names and tokens are hidden in both.
+        2. **Log lines** filtered for `ha_creality_ws` from Settings → System → Logs. For debug logging, add this to `configuration.yaml` and restart:
+           ```yaml
+           logger:
+             logs:
+               custom_components.ha_creality_ws: debug
+           ```
+
+        If logs genuinely do not apply (a card layout glitch, a docs typo), write `N/A - ` and the reason.
+      placeholder: "Paste log lines or the printers section here, or attach files..."
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: entities
+    attributes:
+      label: Affected Entities
+      description: Entity IDs that are wrong, missing or noisy.
+      placeholder: "sensor.k1c_print_progress"
+    validations:
+      required: false
+
+  - type: input
+    id: regression
+    attributes:
+      label: Last Working Version
+      description: If this used to work, the last integration version where it did.
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional Context
+      description: Screenshots, card YAML, network setup (VLANs, go2rtc), anything unusual.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: pr_intention
+    attributes:
+      label: Contributing a Fix
+      description: >
+        Want to fix it yourself? Agree the work with the maintainer **before** writing code:
+        tick the box, wait for the `accepted` label, then open a PR with `Closes #<this issue>`.
+        A PR opened before the label is added is not reviewed and may be closed automatically.
+        See [CONTRIBUTING.md](https://github.com/3dg1luk43/ha_creality_ws/blob/main/CONTRIBUTING.md#contributor-pr-flow-non-translation-prs).
+      options:
+        - label: I plan to submit a PR fixing this, and will wait for the `accepted` label before opening it.
+          required: false

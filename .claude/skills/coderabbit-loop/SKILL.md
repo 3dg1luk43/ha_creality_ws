@@ -114,21 +114,24 @@ Apply the smallest change that resolves the finding. Then:
 ```bash
 python3 -m compileall custom_components/ha_creality_ws tools/tests -q
 node --check custom_components/ha_creality_ws/www/<edited>.js   # if card JS changed
-python3 -m pytest -q                                 # whole suite, ~3s
+python3 -m pytest -q                                 # whole suite, ~90 s
 python3 -m pytest tools/tests/test_<area>.py -q      # targeted, while iterating
+ruff check --isolated --select F,E9 custom_components tools   # what CI's lint job runs
 ```
 
-Baseline: **5 skipped, and a pass count that only ever grows** (707 at the time of
-writing, but every round adds tests, so treat a *drop* as the signal and ignore the
-absolute number -- an exact figure here is stale within one round and this one was
-wrong by 120 before anyone noticed). The 5 skips need Node or the CFS simulator and
-are expected in a bare environment; a larger skip count means missing tooling, not
-removed tests.
+Baseline: **a pass count that only ever grows**, so treat a *drop* as the signal and
+ignore the absolute number (it is stale within one round). Skips depend on the
+interpreter: none in the project `.venv`; where `aiohttp`/`websockets` are missing
+the simulator tests skip, and without node every card suite skips (CI fails
+instead). A skip count that grows in the same environment means missing tooling,
+not removed tests.
 
-Run the suite in a venv holding only `pytest` and `voluptuous` before trusting a
-green gate. That is what CI installs, and a suite that passes with the project venv
-can still fail there -- `Static Tests` was red for six days on exactly that
-difference while local runs looked clean.
+Run the suite in a venv holding only `tools/requirements-test.txt` before trusting
+a green gate. That is what CI installs, and a suite that passes with the project
+venv can still fail there -- `Static Tests` was red for six days on exactly that
+difference while local runs looked clean. Lifecycle, flow and power-switch changes
+also need `python -m pytest tools/tests_ha` (Python 3.14, `tools/requirements-ha.txt`;
+CI job `home-assistant`).
 
 Then restore line endings and re-check the diff is the size you intended:
 
@@ -169,7 +172,7 @@ where a standing rule discourages posting to GitHub generally.
   line from the system reminder.
 - **Release notes:** fixes to unreleased work on the current branch get **no new
   entry**, the bug never shipped. Only correct stale wording in
-  `.release_notes/RELEASE_NOTES.md`. Fixes to already-shipped behaviour do get an
+  `CHANGELOG.md`. Fixes to already-shipped behaviour do get an
   entry.
 - Push. A push auto-retriggers CodeRabbit. If the round produced replies only,
   retrigger explicitly with `@coderabbitai full review`.

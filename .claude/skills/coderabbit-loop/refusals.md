@@ -8,9 +8,10 @@ rationale rather than re-deriving it, and do not re-litigate a rejection.
 1. **The premise is factually wrong.** Verify before accepting. CodeRabbit invents
    "needed to pass the configured lint checks" for rules the repo does not
    configure. Concretely: this repo has **no ruff, flake8 or pylint config at
-   all** - `pyproject.toml` holds only `[tool.pytest.ini_options]`, and no linter
-   runs in `.github/workflows/`. A stray `.ruff_cache/` is someone's ad-hoc run,
-   not configuration. `# pylint: disable=broad-except` is a local convention, not
+   all** - `pyproject.toml` holds only `[tool.pytest.ini_options]`. CI's `lint`
+   job runs `ruff check --isolated --select F,E9` and nothing else: undefined
+   names, unused imports, syntax errors. Any other rule code is CodeRabbit's own
+   run. A stray `.ruff_cache/` is someone's ad-hoc run, not configuration. `# pylint: disable=broad-except` is a local convention, not
    evidence of a configured linter.
 2. **Correct in general, wrong against the hardware or the push relay.** Printer
    firmware and the companion-app relay both behave in ways no amount of reading

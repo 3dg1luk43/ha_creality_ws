@@ -27,14 +27,14 @@ function card(config) {
 
 test("a new card defaults to full", () => {
   const { KCFSCard } = loadCard();
-  assert.equal(KCFSCard.getStubConfig().view_mode, "full");
+  assert.equal(KCFSCard.defaultConfig().view_mode, "full");
 });
 
 test("the stub does not carry the legacy key", () => {
   // Keeping both would make the migration unreachable: getStubConfig is spread
   // *before* the user config, so view_mode would always already be set.
   const { KCFSCard } = loadCard();
-  assert.ok(!("compact_view" in KCFSCard.getStubConfig()));
+  assert.ok(!("compact_view" in KCFSCard.defaultConfig()));
 });
 
 test("compact_view: true migrates to compact", () => {
@@ -120,19 +120,16 @@ test("getCardSize scales with the amount configured", () => {
   );
 });
 
-test("getLayoutOptions reports real grid bounds", () => {
+test("a sections view sizes the card to its content", () => {
+  // R23. getLayoutOptions reserved fixed rows (five for the full view) while
+  // the card forces height:auto, so in a sections view it drew over the card
+  // below: 176 px for one box at 390 px wide, measured in Chromium by
+  // tools/testbox/card_check.mjs. rows "auto" makes the cell the card's height.
   const c = card({ view_mode: "compact", box0_slot0_filament: "sensor.a" });
   c.hass = makeHass(slotEntities(1, 0, { attributes: { type: "PLA" } }));
-  const layout = c.getLayoutOptions();
-
-  assert.ok(layout && typeof layout === "object", "an options object");
-  const keys = Object.keys(layout);
-  assert.ok(keys.length > 0, `an empty object would satisfy typeof: ${keys}`);
-  // HA reads grid_* keys; a stub returning {} would silently lose sizing.
-  assert.ok(
-    keys.some((k) => k.startsWith("grid_")),
-    `expected grid_* sizing keys, got ${keys}`,
-  );
+  const grid = c.getGridOptions();
+  assert.equal(grid.rows, "auto");
+  assert.equal(typeof c.getLayoutOptions, "undefined", "the deprecated fixed-row API is gone");
 });
 
 test("compact is strictly shorter than full for the same config", () => {

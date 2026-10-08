@@ -113,6 +113,7 @@ from custom_components.ha_creality_ws.config_flow import (  # noqa: E402
     OptionsFlowHandler,
 )
 from custom_components.ha_creality_ws.const import (  # noqa: E402
+    CAM_MODE_AUTO,
     CAM_MODE_CUSTOM,
     CONF_POLLING_RATE,
     CONF_NOTIFY_TEMPLATE_COMPLETED,
@@ -267,6 +268,22 @@ def test_a_submitted_go2rtc_url_is_still_applied():
     assert handler._working[CONF_GO2RTC_URL] == "10.0.0.55"
     assert handler._working[CONF_GO2RTC_PORT] == 1985
     assert handler._working[CONF_GO2RTC_RTSP_PORT] == 8556
+
+
+@requires_voluptuous
+def test_auto_is_stored_as_auto_and_keeps_the_go2rtc_settings():
+    """#46. Auto used to be resolved on submit and the result saved, which made
+    it a forced mode: a K1C taken for MJPEG kept MJPEG through the firmware
+    update that moved it to WebRTC, with nothing on :8080 to show. Auto can
+    resolve to WebRTC, so its go2rtc fields are kept like WebRTC's."""
+    handler = _handler(EXTERNAL)
+
+    result = _submit(handler, {CONF_CAMERA_MODE: CAM_MODE_AUTO})
+
+    assert result["step"] == "menu"
+    assert handler._working[CONF_CAMERA_MODE] == CAM_MODE_AUTO
+    assert handler._working[CONF_GO2RTC_URL] == "10.0.0.9"
+    assert handler._working[CONF_GO2RTC_PORT] == 1984
 
 
 @requires_voluptuous
@@ -590,12 +607,24 @@ def test_a_refused_submit_does_not_leak_into_the_next_section():
     assert CONF_CUSTOM_CAMERA_URL not in options
 
 
+def _new_host_check(monkeypatch, handler, *, reachable=True, others=()):
+    """Answer the new-address check without touching the network (R35)."""
+    flow_module = sys.modules[OptionsFlowHandler.__module__]
+
+    async def _probe(host, port, timeout=2.5):
+        return reachable
+
+    monkeypatch.setattr(flow_module, "_probe_tcp", _probe)
+    handler.hass.config_entries.async_entries = lambda domain: list(others)
+
+
 @requires_voluptuous
-def test_a_new_host_and_the_options_go_out_in_one_update():
+def test_a_new_host_and_the_options_go_out_in_one_update(monkeypatch):
     """The host lives in `data` and everything else in `options`. Updating them
     separately fired the update listener twice and reloaded the entry twice for
     one submit."""
     handler = _handler({})
+    _new_host_check(monkeypatch, handler)
 
     asyncio.run(handler.async_step_connection({
         CONF_HOST: " 5.6.7.8 ",
@@ -616,6 +645,45 @@ def test_an_unchanged_host_is_not_written_back():
     asyncio.run(handler.async_step_connection({CONF_HOST: "1.2.3.4"}))
 
     assert "data" not in _updates(handler)
+
+
+@requires_voluptuous
+def test_an_address_another_printer_uses_is_refused(monkeypatch):
+    """Saved, it moved this printer's device onto the other one's (R35)."""
+    handler = _handler({})
+    other = MagicMock(entry_id="entry2", unique_id="5.6.7.8", data={CONF_HOST: "5.6.7.8"})
+    _new_host_check(monkeypatch, handler, others=[handler.config_entry, other])
+
+    result = asyncio.run(handler.async_step_connection({CONF_HOST: "5.6.7.8", CONF_POLLING_RATE: 3}))
+
+    assert result["step"] == "form"
+    assert result["errors"] == {CONF_HOST: "host_in_use"}
+    handler.hass.config_entries.async_update_entry.assert_not_called()
+
+
+@requires_voluptuous
+def test_an_address_with_no_printer_is_refused_and_kept_in_the_form(monkeypatch):
+    """A typo was saved without a word and left the printer unavailable (R35)."""
+    handler = _handler({})
+    _new_host_check(monkeypatch, handler, reachable=False)
+
+    result = asyncio.run(handler.async_step_connection({CONF_HOST: "5.6.7.9", CONF_POLLING_RATE: 3}))
+
+    assert result["errors"] == {CONF_HOST: "cannot_connect"}
+    handler.hass.config_entries.async_update_entry.assert_not_called()
+    shown = {str(key): key.default() for key in result["data_schema"].schema}
+    assert shown[CONF_HOST] == "5.6.7.9", "the user would have to type it again"
+
+
+@requires_voluptuous
+def test_an_unchanged_address_is_not_checked_again(monkeypatch):
+    """The printer may be off while someone changes the polling rate."""
+    handler = _handler({})
+    _new_host_check(monkeypatch, handler, reachable=False)
+
+    asyncio.run(handler.async_step_connection({CONF_HOST: "1.2.3.4", CONF_POLLING_RATE: 3}))
+
+    assert _updates(handler)["options"][CONF_POLLING_RATE] == 3
 
 
 @requires_voluptuous

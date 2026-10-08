@@ -60,6 +60,8 @@ if "homeassistant.const" not in sys.modules:
     _install_module("homeassistant.const", MagicMock())
 
 from custom_components.ha_creality_ws.sensor import (  # noqa: E402
+    CurrentObjectSensor,
+    KActiveFilamentSensor,
     KCFSExtSlotSensor,
     KCFSSlotSensor,
     PrintStatusSensor,
@@ -277,3 +279,66 @@ def test_a_mapping_error_code_is_still_read_from_errcode():
 def test_no_error_reports_no_error_code():
     for err in (None, 0, {}, {"errcode": 0}):
         assert "error_code" not in _status_sensor(err).extra_state_attributes, err
+
+
+# --------------------------------------------------------------------------- #
+# Text states come from the translations (R33)
+# --------------------------------------------------------------------------- #
+
+import json  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+_SENSOR_STRINGS = json.loads(
+    (Path(__file__).resolve().parents[2] / "custom_components/ha_creality_ws/strings.json")
+    .read_text(encoding="utf-8")
+)["entity"]["sensor"]
+
+
+def _active_slot(box_id, box_type, slot_id):
+    slot = {**GENERIC_SLOT, "id": slot_id, "selected": 1}
+    coord = SimpleNamespace(
+        client=SimpleNamespace(_host="1.2.3.4"),
+        data={"boxsInfo": {"materialBoxs": [{"id": box_id, "type": box_type, "materials": [slot]}]}},
+        available=True,
+        power_is_off=lambda: False,
+    )
+    return KActiveFilamentSensor(coord).native_value
+
+
+def test_every_active_slot_state_has_a_translation():
+    """The state was the English "Box 1 Slot 2"; it is a slug now, and every
+    slug a CFS can produce must have text, or the raw slug shows."""
+    states = _SENSOR_STRINGS["active_filament_slot"]["state"]
+    for box_id in range(1, 5):
+        for slot_id in range(4):
+            value = _active_slot(box_id, 0, slot_id)
+            assert value in states, value
+            assert states[value] == f"Box {box_id} Slot {slot_id + 1}"
+    assert states[_active_slot(0, 1, 0)] == "External"
+
+
+def test_an_idle_printer_has_a_translated_current_object():
+    coord = SimpleNamespace(
+        client=SimpleNamespace(_host="1.2.3.4"),
+        data={"printFileName": ""},
+        available=True,
+        power_is_off=lambda: False,
+    )
+    value = CurrentObjectSensor(coord).native_value
+    assert value in _SENSOR_STRINGS["current_object"]["state"], value
+
+
+def test_a_box_sensor_says_which_unit_it_is():
+    """The card's "fill from device" places it by this, not by an entity id the
+    user may have renamed (R43)."""
+    from custom_components.ha_creality_ws.sensor import KCFSBoxSensor
+
+    sensor = KCFSBoxSensor(_coordinator(GENERIC_SLOT), box_id=2, sensor_type="temp")
+    assert sensor.extra_state_attributes == {"box_id": 2}
+
+
+def test_an_active_slot_id_sent_as_text_is_read_or_dropped():
+    """The printer sends ints, but a text id used to raise TypeError on
+    `slot_id + 1` and fail the sensor's every update."""
+    assert _active_slot("1", 0, "1") == "box_1_slot_2"
+    assert _active_slot(1, 0, "?") is None

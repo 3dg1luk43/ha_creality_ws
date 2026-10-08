@@ -33,7 +33,9 @@ _SIMULATOR_OPTIONAL_DEPS = frozenset({"aiortc", "av", "websockets", "aiohttp", "
 
 
 def _source() -> str:
-    return SERVER.read_text(encoding="utf-8")
+    """The simulator's code: the entry script and the tools/simulator package."""
+    files = [SERVER, *sorted((ROOT / "tools" / "simulator").glob("*.py"))]
+    return "\n".join(f.read_text(encoding="utf-8") for f in files)
 
 
 # --------------------------------------------------------------------------- #
@@ -54,7 +56,7 @@ def test_server_streams_cfs_connect():
 def test_server_handles_modify_material():
     """Without this branch the set_cfs_material service has nothing to talk to."""
     source = _source()
-    assert '"modifyMaterial" in params' in source
+    assert 'key == "modifyMaterial"' in source
     assert "def modify_material" in source
 
 
@@ -182,6 +184,9 @@ def simulator():
             "--http-port", str(http_port),
             "--deterministic",
             "--video-source", "synthetic",
+            # Only the two ports the test reserved: no web, MJPEG or control
+            # listener on the host's 80, 8080 or 8099.
+            "--web-port", "0", "--mjpeg-port", "0", "--control-port", "0",
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -210,7 +215,7 @@ def _slot(boxes, box_id, slot_id):
 
 async def _read_until(ws, predicate, timeout=15.0):
     """Telemetry snapshots interleave with replies, so filter for what we want."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while loop.time() < deadline:
         raw = await asyncio.wait_for(ws.recv(), timeout=deadline - loop.time())

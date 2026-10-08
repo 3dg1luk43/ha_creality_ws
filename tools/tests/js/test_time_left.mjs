@@ -68,6 +68,12 @@ test("sub-minute remainders still render", () => {
   assert.equal(pill("0.005", "h"), "18s");
 });
 
+test("a fractional time is shown in whole seconds", () => {
+  // #103: some firmware reports a float, and the card printed every decimal.
+  assert.equal(fmtTimeLeft(145.6789), "2:25");
+  assert.equal(pill("0.0336", "h"), "2:00");
+});
+
 let failed = 0;
 for (const [name, fn] of tests) {
   try { fn(); console.log(`ok   ${name}`); }

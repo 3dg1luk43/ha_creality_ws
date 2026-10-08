@@ -46,6 +46,19 @@ test("collects the fields the edit dialog prefills from", () => {
   assert.equal(slot.pressure, 0.04);
 });
 
+test("an unknown colour sensor falls back to the slot's colour attribute", () => {
+  // R28. `colorState || color_hex`: "unknown" is truthy, so the attribute was
+  // never consulted and the spool rendered grey.
+  for (const sentinel of ["unknown", "unavailable"]) {
+    const card = cardForOneSlot();
+    card.hass = makeHass(slotEntities(1, 0, {
+      color: sentinel,
+      attributes: { ...FULL_ATTRS, color_hex: "#ff0000" },
+    }));
+    assert.equal(card._collectData().boxes[0].slots[0].color, "#ff0000", sentinel);
+  }
+});
+
 test("prefers the printer ids published by the sensor", () => {
   const card = cardForOneSlot();
   // Card position 0 would guess box 1; the attributes say box 3, which must win.

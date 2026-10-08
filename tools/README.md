@@ -2,200 +2,128 @@
 
 This directory contains tools for developing and deploying the Creality WebSocket integration.
 
-## Unified Creality Printer Test Server
+## Printer simulator
 
-One test server to emulate telemetry and video behavior of Creality K-series and Ender models. It merges the previous separate WS and WebRTC/MJPEG servers.
+A simulated Creality printer to test the integration against: the WebSocket
+telemetry and commands, the cameras, the printer's web server and Moonraker,
+with a control UI to drive scenarios. It follows what real printers send (field
+names, types, delta frames, numbers as strings on the K1 family) and how their
+firmware behaves around a print; `docs/internal/reference/07-simulator.md`
+lists what it reproduces and what it does not.
 
-File: `tools/creality_printer_test_server.py`
-
-Features
-- WebSocket telemetry on `ws://<host>:9999`
-- HTTP endpoints on `http://<host>:8000`:
-	- WebRTC signaling: `POST /call/webrtc_local` (K2 family models)
-	- MJPEG stream: `GET /stream.mjpeg` (K1/Ender/Hi models)
-- Default video: 1080p at 30 fps (overridable)
-- Expanded states: self-testing -> printing/paused/idle
-- Configurable print duration, layers, objects
-- Random XYZ movement while printing
-- Temperature targets with ±0.1–0.2°C oscillation
-	- Defaults: nozzle 250°C, bed 70°C, box 50°C (override with --target-* flags)
-- Dynamic working layer and current object index
-- Randomized case/model/side fan values (bridge spikes)
-- Fan **control** via `M106 P<0|1|2> S<0-255>` over `gcodeCmd`; a manually driven fan holds its value
-- H.264 video with a 1s keyframe interval (what real K-series printers send, and what Home Assistant's HLS pipeline needs)
-- Model-based capabilities: box temp sensor/control, light, camera type
-- Deterministic mode and a test-control endpoint for reproducible/scripted testing
-- CFS: `cfsConnect` in the telemetry stream, `boxsInfo` on request, and **material writes** via `modifyMaterial`
-- Sliced-G-code metadata: `reqGcodeFile` returns a `retGcodeFileInfo2` listing of
-  several files, so matching the running job out of it is exercised, along with a
-  file that carries a length but no weight
-
-CFS material writes
-
-`{"method":"set","params":{"modifyMaterial":{...}}}` updates the stored slot, so the
-next `boxsInfo` request reflects the change -- that round trip is what makes
-`ha_creality_ws.set_cfs_material` testable without CFS hardware.
-
-- Addressed by `boxId` (matching `materialBoxs[].id`) and `id` (matching `materials[].id`)
-- **Merges** rather than replaces: a key that is absent from the payload keeps the
-  value the slot already has. This matters most for `rfid` -- writing an empty
-  string would erase a real tag association, so the integration omits the key
-  instead
-- Writable keys: `type`, `name`, `vendor`, `color`, `minTemp`, `maxTemp`, `pressure`, `rfid`
-- An unknown `boxId` or `id` is **rejected and logged**, not silently created, so
-  an off-by-one in the caller fails loudly during testing
+Code: `tools/simulator/` (a package). `tools/creality_printer_test_server.py`
+is the entry point and keeps the old command line.
 
 ```bash
-# watch a write land (the server logs the payload and the resulting slot)
-python3 tools/creality_printer_test_server.py --model k2plus --deterministic
+python3 tools/creality_printer_test_server.py --model k1c --simulate-print   # or: cd tools && python3 -m simulator ...
 ```
 
-`tools/tests/test_cfs_simulator.py` drives this over a real socket. Those tests
-skip automatically unless `websockets` is importable and `.venv` has the
-simulator's dependencies, which is why they do not run in CI.
+Then open the control UI at `http://<host>:8099/ui/` (on the test box:
+`http://127.0.0.1:8323/ui/`).
 
-Dependencies
-- Required: `aiohttp`, `aiortc`, `av`, `numpy`, `websockets`
-- Optional for MJPEG: `Pillow`
+To keep it running in the background, `tools/simulator.sh on [model] [flags...]`
+installs, enables and starts it as the systemd unit `creality-simulator.service`
+(k2plus with a one-year print by default, control UI on `:8888`), and `off` stops
+and disables it; `status`, `restart` and `logs` do what they say. The model and
+flags are written into the unit, so it comes back the same after a reboot.
 
-Run without parameters for a comprehensive help guide:
+### Ports
 
-```bash
-python3 tools/creality_printer_test_server.py
-```
+| Port | What | Models |
+|---|---|---|
+| 9999 | WebSocket telemetry and commands | all |
+| 8000 | WebRTC signalling, `POST /call/webrtc_local` | WebRTC cameras |
+| 8080 | mjpg-streamer: `/?action=stream`, `/?action=snapshot` | MJPEG cameras |
+| 80 | web page and print preview, `/downloads/original/current_print_image.png` | all |
+| 7125 | Moonraker, `/printer/objects/query` | K2 Base |
+| 8099 | control UI (`/ui/`) and API (`/api/state`, `/api/action`, `/api/log`, `/test/*`); stays up while the printer is "off" | simulator only |
 
-Common examples
+Each is a flag (`--ws-port`, `--http-port`, `--mjpeg-port`, `--web-port`,
+`--moonraker-port`, `--control-port`); `0` disables the optional ones, and a
+port that cannot be bound (80 without root) is logged and skipped.
 
-```bash
-# K2 Plus with WebRTC camera, 10-minute print, default 1080p30
-python3 tools/creality_printer_test_server.py --model k2plus --simulate-print --print-seconds 600
+### Models
 
-# K1 with MJPEG camera, 720p25, targets set
-python3 tools/creality_printer_test_server.py --model k1 --simulate-print --width 1280 --height 720 --fps 25 \
-	--target-nozzle 210 --target-bed 60
-
-# K2 Pro, set box temp, 8 objects, 160 layers, larger volume
-python3 tools/creality_printer_test_server.py --model k2pro --simulate-print --target-box 40 --objects 8 --layers 160 \
-	--max-x 300 --max-y 300 --max-z 300
-```
-
-Endpoints
-- WebSocket telemetry: `ws://<host>:9999`
-- WebRTC signaling: `POST http://<host>:8000/call/webrtc_local` (K2 family)
-- MJPEG stream: `GET http://<host>:8000/stream.mjpeg` (others)
-
-Test-control endpoints (not present on real printers)
-
-These pin telemetry on demand so a scenario can be reached instantly instead of
-waiting out a simulated print.
-
-- `POST /test/set` -- force telemetry fields; `null` clears one field
-- `POST /test/reset` -- drop all forced fields
-- `POST /test/cfs` -- replace a CFS box's slot list: `{"box_id": 1, "materials": [...]}`
-- `GET /test/state` -- the exact snapshot currently being streamed
-
-```bash
-# park the printer at 100% with an error and a filament runout
-curl -X POST -H 'Content-Type: application/json' \
-  -d '{"printProgress":100,"err":{"errcode":521,"key":3},"materialStatus":1}' \
-  http://127.0.0.1:8000/test/set
-
-curl -X POST http://127.0.0.1:8000/test/reset
-```
-
-Reproducible runs and edge cases
-
-```bash
-# identical telemetry every run -- use this when diffing entity states
-# between two versions of the integration to check for regressions.
-# Exception: anything derived from elapsed wall-clock time still depends on
-# when you sample it. That is printProgress, printJobTime, printLeftTime,
-# layer and usedMaterialLength, and also state (self-test -> printing -> idle
-# on a timer) plus everything computed from the progress: dProgress,
-# curObjectIndex and realTimeFlow. The rest is fixed.
-python3 tools/creality_printer_test_server.py --model k2plus --simulate-print --deterministic
-
-# awkward CFS payloads: already-correct 6-char colour, missing vendor,
-# multi-colour spool, shared rfid across colours, empty external slot
-python3 tools/creality_printer_test_server.py --model k2plus --simulate-print --cfs-variant edge
-```
-
-Notes
-- Camera mode is selected automatically based on model.
-- Temperature and fans are simulated realistically for UI testing.
-- Video answers H.264 first by default (`--prefer-codec`). Home Assistant's
-  `stream` component cannot package VP8 into HLS, so `--prefer-codec vp8` will
-  make HLS/`camera.record` hang while WebRTC playback still works.
-- `--video-source auto` (default) pre-encodes a short clip with a 1s GOP and
-  sends the packets through untouched; aiortc's own H.264 encoder inherits
-  libx264's 250-frame keyframe interval, which is far too long for HA's stream
-  worker. Needs `ffmpeg` on PATH; without it the server falls back to synthetic
-  frames and HLS will not work.
-- If MJPEG fails, install Pillow.
-
-## deploy_to_ha.sh
-
-Deployment script that syncs code from the development repository to production Home Assistant.
-
-### Usage
-
-```bash
-# Dry run - see what would happen
-./tools/deploy_to_ha.sh
-
-# Full deployment with backup and restart
-./tools/deploy_to_ha.sh --run
-
-# Deploy without creating backup
-./tools/deploy_to_ha.sh --run --no-backup
-
-# Deploy without restarting Home Assistant
-./tools/deploy_to_ha.sh --run --no-restart
-
-# Deploy only the Lovelace card (k_printer_card.js)
-./tools/deploy_to_ha.sh --run --card
-
-# Deploy only the card without backup or restart
-./tools/deploy_to_ha.sh --run --card --no-backup --no-restart
-```
+`--model` picks a profile (`python3 tools/creality_printer_test_server.py --help`
+lists them): `k1c` (1.3.3.x, MJPEG; the test box default), `k1c-1.3.5`
+(WebRTC, `webrtcSupport: 1`), `k1`, `k1max`, `k1se`, `k2` (Base: chamber
+target 0 on the WebSocket, real value in Moonraker), `k2pro`, `k2plus`,
+`e3v3`, `e3v3ke`, `e3v3plus`, `crealityhi`. The control UI can switch model
+at runtime.
 
 ### What it does
 
-**Full deployment mode (default):**
-1. **Creates timestamped backup** of production code in `/root/ha_creality_ws/backups/`
-2. **Syncs code** from development repo to production Home Assistant
-3. **Removes cache files** (`__pycache__`, `*.pyc`, `*.pyo`) from production
-4. **Restarts Home Assistant** via API call
+- **Telemetry like a real printer:** one full frame on connect, then only the
+  keys that changed (`--frames full` restores the old every-2-seconds full
+  frame). The K1 family writes temperatures and flow as `"31.030000"`. Client
+  heartbeats are answered with `ok`. `get` requests are answered with only
+  what was asked: `boxsInfo`, the G-code listing, `reqPrintObjects`
+  (`{current_object, excluded_objects, objects}`), `reqProbedMatrix`, or for
+  `ReqPrinterPara` a full frame.
+- **A print's whole life:**
+  - Heating with `state 1` at 0 %, then a self-test on K2 and Hi
+    (`withSelfTest` 1..99).
+  - Progress reads 100 while time is still left, then 99 once more, then the
+    job completes with the file still selected.
+  - Optionally, progress resets to 0 later (`--finished-reset-seconds`).
+  - A pause freezes progress and the time left.
+  - A stop is `state4`, `state0` or `clear` (`--stop-style`).
+  - Reprints of the same file.
+- **Conditions and faults** (control UI or `POST /api/action`):
+  - Prints: start with any file and length, pause, resume, stop, finish now, a
+    mid-print CFS swap (`state 0` for a while), homing (`deviceState` 7).
+  - Errors (code and key), filament runout with its pause.
+  - Power: power off (connections dropped, ports refused), power on with blank
+    values (#121).
+  - Connections: clean or abnormal drops, a silent printer, ignored commands, a
+    late first frame.
+  - Field overrides.
+- **CFS:**
+  - Boxes attach, detach, chain on and come off.
+  - Slots are selected and consumed while printing.
+  - `modifyMaterial` writes merge into the slot. They are addressed by `boxId`
+    and `id`, unknown targets are rejected, and an omitted `rfid` keeps the
+    tag. The echo can store the colour as sent or padded like the stream
+    (#113).
+- **G-code listing:** `retGcodeFileInfo2` (1.3.5.22), the legacy packed
+  `retGcodeFileInfo` (1.3.3.x), or no reply (`--gcode-listing`).
+- **Commands:** temperatures, light, `SET_PIN` LED dimming (K2 Pro/Plus,
+  recorded), fans via `M106 P<0|1|2> S<0-255>`, speed and flow, autohome. Every
+  message in and out is in the control UI's log and `GET /api/log`.
 
-**Card-only mode (`--card`):**
-1. **Creates backup** of only the `k_printer_card.js` file
-2. **Syncs only the card file** from development to production
-3. **Restarts Home Assistant** via API call (optional)
+### Video
 
-### Configuration
+The picture is a 4-second loop stored with the simulator in
+`tools/simulator/media/`:
+- `loop.h264`: H.264 with a keyframe every second, which Home Assistant's HLS
+  pipeline and go2rtc need.
+- `loop.mjpeg`: JPEG frames for the MJPEG camera.
 
-- **Repository**: `/root/ha_creality_ws` (development)
-- **Production**: `/root/ha_config/custom_components/ha_creality_ws` (SMB mount)
-- **Backups**: `/root/ha_creality_ws/backups/` (timestamped)
-- **API**: Home Assistant restart via authenticated API call
+Nothing is encoded at runtime, so low-end hosts keep up and neither ffmpeg nor
+Pillow is needed. Regenerate with `cd tools && python3 -m simulator.media`
+(needs ffmpeg with libx264). `--video-source synthetic|ffmpeg` renders live
+instead.
 
-### Safety Features
+### Old test-control endpoints
 
-- **Dry-run by default**: Use `--run` to actually perform changes
-- **Automatic backups**: Creates timestamped backups before changes
-- **Validation**: Checks that source and destination directories exist
-- **Error handling**: Stops on errors and provides clear messages
-- **Cache cleanup**: Removes Python cache files to prevent issues
+`POST /test/set` (force fields; `null` clears one), `POST /test/reset`,
+`POST /test/cfs` (`{"box_id": 1, "materials": [...]}`) and `GET /test/state`
+still work, on the control port and on :8000.
 
-### Examples
+### Tests
 
-```bash
-# Quick development cycle
-./tools/deploy_to_ha.sh --run
+- `tools/tests/test_simulator_core.py` covers the printer model, the frames
+  and the protocol, with no third-party dependencies, so it runs in CI.
+- `test_simulator_server.py` and `test_cfs_simulator.py` run the real servers;
+  they skip where `websockets`/`aiohttp` (or `.venv`) are missing.
 
-# Deploy without backup (faster, but no rollback)
-./tools/deploy_to_ha.sh --run --no-backup
+Dependencies: `aiohttp`, `websockets`; for cameras `aiortc`, `av`, `numpy`
+(and `Pillow` only for live-rendered MJPEG).
 
-# Deploy without restart (manual restart later)
-./tools/deploy_to_ha.sh --run --no-restart
-```
+## deploy_to_ha.sh (maintainer only)
+
+`tools/test_files/deploy_to_ha.sh` is gitignored and not in the repository. It
+copies the working tree into the maintainer's own Home Assistant and restarts
+it: a dry run by default, `--run` to apply, `--card` for the printer card only,
+`--no-backup` and `--no-restart`. To try a change in Home Assistant without it,
+use the test box (`tools/testbox`, see its README).

@@ -10,14 +10,20 @@ from typing import Any
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator  # type: ignore[import]
 from homeassistant.helpers.aiohttp_client import async_get_clientsession  # type: ignore[import]
 from homeassistant.helpers.dispatcher import async_dispatcher_send  # type: ignore[import]
+from homeassistant.helpers import device_registry as dr  # type: ignore[import]
 from homeassistant.helpers import entity_registry as er  # type: ignore[import]
+from homeassistant.helpers import issue_registry as ir  # type: ignore[import]
 from homeassistant.helpers.translation import async_get_translations  # type: ignore[import]
 from homeassistant.util import slugify  # type: ignore[import]
+from homeassistant.exceptions import HomeAssistantError  # type: ignore[import]
 from .ws_client import KClient
 from .utils import (
     BUSY_PRINT_STATES,
+    PREVIEW_PRINT_STATES,
     ModelDetection,
     derive_activity_state,
+    detect_camera_type,
+    parse_model_version,
     safe_float,
 )
 from .notification_rules import (
@@ -55,14 +61,18 @@ from .notification_rules import (
     is_mobile_target,
     notify_service_slug,
     is_new_job_cycle,
+    REARM_JOB_STATES,
     render_user_template,
     TEMPLATE_FIELDS,
     notify_tag_base,
+    is_apple_platform,
+    native_data,
     stringify_data,
 )
 from .const import (
     DOMAIN,
     STALE_AFTER_SECS,
+    POWER_SWITCH_MISSING_GRACE_SECS,
     CLEAR_NOTIFICATION_MARKER,
     CONF_NOTIFY_ACTIONS,
     CONF_NOTIFY_CAMERA_SNAPSHOT,
@@ -103,6 +113,20 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _cfs_shape(boxs_info: Any) -> frozenset[tuple[Any, Any, tuple[Any, ...]]]:
+    """Which boxes and slots `boxsInfo` describes, ignoring their contents."""
+    boxes = (boxs_info or {}).get("materialBoxs") if isinstance(boxs_info, Mapping) else None
+    return frozenset(
+        (
+            box.get("id"),
+            box.get("type"),
+            tuple(m.get("id") for m in (box.get("materials") or []) if isinstance(m, Mapping)),
+        )
+        for box in (boxes or [])
+        if isinstance(box, Mapping)
+    )
+
+
 def _warn_on_unsendable(data: dict[str, Any], target: str) -> None:
     """Complain in our own log if a payload cannot survive the push relay.
 
@@ -139,6 +163,25 @@ def _warn_on_unsendable(data: dict[str, Any], target: str) -> None:
         )
 
 
+def not_connected_error() -> HomeAssistantError:
+    """What a user command reports when the printer cannot take it (R32)."""
+    return HomeAssistantError(
+        translation_domain=DOMAIN, translation_key="printer_not_connected"
+    )
+
+
+async def send_command(client, **params: Any) -> None:
+    """Send a user's command, or tell them it did not go.
+
+    The client raises a bare RuntimeError, which Home Assistant shows as
+    "Unknown error" with a traceback in the log (R32).
+    """
+    try:
+        await client.send_set_retry(**params)
+    except Exception as exc:  # pylint: disable=broad-except
+        raise not_connected_error() from exc
+
+
 class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator to manage connection and data for the printer."""
     def __init__(self, hass, host: str, power_switch: str | None = None, config_entry=None):
@@ -162,6 +205,16 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._pending_pause = False
         self._pending_resume = False
         self._last_power_off: bool = False
+        # The camera type the camera platform built in auto mode; None when a
+        # mode is forced or no camera has been set up yet.
+        self.camera_type_in_use: str | None = None
+        self._power_lock = asyncio.Lock()
+        # When the configured switch was first seen missing, and whether the
+        # repair issue for it is up (R24).
+        self._switch_missing_since: float | None = None
+        self._switch_missing_reported = False
+        # Last boxsInfo shape seen, for discovery of a CFS box added later.
+        self._cfs_shape: frozenset | None = None
         
         # Notification & Performance
         self._notify_targets: list[str] = []
@@ -176,6 +229,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._notify_templates: dict[str, str] = {}
         # The options as of the last `_load_options`; see `notifications_only_change`.
         self._loaded_options: dict[str, Any] | None = None
+        # The entry data this coordinator wrote itself, so the update listener
+        # can tell that write from a change that needs a reload (R40).
+        self._own_data_write: dict[str, Any] | None = None
         # (notification, template) pairs already complained about; see
         # `_custom_message`.
         self._notify_template_warned: set[tuple[str, str]] = set()
@@ -191,6 +247,14 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # undeliverable -- it stays owed until there is somewhere to send it.
         self._card_dismiss_owed = False
         self._soon_dismiss_owed = False
+        # The printer was mid-job when the baseline was taken (a restart), so
+        # the next START re-syncs a card that may still be on the phone.
+        self._live_resync = False
+        # Whether a finishing-soon reminder actually went out this job. The
+        # near-end latch is set with the option off too (detection is not
+        # gated, only sends are), so dismissing on the latch sent a clear for
+        # a reminder that never existed (R28).
+        self._soon_reminder_sent = False
         # An error or runout alert is on a phone. Errors and runouts share one
         # tag, so this is deliberately not two flags: whichever condition
         # resolves last is the one that gets to take the alert away.
@@ -201,9 +265,10 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # platforms are forwarded after this coordinator exists, so nothing
         # can be resolved here.
         self._entity_id_cache: dict[tuple[str, str], str] = {}
-        # notify target -> companion `os_name`. Resolved lazily; a target the
-        # user has just added would not be in a cache built at setup.
-        self._target_os_cache: dict[str, str | None] = {}
+        # notify target -> companion `(os_name, manufacturer)`. Resolved
+        # lazily; a target the user has just added would not be in a cache
+        # built at setup.
+        self._target_os_cache: dict[str, tuple[str | None, str | None]] = {}
         self._notify_completed = False
         self._notify_error = False
         self._notify_minutes_to_end = False
@@ -253,7 +318,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Only enable power detection if a switch is configured
         if self._power_switch_entity:
             self.client._check_power_status = self.power_is_off
-            self._last_power_off = self.power_is_off()
+            self._last_power_off = self._switch_reports_off()
             _LOGGER.debug("Power switch configured: %s (initial state: %s)", 
                          self._power_switch_entity, "OFF" if self._last_power_off else "ON")
         else:
@@ -311,18 +376,109 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # This allows manual "Reconnect" to work even if the switch entity is lagging or wrong.
         if self.client.is_connected:
             return False
+        return self._switch_reports_off()
 
+    def _check_camera_type(self) -> None:
+        """Rebuild the camera if telemetry shows it is the wrong kind.
+
+        The type is decided at setup, often before the printer has said
+        anything: an HA start with the printer switched off, or a firmware
+        update that moved a K1C to WebRTC while HA kept running (#46). Recording
+        the corrected type reloads the entry through its update listener, and
+        the reload builds the right camera. Once per coordinator.
+        """
+        in_use = self.camera_type_in_use
+        if in_use is None or self.config_entry is None:
+            return
+        live = detect_camera_type(self.data, in_use)
+        if not live or live == in_use:
+            return
+        self.camera_type_in_use = None
+        _LOGGER.info(
+            "Printer reports a %s camera, not %s; rebuilding the camera", live, in_use
+        )
+        self.hass.config_entries.async_update_entry(
+            self.config_entry,
+            data={**self.config_entry.data, "_cached_camera_type": live},
+        )
+
+    def _switch_reports_off(self) -> bool:
+        """What the power switch itself says, whatever the socket is doing.
+
+        Power *edges* must come from here, not from `power_is_off`. A plug that
+        cuts a running printer leaves the socket looking connected for another
+        30 s, during which `power_is_off` is False by design, so an edge decided
+        from it never saw the printer go off and never restarted the client
+        when it came back on (#45, regressed in 0.9.1).
+        """
         eid = self._power_switch_entity
         if not eid:
             return False
         st = self.hass.states.get(eid)
         if not st:
-            _LOGGER.debug("Power switch entity %s not found (assume OFF)", eid)
-            return True # FAIL-SAFE: Assume OFF if switch entity isn't ready
+            return self._switch_missing(eid)
+        if self._switch_missing_since is not None:
+            self._switch_found_again()
         is_off = str(st.state).lower() in ("off", "unavailable", "unknown")
         if is_off:
             _LOGGER.debug("Power switch %s is %s -> skipping connection", eid, st.state)
         return is_off
+
+    def _switch_missing(self, eid: str) -> bool:
+        """A configured switch that is not in the state machine.
+
+        Off at first: at startup the plug's own integration may simply not have
+        loaded yet. But a switch that stays missing has been renamed or deleted,
+        and treating it as off for good meant the printer never connected again,
+        with only a debug line to say why (R24). Past the grace period it counts
+        as no switch, and a repair issue names it.
+        """
+        now = time.monotonic()
+        if self._switch_missing_since is None:
+            self._switch_missing_since = now
+            _LOGGER.debug("Power switch entity %s not found (assume OFF for now)", eid)
+        if now - self._switch_missing_since < POWER_SWITCH_MISSING_GRACE_SECS:
+            return True
+        if not self._switch_missing_reported:
+            self._switch_missing_reported = True
+            _LOGGER.warning(
+                "Power switch %s does not exist; connecting as if no switch were "
+                "configured. Choose another one in the integration's options.",
+                eid,
+            )
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                self._missing_switch_issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key="missing_power_switch",
+                translation_placeholders={
+                    "entity_id": eid,
+                    "printer": self._notify_title(),
+                },
+            )
+        return False
+
+    def _switch_found_again(self) -> None:
+        self._switch_missing_since = None
+        if self._switch_missing_reported:
+            self._switch_missing_reported = False
+            ir.async_delete_issue(self.hass, DOMAIN, self._missing_switch_issue_id)
+
+    @property
+    def _missing_switch_issue_id(self) -> str:
+        return f"missing_power_switch_{self.entry_id or self.client._host}"
+
+    async def async_recheck_missing_switch(self) -> None:
+        """Re-decide power while the switch is missing.
+
+        No state-change event will ever arrive for an entity that does not
+        exist, and a client deferred at setup is not running to poll, so the
+        end of the grace period has to be noticed from the interval check.
+        """
+        if self._power_switch_entity and self._switch_missing_since is not None:
+            await self.async_handle_power_change()
 
     async def async_start(self) -> None:
         """Start the WebSocket connection."""
@@ -334,16 +490,51 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.client.start()
         
     async def ensure_connected(self) -> bool:
-        """Ensure WebSocket connection is active, restart if needed."""
+        """A live connection for a command about to be sent, or False."""
         if self.power_is_off():
             return False
+        if self.client.is_connected:
+            return True
         # pylint: disable=protected-access
         if not self.client._task or self.client._task.done():
             _LOGGER.info("WebSocket connection lost, restarting...")
             await self.client.start()
-            return await self.client.wait_first_connect(timeout=10.0)
-        return True
+        else:
+            # The loop is alive but between attempts, in a backoff that can
+            # last five minutes. This used to count as connected, so a Stop
+            # pressed then waited the backoff out (R66). Try now instead.
+            await self.client.reconnect()
+        # The live connection, not the first one ever: that is set for good
+        # after the first connect, and answered True during every outage since.
+        return await self.client.wait_connected(timeout=10.0)
         
+    def _detect_k2_base(self, payload: Mapping[str, Any]) -> None:
+        """Latch whether this is a K2 Base, from what has arrived so far.
+
+        Read across frames, not from this one alone: the detector takes the
+        board code from either field, and a frame carrying only one of them
+        latched False for good (R41). A match decides at once; a miss only once
+        both are known.
+        """
+        if self._is_k2_base is not None or not (
+            payload.get("model") or payload.get("modelVersion")
+        ):
+            return
+        seen = {**(self.data or {}), **payload}
+        if ModelDetection(seen).is_k2_base:
+            self._is_k2_base = True
+        elif seen.get("model") and seen.get("modelVersion"):
+            self._is_k2_base = False
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        """What a refresh request returns: the telemetry already pushed.
+
+        The printer pushes everything, so there is nothing to fetch. Without
+        this, `homeassistant.update_entity` on any of the entities (and every
+        automation or card that calls it) failed with NotImplementedError (R41).
+        """
+        return self.data if self.data is not None else {}
+
     async def async_stop(self) -> None:
         """Stop the WebSocket connection."""
         await self.client.stop()
@@ -385,9 +576,23 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("Power change handler called but no switch configured; ignoring")
             return
         
-        now_off = self.power_is_off()
-        was_off = getattr(self, "_last_power_off", False)
-        
+        # Serialized: stopping can wait seconds on the socket close, and a quick
+        # off-then-on must not interleave into a stopped client with power on.
+        async with self._power_lock:
+            await self._apply_power_edge()
+        self.async_update_listeners()
+
+    async def _apply_power_edge(self) -> None:
+        now_off = self._switch_reports_off()
+        if now_off and self.client.is_connected:
+            st = self.hass.states.get(self._power_switch_entity)
+            if st is None or str(st.state).lower() != "off":
+                # A plug blinking to unavailable/unknown is not a power cut,
+                # and the printer is visibly streaming: keep the connection.
+                # Only a real "off" stops it.
+                return
+        was_off = self._last_power_off
+
         if now_off and not was_off:
             _LOGGER.info("Power OFF detected; stopping WebSocket client")
             await self.client.stop()
@@ -403,20 +608,14 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await asyncio.sleep(0.1)
             await self.client.start()
             self._last_power_off = False
-        
-        self.async_update_listeners()
-        
-    def _notify_listeners_threadsafe(self) -> None:
-        """Always execute listener updates on HA's event loop."""
-        # Pass the callable itself (no parens); the loop invokes it safely.
-        self.hass.loop.call_soon_threadsafe(self.async_update_listeners)
 
     def check_stale(self) -> None:
-        """Called by periodic timer; may run off the event loop."""
+        """Tell the entities when availability flips. From the interval check,
+        a callback, so on the event loop."""
         now_avail = self.available
         if now_avail != getattr(self, "_last_avail", None):
             self._last_avail = now_avail
-            self._notify_listeners_threadsafe()
+            self.async_update_listeners()
 
     @property
     def available(self) -> bool:
@@ -550,7 +749,10 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._pending_resume = False
             return
 
-        if self._pending_pause and state == "printing":
+        # Not while homing, for the same reason request_pause queues then: the
+        # printer ignores a pause mid-move, and the queue was cleared as if it
+        # had landed (R28).
+        if self._pending_pause and state == "printing" and not self._is_busy_homing():
             try:
                 await self.client.send_set_retry(pause=1)
                 self._pending_pause = False
@@ -582,14 +784,25 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         newly_seen = [f for f in LATE_DISCOVERY_FIELDS if f not in self.data and f in payload]
 
+        # A CFS box (or slot) can appear after the first boxsInfo: a second
+        # unit daisy-chained later, or the CFS reporting after the external
+        # holder at boot. Its key is no longer "newly seen" then, so the shape
+        # of the box list is compared as well (R21). Platforms dedupe by unique
+        # id, so a repeated signal creates nothing twice.
+        cfs_reshaped = False
+        if "boxsInfo" in payload:
+            shape = _cfs_shape(payload.get("boxsInfo"))
+            cfs_reshaped = shape != self._cfs_shape and "boxsInfo" not in newly_seen
+            self._cfs_shape = shape
+
         self.data.update(payload)
 
-        if newly_seen:
+        if newly_seen or cfs_reshaped:
             _LOGGER.info(
-                "Telemetry reported %s for the first time; triggering dynamic discovery",
-                ", ".join(newly_seen),
+                "Telemetry reported %s; triggering dynamic discovery",
+                ", ".join(newly_seen) if newly_seen else "a changed set of CFS boxes",
             )
-            if "boxsInfo" in newly_seen:
+            if "boxsInfo" in newly_seen or cfs_reshaped:
                 _LOGGER.debug("CFS Raw Data: %s", json.dumps(payload.get("boxsInfo"), default=str))
             async_dispatcher_send(self.hass, f"{DOMAIN}_new_entities_{self.entry_id}")
 
@@ -697,17 +910,16 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # frame that carried neither left a real K2 Base without the suppression
         # and without the Moonraker poll -- the only source of its targetBoxTemp --
         # so the chamber target snapped back to 0 after every set.
-        if self._is_k2_base is None and (
-            payload.get("model") or payload.get("modelVersion")
-        ):
-            self._is_k2_base = ModelDetection(payload).is_k2_base
+        self._detect_k2_base(payload)
              
         if (payload.get("targetBoxTemp") == 0) and self._is_k2_base:
             payload.pop("targetBoxTemp")
 
         self._absorb_gcode_file_listing(payload)
+        self._follow_firmware(payload)
 
         self.merge_telemetry(payload)
+        self._check_camera_type()
 
         self._recompute_paused_from_telemetry()
         
@@ -721,7 +933,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.exception("flush_pending failed")
 
         # --- Notifications ---
-        await self._check_notifications(payload)
+        # Guarded like the queue above. An exception here used to skip the
+        # rest of the frame, the entity update included, on every frame it
+        # recurred: entities froze on stale values while still "available".
+        try:
+            await self._check_notifications(payload)
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("Notification check failed")
 
         # --- Sliced G-code metadata ---
         # Must stay above the throttle below, which returns early while printing
@@ -818,6 +1036,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Milestone comes off the progress we can actually see so the first real
         # push is a start, not a redundant milestone.
         self._live_card.reset_for_new_job(progress=prog_val)
+        self._live_resync = primed_state in BUSY_PRINT_STATES
 
         # A card outlives the process. `card_active` is in-memory, so after a
         # restart nothing knows one is still on a phone -- and `notifier_tick`
@@ -950,8 +1169,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if getattr(self, "_last_filename", None) != fname:
             self._last_filename = fname
             self._notified_minutes_to_end = False
-            self._notified_filament_runout = False
-            self._last_error_code = 0
+            # Baselined to what the printer reports now, exactly as priming
+            # does, not cleared. A fault that outlives the job before it is not
+            # news: a Hi stuck on error 116 for two days alerted, with a
+            # snapshot, at the start of every print (#125). One that appears,
+            # or clears and comes back, during this job still alerts.
+            self._notified_filament_runout = self._runout_reported(d)
+            self._last_error_code = self._error_code(d)
             # Baseline completion off the progress we can actually see, exactly
             # as _prime_notification_state does. Telemetry arrives incrementally,
             # so the frame that first carries the new file name usually still
@@ -968,15 +1192,6 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # keep publishing it raw, but a notification body should not.
         job = display_filename(fname) or fname
 
-        # 0) Started. Deliberately not tied to the frame the file name changes
-        # on: telemetry arrives incrementally, so that frame usually still holds
-        # the previous job's 100%, and firing there would announce a print
-        # beginning at 100%. Waiting for real progress means the event lands on
-        # the first frame that actually describes the new job.
-        if not self._notified_started and prog_val < 100:
-            self._notified_started = True
-            self._fire_print_event(BUS_EVENT_PRINT_STARTED, d, job)
-
         # 1) Completion
 
         # Progress falling back below 100% means a new job cycle started, even if
@@ -990,7 +1205,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # 100 sent the completion notification twice for every print, once per
         # crossing. A drop that stays within the jitter band is only a new cycle
         # if the job clock restarted too.
-        if is_new_job_cycle(
+        if state in REARM_JOB_STATES and is_new_job_cycle(
             prog_val,
             job_restarted,
             ended_at_completion=self._notified_completed,
@@ -1001,6 +1216,17 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Same predicate, so the card and the completion notification can
             # never disagree about where one job ends and the next begins.
             self._reset_for_new_job(prog_val)
+
+        # 0) Started. Deliberately not tied to the frame the file name changes
+        # on: telemetry arrives incrementally, so that frame usually still holds
+        # the previous job's 100%, and firing there would announce a print
+        # beginning at 100%. Waiting for real progress means the event lands on
+        # the first frame that actually describes the new job. After the
+        # re-arm above, so a reprint of the same file is announced on the frame
+        # that re-arms it rather than the one after.
+        if not self._notified_started and prog_val < 100:
+            self._notified_started = True
+            self._fire_print_event(BUS_EVENT_PRINT_STARTED, d, job)
 
         # Before the one-shot events below: on the frame a print finishes this
         # ends the activity, and the completion banner then arrives on its own
@@ -1061,11 +1287,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # 3) Filament runout (materialStatus == 1). Shares the error toggle,
         # being an error-like state the user wants to hear about together.
-        try:
-            mat_status = d.get("materialStatus")
-            is_runout = mat_status is not None and int(mat_status) == 1
-        except (ValueError, TypeError):
-            is_runout = False
+        is_runout = self._runout_reported(d)
 
         if is_runout and not self._notified_filament_runout:
             if self._notify_error and deliver:
@@ -1074,7 +1296,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     or self._t(
                         "filament_runout",
                         device=self._notify_title(),
-                        state=self._job_state(),
+                        state=self._state_label(self._job_state()),
                     ),
                     kind=ALERT_RUNOUT,
                 )
@@ -1106,17 +1328,18 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             if 0 < left_min <= target_min and not self._notified_minutes_to_end:
                 if self._notify_minutes_to_end and deliver:
+                    # Rounded up: 40 seconds left said "0 minutes" (R33).
+                    minutes = math.ceil(left_min)
                     await self._notify_event(
-                        self._custom_message(
-                            "finishing_soon", minutes=int(left_min)
-                        )
+                        self._custom_message("finishing_soon", minutes=minutes)
                         or self._t(
                             "finishing_soon",
                             device=self._notify_title(),
-                            minutes=int(left_min),
+                            minutes=minutes,
                         ),
                         kind=EVENT_SOON,
                     )
+                    self._soon_reminder_sent = True
                 self._notified_minutes_to_end = True
             elif left_min > (target_min + 2):
                 # The estimate jumped back up by more than the slack; re-arm.
@@ -1133,6 +1356,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._clear_live_card(finished=self._live_card.job_finished)
         if deliver and self._soon_dismiss_owed:
             self._soon_dismiss_owed = False
+            self._soon_reminder_sent = False
             self._notify_dispatch(
                 build_clear_payload(f"{self._notify_tag_base()}_soon"),
                 kind="soon:clear",
@@ -1185,12 +1409,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # it. A print stopped in its last minutes would otherwise leave
         # "finishing in 5 minutes" sitting on the phone for good, and this frame
         # can be the last one that carries a job at all.
-        if deliver and (self._notified_minutes_to_end or self._soon_dismiss_owed):
+        if deliver and (self._soon_reminder_sent or self._soon_dismiss_owed):
             self._notify_dispatch(
                 build_clear_payload(f"{self._notify_tag_base()}_soon"),
                 kind="soon:clear",
                 mobile_only=True,
             )
+            self._soon_reminder_sent = False
         self._soon_dismiss_owed = False
 
         self._fire_print_event(
@@ -1210,6 +1435,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._live_card.card_active:
             self._clear_live_card()
         self._live_card.reset_for_new_job(progress=prog_val)
+        self._live_resync = False
         self._notified_started = False
         self._notified_stopped = False
         # Also once per print: a job stopped near the end latches this, and the
@@ -1276,7 +1502,15 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._notify_preview_image:
             entity_id, state = self._live_entity_state("image", "current_print_preview")
             reason = (getattr(state, "attributes", None) or {}).get("preview_reason")
-            if state is not None and reason not in PREVIEW_REASONS_UNUSABLE:
+            # "not_printing" was recorded while there was no job. With one
+            # running it is stale, and on the frame a job starts it always is:
+            # entities update after notifications, so honouring it left the
+            # start notification without its preview (R27).
+            stale = (
+                reason == "not_printing"
+                and self._job_state() in PREVIEW_PRINT_STATES
+            )
+            if state is not None and (reason not in PREVIEW_REASONS_UNUSABLE or stale):
                 preview_url = f"/api/image_proxy/{entity_id}"
 
         snapshot_url = None
@@ -1380,7 +1614,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "body_layer", layer=snap.layer, total_layers=snap.total_layers
                 )
             )
-        remaining = format_duration(snap.seconds_left, self._notify_strings or {})
+        # Zero or less is the printer having no estimate (warm-up, self-test, or
+        # an estimate that ran out), not "0s left" (R25).
+        remaining = (
+            format_duration(snap.seconds_left, self._notify_strings or {})
+            if snap.seconds_left is not None and snap.seconds_left > 0
+            else ""
+        )
         if remaining:
             parts.append(self._t("body_time_left", duration=remaining))
         return NOTIFY_BODY_SEPARATOR.join(p for p in parts if p) or self._t(
@@ -1433,7 +1673,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._card_dismiss_owed = True
                 # The reminder is on its own tag, so no banner will ever
                 # supersede it and it always needs taking away by hand.
-                self._soon_dismiss_owed = self._notified_minutes_to_end
+                self._soon_dismiss_owed = self._soon_reminder_sent
                 self._clear_live_card(finished=finished, send=False)
             return
 
@@ -1468,7 +1708,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             progress=snap.progress,
             when=when,
             channel=self._t(NOTIFY_CHANNEL_KEY_LIVE),
-            status_text=self._live_status_text(phase, paused),
+            status_text=self._live_status_text(phase, paused, snap),
             live_update=not expired,
             group=tag_base,
             # No snapshot: Android re-downloads a big picture on every push and
@@ -1479,12 +1719,24 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # A card is already on the phone, so this push updates one rather
             # than starting one -- which is what makes it silent on iOS.
             refresh=self._live_card.card_active,
-            # For the iOS Live Activity's own rendered state.
+            # The card's subtitle on both platforms.
             job_name=display_filename(snap.filename) or snap.filename or "",
-            device_name=self._notify_title(),
         )
+        # A new card on an iPhone. Home Assistant keeps an activity token per
+        # tag, and while one has not expired it sends every push to it as an
+        # UPDATE -- this START included. A card swiped away on the phone leaves
+        # such a token behind, and the next print's card then never appeared
+        # (#125, finding 2). Clearing the tag first ends that activity and drops
+        # the token, so the START is a real one. Not after a restart mid-print:
+        # there the token is most likely the card still on screen.
+        clear_first = None
+        if reason is PushReason.START and not self._live_card.card_active:
+            if self._live_resync:
+                self._live_resync = False
+            else:
+                clear_first = build_clear_payload(f"{tag_base}_live")
         self._notify_dispatch(
-            payload, kind=f"live:{reason.value}", live_only=True
+            payload, kind=f"live:{reason.value}", live_only=True, clear_first=clear_first
         )
         self._live_card.record_push(
             reason=reason,
@@ -1494,13 +1746,24 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             when=when,
         )
 
-    def _live_status_text(self, phase: str, paused: bool) -> str:
-        """The short label shown when there is no chronometer to show instead."""
+    def _live_status_text(self, phase: str, paused: bool, snap: LiveSnapshot) -> str:
+        """The short label shown when there is no chronometer to show instead.
+
+        "Finishing" used to be the answer to everything else, so a printer
+        heating or self-testing with no time estimate yet read "Finishing" at 0%
+        (#125's log, R25). It now means what it says: progress under way and
+        the printer's own estimate run out.
+        """
         if paused:
             return self._t("status_paused")
-        if phase == PHASE_START:
+        # From the printer's state, not from this being the card's first push:
+        # a card that starts mid-print (after a restart, or with notifications
+        # switched on mid-print) is not "Starting".
+        if snap.activity_state in ("self-testing", "processing") or snap.progress == 0:
             return self._t("status_starting")
-        return self._t("status_finishing")
+        if snap.seconds_left is not None and snap.seconds_left <= 0:
+            return self._t("status_finishing")
+        return self._t("status_printing")
 
     def _clear_live_card(self, *, finished: bool = False, send: bool = True) -> None:
         """End the live activity.
@@ -1570,6 +1833,14 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except (AttributeError, ValueError, TypeError):
             return 0
 
+    @staticmethod
+    def _runout_reported(d: dict[str, Any]) -> bool:
+        try:
+            mat_status = d.get("materialStatus")
+            return mat_status is not None and int(mat_status) == 1
+        except (ValueError, TypeError):
+            return False
+
     def _notify_action_ids(self) -> dict[str, str]:
         """Action ids for this printer, namespaced by config entry."""
         return action_ids(self.entry_id or self.client._host)
@@ -1610,7 +1881,12 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         elif action == ids[ACTION_RESUME]:
             await self.request_resume()
         elif action == ids[ACTION_STOP]:
-            await self.async_stop_print()
+            # No one to show the error to: the tap came from a phone.
+            try:
+                await self.async_stop_print()
+            except HomeAssistantError:
+                _LOGGER.warning("Stop from the live card not sent: the printer is not connected")
+                return True
         elif action == ids[ACTION_DISMISS]:
             # A swipe only removes the notification that is on screen; the
             # next live-card refresh posts it again under the same tag. This
@@ -1631,9 +1907,8 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         here; telemetry reflects idle soon enough.
         """
         if not await self.ensure_connected():
-            _LOGGER.warning("Cannot execute stop command: printer not connected")
-            return
-        await self.client.send_set_retry(stop=1)
+            raise not_connected_error()
+        await send_command(self.client, stop=1)
 
     def notifier_tick(self) -> None:
         """Clear a live card the printer has stopped reporting on.
@@ -1684,12 +1959,26 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             for key, value in (raw or {}).items()
             if key.startswith(prefix)
         }
+        # The print status sensor's state names, for a job state inside a
+        # sentence: the bare slug put English into every language (R33).
+        status_prefix = f"component.{DOMAIN}.entity.sensor.print_status.state."
+        try:
+            entity_raw = await async_get_translations(self.hass, language, "entity", {DOMAIN})
+        except Exception:  # pylint: disable=broad-except
+            entity_raw = {}
+        for key, value in (entity_raw or {}).items():
+            if key.startswith(status_prefix):
+                self._notify_strings[f"print_status.{key[len(status_prefix):]}"] = value
         if not self._notify_strings:
             _LOGGER.error(
                 "No notification strings available for language %s; "
                 "notifications are disabled until this is fixed",
                 language,
             )
+
+    def _state_label(self, state: str) -> str:
+        """A job state as the print status sensor names it, in the server's language."""
+        return (self._notify_strings or {}).get(f"print_status.{state}") or state
 
     def _t(self, key: str, /, **values: Any) -> str:
         """Resolve one translated notification string.
@@ -1877,6 +2166,45 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self._async_deliver_one(target, payload)
                 )
 
+    def _follow_firmware(self, payload: Mapping[str, Any]) -> None:
+        """Show a new firmware version as soon as the printer reports it (R40).
+
+        The device's version came only from the cache that setup fills on the
+        first run, an integration upgrade or a new address, so a printer
+        updated since kept showing the old firmware indefinitely.
+        """
+        entry = self.config_entry
+        reported = payload.get("modelVersion")
+        if entry is None or not isinstance(reported, str) or not entry.data.get("_device_info_cached"):
+            # Setup's own cache pass writes the first value.
+            return
+        cached = entry.data.get("_cached_model_version")
+        hw, sw = parse_model_version(reported)
+        if not (hw or sw) or (hw, sw) == parse_model_version(cached):
+            return
+        new_data = {**entry.data, "_cached_model_version": reported}
+        self._own_data_write = new_data
+        self.hass.config_entries.async_update_entry(entry, data=new_data)
+        dev_reg = dr.async_get(self.hass)
+        for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
+            if (DOMAIN, self.client._host) in device.identifiers:  # pylint: disable=protected-access
+                dev_reg.async_update_device(device.id, hw_version=hw, sw_version=sw)
+        _LOGGER.info("Printer firmware is now %s (was %s)", sw or hw, parse_model_version(cached)[1])
+
+    def consume_own_data_write(self, entry) -> bool:
+        """Whether the entry update just seen is this coordinator's own cache write.
+
+        Such a write changes nothing the entities are built from at runtime,
+        so it must not reload the entry: a reload mid-print drops the
+        connection and every entity goes unavailable.
+        """
+        expected, self._own_data_write = self._own_data_write, None
+        return (
+            expected is not None
+            and dict(entry.data) == expected
+            and dict(entry.options) == (self._loaded_options or {})
+        )
+
     def notifications_only_change(self, options: Mapping[str, Any]) -> bool:
         """Whether an options update touched nothing but the notification path.
 
@@ -2055,17 +2383,25 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         than guessing from the service name, because "macbookairlukas" is not
         distinguishable from a phone by inspection.
         """
+        return self._target_platform(target)[0]
+
+    def _target_is_apple(self, target: str) -> bool:
+        """Whether a notify target is an Apple companion app (native types)."""
+        return is_apple_platform(*self._target_platform(target))
+
+    def _target_platform(self, target: str) -> tuple[str | None, str | None]:
+        """`(os_name, manufacturer)` of the companion behind a target, cached."""
         if target in self._target_os_cache:
             return self._target_os_cache[target]
 
         slug = notify_service_slug(target)
-        found: str | None = None
+        found: tuple[str | None, str | None] = (None, None)
         if slug:
             entries = getattr(self.hass.config_entries, "async_entries", None)
             for entry in (entries("mobile_app") if entries else ()):
                 data = getattr(entry, "data", None) or {}
                 if slugify(str(data.get("device_name", ""))) == slug:
-                    found = data.get("os_name")
+                    found = (data.get("os_name"), data.get("manufacturer"))
                     break
         self._target_os_cache[target] = found
         return found
@@ -2121,8 +2457,12 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         kind: str = "event",
         mobile_only: bool = False,
         live_only: bool = False,
+        clear_first: dict[str, Any] | None = None,
     ) -> None:
         """Fan a payload out to every configured target without blocking.
+
+        `clear_first` goes to Apple targets just before the payload, in the
+        same task: the clear has to be delivered before the payload is routed.
 
         Deliberately not a coroutine that awaits the sends. `ws_client` awaits
         `_on_message` inline in its receive loop, and a notify call is an HTTPS
@@ -2153,7 +2493,12 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 continue
             sent_to += 1
-            self.hass.async_create_task(self._async_deliver_one(target, payload))
+            if clear_first is not None and self._target_is_apple(target):
+                self.hass.async_create_task(
+                    self._async_deliver_in_order(target, clear_first, payload)
+                )
+            else:
+                self.hass.async_create_task(self._async_deliver_one(target, payload))
 
         if not sent_to:
             return
@@ -2161,7 +2506,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # user-submitted logs, and entity ids plus print file names are theirs,
         # not ours. DEBUG carries them for anyone debugging their own setup.
         #
-        # Live-card pushes stay at DEBUG: there are ~20 per print, and they would
+        # Live-card pushes stay at DEBUG: there can be a hundred per print, and they would
         # otherwise bury the handful of lines that describe something happening.
         if not kind.startswith("live"):
             _LOGGER.info(
@@ -2173,6 +2518,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             targets,
             payload.get("message", ""),
         )
+
+    async def _async_deliver_in_order(
+        self, target: str, first: dict[str, Any], then: dict[str, Any]
+    ) -> None:
+        """Deliver two payloads to one target, the second after the first."""
+        await self._async_deliver_one(target, first)
+        await self._async_deliver_one(target, then)
 
     async def _async_deliver_one(self, target: str, payload: dict[str, Any]) -> None:
         """Deliver one payload to one target, tolerating a dead target."""
@@ -2207,7 +2559,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if title:
                     entity_data["title"] = title
                 await self.hass.services.async_call(
-                    "notify", "send_message", entity_data
+                    "notify", "send_message", entity_data, blocking=True
                 )
                 return
 
@@ -2238,11 +2590,28 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if title:
                 service_data["title"] = title
             if data:
-                # Only the mobile branch reaches here with data still attached,
-                # and that is the one the FCM string rule applies to.
-                service_data["data"] = stringify_data(data)
-                _warn_on_unsendable(service_data["data"], target)
-            await self.hass.services.async_call(domain, service, service_data)
+                # Only the mobile branch reaches here with data still attached.
+                # The FCM string rule is Android's: an iPhone needs the real
+                # types, and gets them whenever it can be identified. An
+                # unidentified target gets strings, which Android requires and
+                # the typed `content_state` copy covers on iOS.
+                if self._target_is_apple(target):
+                    service_data["data"] = native_data(data)
+                else:
+                    service_data["data"] = stringify_data(data)
+                    _warn_on_unsendable(service_data["data"], target)
+            # Blocking, so the call has finished when this returns. Without it
+            # core only schedules a task and returns: a dismissal and the
+            # banner meant to replace it went out concurrently on the same tag,
+            # a slow dismissal could take the banner down with it, and no
+            # failure ever reached the except below. Safe here: every caller
+            # runs this in its own task, off the WebSocket receive loop.
+            await self.hass.services.async_call(
+                domain, service, service_data, blocking=True
+            )
+        except HomeAssistantError as err:
+            # Rejected by the notify platform: one line, not a traceback.
+            _LOGGER.warning("Notification to %s was refused: %s", target, err)
         except Exception:  # pylint: disable=broad-except
             # One unreachable phone must not starve the others.
             _LOGGER.exception("Failed to send notification to %s", target)

@@ -77,13 +77,13 @@ def test_zero_valued_settings_survive():
 
 
 def test_blank_material_type_is_rejected():
-    with pytest.raises(ValueError, match="type"):
+    with pytest.raises(ValueError, match="material_type_empty"):
         build_modify_material_payload(box_id=1, slot_id=0, material_type="  ")
 
 
 def test_inverted_temperature_range_is_rejected_not_clamped():
     """A user who typed min 240 / max 200 should be told, not quietly corrected."""
-    with pytest.raises(ValueError, match="max_temp"):
+    with pytest.raises(ValueError, match="material_temp_order"):
         build_modify_material_payload(
             box_id=1, slot_id=0, material_type="PLA", min_temp=240, max_temp=200
         )
@@ -98,7 +98,7 @@ def test_equal_temperatures_are_allowed():
 
 @pytest.mark.parametrize("bad", [-0.1, 1.5])
 def test_out_of_range_pressure_is_rejected(bad):
-    with pytest.raises(ValueError, match="pressure"):
+    with pytest.raises(ValueError, match="material_pressure_range"):
         build_modify_material_payload(
             box_id=1, slot_id=0, material_type="PLA", pressure=bad
         )
@@ -119,7 +119,7 @@ def test_colour_is_normalised_to_lowercase_six_digit_hex(raw, expected):
 
 def test_rgb_list_is_rejected_with_a_pointed_message():
     """Guards the color_rgb-selector mistake: HA hands back [r, g, b]."""
-    with pytest.raises(ValueError, match="color_rgb"):
+    with pytest.raises(ValueError, match="material_colour_list"):
         normalize_material_color([6, 200, 79])
 
 
@@ -132,7 +132,7 @@ def test_unwritable_colours_are_rejected(bad):
 @pytest.mark.parametrize("multi", ["#0ffa800,#0ff97e1", "#ffa800;#ff97e1"])
 def test_multi_colour_spools_are_not_flattened(multi):
     """A two-colour spool cannot be written as one colour, so refuse to try."""
-    with pytest.raises(ValueError, match="multi-colour"):
+    with pytest.raises(ValueError, match="material_colour_multi"):
         normalize_material_color(multi)
 
 
@@ -191,7 +191,7 @@ def test_an_unparseable_number_is_rejected_not_dropped():
     a silent no-op.
     """
     for field in ("min_temp", "max_temp", "pressure"):
-        with pytest.raises(ValueError, match=field):
+        with pytest.raises(ValueError, match=f"material_not_a_number: field={field}"):
             build_modify_material_payload(
                 box_id=1, slot_id=0, material_type="PLA", **{field: "abc"}
             )
@@ -205,7 +205,7 @@ def test_non_finite_numbers_are_rejected():
     """
     for field in ("min_temp", "max_temp", "pressure"):
         for value in ("nan", "inf", "-inf", float("nan"), float("inf")):
-            with pytest.raises(ValueError, match="finite"):
+            with pytest.raises(ValueError, match=f"material_not_a_number: field={field}"):
                 build_modify_material_payload(
                     box_id=1, slot_id=0, material_type="PLA", **{field: value}
                 )

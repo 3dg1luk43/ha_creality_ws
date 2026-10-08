@@ -90,6 +90,28 @@ def test_pause_resume_queue_logic(monkeypatch):
     asyncio.run(run())
 
 
+def test_a_pause_queued_for_homing_waits_until_homing_is_over(monkeypatch):
+    """R28. request_pause queues while the printer homes, because a pause sent
+    mid-move is ignored; the flush then sent it on the very next frame, still
+    homing, and cleared the queue as if it had landed."""
+    async def run():
+        coord, sent = _coord_with_send(monkeypatch)
+        coord.data = dict(PRINTING, deviceState=7)
+        await coord.request_pause()
+        assert sent == [] and coord.pending_pause() is True
+
+        await coord._flush_pending()  # next frame, still homing
+        assert sent == []
+        assert coord.pending_pause() is True
+
+        coord.data["deviceState"] = 0
+        await coord._flush_pending()
+        assert sent == [{"pause": 1}]
+        assert coord.pending_pause() is False
+
+    asyncio.run(run())
+
+
 def test_pause_is_not_sent_to_a_finished_print(monkeypatch):
     """The printer has stopped; there is nothing to pause.
 
@@ -213,3 +235,59 @@ def test_power_switch_logic():
 
 def teardown_module(_module):
     restore_stubs(__name__)
+
+
+# --------------------------------------------------------------------------- #
+# R41
+# --------------------------------------------------------------------------- #
+
+
+def test_a_refresh_request_returns_the_pushed_telemetry():
+    """`homeassistant.update_entity` on any entity failed with
+    NotImplementedError: there was no update method to call."""
+    async def run():
+        coord = KCoordinator(HassStub(), host="dummy")
+        coord.data = {"nozzleTemp": 210}
+        assert await coord._async_update_data() == {"nozzleTemp": 210}
+
+    asyncio.run(run())
+
+
+def test_the_k2_base_is_recognised_when_its_board_code_comes_later():
+    """A frame with only `model` latched "not a K2 Base" for good, so the
+    chamber target was never read from Moonraker."""
+    async def run():
+        coord = KCoordinator(HassStub(), host="dummy")
+        coord._detect_k2_base({"model": "K2"})
+        coord.data = {"model": "K2"}
+        assert coord._is_k2_base is None
+        coord._detect_k2_base({"modelVersion": "printer hw ver:F021;printer sw ver:1.1.0;"})
+        assert coord._is_k2_base is True
+
+    asyncio.run(run())
+
+
+def test_another_printer_is_settled_once_both_fields_are_known():
+    async def run():
+        coord = KCoordinator(HassStub(), host="dummy")
+        coord._detect_k2_base({"model": "K1C"})
+        coord.data = {"model": "K1C"}
+        coord._detect_k2_base({"modelVersion": "DWIN sw ver:1.3.5.22;"})
+        assert coord._is_k2_base is False
+
+    asyncio.run(run())
+
+
+def test_the_moonraker_query_names_the_chamber_fan_as_moonraker_reads_it():
+    """Moonraker's `_object_parser` makes every GET query key an object name.
+    `objects=temperature_fan%20chamber_fan` asked for an object called
+    "objects", so the K2 Base chamber target never arrived (R41)."""
+    from urllib.parse import parse_qsl
+
+    from custom_components.ha_creality_ws.const import MR_QUERY_PARAMS
+
+    excluded = {"_", "token", "access_token", "connection_id"}
+    objects = {k: v for k, v in parse_qsl(MR_QUERY_PARAMS, keep_blank_values=True) if k not in excluded}
+    assert "temperature_fan chamber_fan" in objects
+    assert "objects" not in objects
+    assert "target" in objects["temperature_fan chamber_fan"].split(",")

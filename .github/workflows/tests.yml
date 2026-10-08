@@ -1,27 +1,87 @@
-name: Static Tests
+name: Tests
+
+# The whole suite: ~800 static tests, including the card harnesses under
+# tools/tests/js, which pytest drives through node. It runs in seconds, so
+# unlike ha_washdata it stays on every push.
 
 on:
   push:
+    branches: ["**"]
   pull_request:
   schedule:
-    - cron: '15 2 * * *'
+    - cron: "15 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.14 is what Home Assistant runs since 2026.7, the minimum this
+        # release supports; 3.13 is the simulator's image (tools/testbox).
+        python-version: ["3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          python-version: '3.11'
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytest voluptuous
-      - name: Run static pytest suite
-        run: |
-          pytest -q
-    permissions:
-      contents: read
-      pull-requests: read
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          # Node 20 reached end of life on 2026-04-30.
+          node-version: "22"
+      - name: Install test dependencies
+        # Pinned in one place, so a new release of a test dependency cannot
+        # turn the suite red overnight. pyyaml: test_issue_validator_workflow.py
+        # reads the workflow it tests.
+        run: pip install -r tools/requirements-test.txt
+      - name: Run the test suite
+        run: python -m pytest
+
+  home-assistant:
+    # tools/tests stubs Home Assistant; this runs the integration inside a real
+    # one (pytest-homeassistant-custom-component): entry setup, unload and
+    # reload, the config and options flows, the registries, the power switch.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: tools/requirements-ha.txt
+      - name: Install Home Assistant and its test harness
+        # One pinned Home Assistant release; tools/requirements-ha.txt says
+        # how to move it.
+        run: pip install -r tools/requirements-ha.txt
+      - name: Run the tests against Home Assistant
+        run: python -m pytest tools/tests_ha
+
+  lint:
+    # Undefined names, unused imports and syntax errors, which the tests miss
+    # in code they do not reach. Not style: nothing here is formatted, and the
+    # line endings are mixed on purpose (test_line_endings.py).
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.14"
+      - run: pip install ruff==0.16.10
+      - run: ruff check --isolated --select F,E9 custom_components tools

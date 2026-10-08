@@ -329,7 +329,19 @@ export function loadCardModule(cardPath, overrides = {}) {
     // Host globals the printer card reaches for. Left as inert stubs so a test
     // that does not care about layout still loads the module; the tests that do
     // care override them through `overrides`.
-    btoa: (s) => Buffer.from(String(s), "binary").toString("base64"),
+    // As strict as a browser's: Latin-1 only, anything above U+00FF throws.
+    // The lenient version encoded anything, which hid a card that crashed on
+    // any non-Latin-1 name.
+    btoa: (s) => {
+      const text = String(s);
+      for (const ch of text) {
+        if (ch.codePointAt(0) > 0xff) {
+          throw new Error("InvalidCharacterError: btoa() takes Latin-1 only");
+        }
+      }
+      return Buffer.from(text, "latin1").toString("base64");
+    },
+    TextEncoder,
     confirm: () => true,
     requestAnimationFrame: (fn) => setTimeout(() => fn(0), 0),
     cancelAnimationFrame: (id) => clearTimeout(id),

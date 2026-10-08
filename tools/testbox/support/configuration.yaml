@@ -1,0 +1,43 @@
+# Test box Home Assistant config. Copied to config/configuration.yaml by up.sh
+# (edit it there for throwaway experiments; edit it HERE to change the baseline).
+homeassistant:
+  name: Creality Test Box
+  latitude: 50.0755
+  longitude: 14.4378
+  elevation: 200
+  unit_system: metric
+  currency: CZK
+  country: CZ
+  time_zone: Europe/Prague
+
+# Deliberately not `default_config:`. Each entry is something the integration
+# uses, so a failure points at it rather than at cloud/bluetooth noise.
+frontend:        # the bundled cards are registered against it
+http:
+api:
+websocket_api:
+recorder:
+  purge_keep_days: 1
+mobile_app:      # real companion registrations: notify services and push path
+go2rtc:          # the WebRTC camera path
+diagnostics:     # Settings > Devices & services > Download diagnostics
+testbox_tools:   # push capture endpoint + zeroconf injection (support/)
+
+# The printer's smart plug, as the integration's power switch.
+input_boolean:
+  printer_plug:
+    name: Printer plug
+    initial: true
+
+logger:
+  default: warning
+  logs:
+    homeassistant.core: info
+    custom_components.ha_creality_ws: debug
+    custom_components.testbox_tools: info
+    custom_components.testbox_notify: info
+
+# A non-mobile target: must receive title and message only, never `data`.
+notify:
+  - platform: testbox_notify
+    name: plain_testbox

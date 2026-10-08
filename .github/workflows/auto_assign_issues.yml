@@ -1,0 +1,62 @@
+name: Auto-Assign Issues
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  issues: write
+
+jobs:
+  assign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: ${{ !github.event.issue.pull_request }}
+    steps:
+      - name: Assign issue to maintainer
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const body = issue.body || '';
+            const labels = (issue.labels || []).map(l => (typeof l === 'string' ? l : l.name));
+
+            // Skip assignment for templateless issues from external contributors:
+            // issue_validator.yml will auto-close them immediately, so assigning
+            // creates noise. Same dual-signal logic as close-templateless-issues.
+            // Privileged authors (OWNER/MEMBER/COLLABORATOR/Bot) are always assigned.
+            const isPrivileged = ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(issue.author_association)
+              || issue.user.type === 'Bot';
+
+            if (!isPrivileged) {
+              const TEMPLATE_LABELS = ['bug', 'feature request', 'documentation'];
+              // Kept in sync with close-templateless-issues in issue_validator.yml.
+              const KNOWN_HEADINGS = [
+                'Describe the Bug', 'Printer Model', 'Board / modelVersion Code',
+                'Integration Version', 'Home Assistant Version', 'Installation Method',
+                'Camera Mode', 'Reproduction Steps', 'Expected Behavior',
+                'Logs / Diagnostics', 'Affected Entities', 'Last Working Version',
+                'Additional Context', 'Before You Submit', 'Contributing a Fix',
+                'Problem or Motivation', 'Proposed Solution', 'Printers Affected',
+                'Telemetry / Data Source', 'Alternatives Considered',
+                'Contributing an Implementation', 'Page / Section',
+                'What is Wrong or Missing?', 'Suggested Change', 'Environment',
+              ];
+              const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const hasTemplateLabel = labels.some(l => TEMPLATE_LABELS.includes(l));
+              const hasTemplateHeading = KNOWN_HEADINGS.some(
+                h => new RegExp('^ {0,3}#{1,6}[ \\t]+' + escapeRe(h) + '(?=[ \\t]|$)', 'im').test(body)
+              );
+              if (!hasTemplateLabel && !hasTemplateHeading) {
+                console.log(`#${issue.number}: templateless issue - skipping assignment (will be auto-closed).`);
+                return;
+              }
+            }
+
+            await github.rest.issues.addAssignees({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              assignees: [context.repo.owner],
+            });
+            console.log(`#${issue.number} assigned to @${context.repo.owner}`);

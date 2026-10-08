@@ -143,6 +143,47 @@ def test_existing_stream_with_matching_source_is_not_recreated():
     assert camera._force_recreate_stream is False
 
 
+def _ensure_with_existing(producer_urls):
+    """Run stream configuration against a go2rtc that already has the stream."""
+    import asyncio
+    from types import SimpleNamespace
+
+    existing_stream = SimpleNamespace(producers=[SimpleNamespace(url=u) for u in producer_urls])
+    client = MagicMock()
+    client.streams = MagicMock()
+    client.streams.list = AsyncMock(return_value={"creality_k2_1_2_3_4": existing_stream})
+    client.streams.add = AsyncMock()
+    client.streams.delete = AsyncMock()
+    with patch("custom_components.ha_creality_ws.camera._BaseCamera.__init__"):
+        camera = CrealityWebRTCCamera(MagicMock(), "http://1.2.3.4:8000/call/webrtc_local")
+    camera.hass = MagicMock()
+    camera._go2rtc_client = client
+
+    async def run():
+        with patch.object(camera, "_initialize_go2rtc_client", new_callable=AsyncMock) as mock_init:
+            mock_init.return_value = True
+            await camera._ensure_stream_configured()
+
+    asyncio.run(run())
+    return client
+
+
+def test_a_stream_someone_is_watching_is_not_recreated():
+    """R17. A connected producer is reported by its bare URL (go2rtc 1.9.14 on
+    the test box: `http://<ip>:8000/call/webrtc_local`, no `webrtc:` and no
+    `#format`). The exact comparison took that for a wrong source, and a reload
+    deleted the stream from under three viewers."""
+    client = _ensure_with_existing(["http://1.2.3.4:8000/call/webrtc_local"])
+    client.streams.delete.assert_not_called()
+    client.streams.add.assert_not_called()
+
+
+def test_a_connected_stream_from_another_printer_is_still_replaced():
+    client = _ensure_with_existing(["http://9.9.9.9:8000/call/webrtc_local"])
+    client.streams.delete.assert_called_once()
+    client.streams.add.assert_called_once()
+
+
 def test_existing_stream_with_wrong_source_is_recreated():
     """A stream left over from 0.9.3 (wrong source) must be replaced, not reused."""
     import asyncio
@@ -257,15 +298,21 @@ def test_initialization_records_the_stored_defaults_as_ha_managed():
     import asyncio
 
     cam = _camera(go2rtc_url="localhost", go2rtc_port=11984)
+    go2rtc = MagicMock(url="http://localhost:11984/")
+    cam.hass.data = {"go2rtc": go2rtc}
     client = MagicMock()
     client.validate_server_version = AsyncMock(return_value="1.9.11")
 
     with patch(
         "custom_components.ha_creality_ws.camera.Go2RtcRestClient",
         return_value=client,
-    ):
+    ) as rest_client:
         assert asyncio.run(cam._initialize_go2rtc_client()) is True
 
+    # #40: HA's own session and URL, which reach go2rtc over its socket. Home
+    # Assistant 2025.12 closed go2rtc's HTTP port, so a client of our own
+    # pointed at localhost:11984 found nothing there.
+    rest_client.assert_called_once_with(go2rtc.session, go2rtc.url)
     assert cam._go2rtc_is_ha_managed is True, (
         "HA's own go2rtc, arriving as the camera step's default, was recorded "
         "as a stand-alone server"
@@ -560,3 +607,104 @@ def test_a_standalone_go2rtc_on_the_default_pair_is_still_used_without_has_own()
         "a stand-alone go2rtc was recorded as Home Assistant's own, so the RTSP "
         "endpoint will derive 18554 for a server listening on 8554"
     )
+
+
+def _strikes(answers):
+    """Run failed-snapshot checks with go2rtc answering `answers` in turn;
+    return how many times the camera asked to move to direct WebRTC."""
+    import asyncio
+
+    cam = _camera()
+    cam._stream_name = "creality_k2_1_2_3_4"
+    moves = []
+    cam._on_no_video = lambda: moves.append(1)
+    cam._go2rtc_receiving = AsyncMock(side_effect=list(answers))
+
+    async def run():
+        for _ in answers:
+            await cam._note_failed_snapshot()
+
+    asyncio.run(run())
+    return len(moves)
+
+
+def test_go2rtc_connected_without_video_twice_moves_to_direct_webrtc():
+    """#46: the K1C 2025 sends a payload type its own answer did not list,
+    go2rtc drops every packet, and only the browser-side path shows video."""
+    assert _strikes([False, False]) == 1
+    # Once is enough: the camera is rebuilt by then.
+    assert _strikes([False, False, False, False]) == 1
+
+
+def test_one_silent_moment_or_a_dark_printer_moves_nothing():
+    assert _strikes([False]) == 0
+    # Video arrived in between: the count starts again.
+    assert _strikes([False, True, False]) == 0
+    # go2rtc not connected to the printer at all (off, unreachable): no evidence.
+    assert _strikes([None, None, None]) == 0
+    assert _strikes([False, None, False]) == 0
+
+
+def test_a_camera_not_wired_for_it_never_moves():
+    """User-forced go2rtc, and the K2 family, get no callback from setup."""
+    import asyncio
+
+    cam = _camera()
+    cam._stream_name = "creality_k2_1_2_3_4"
+    cam._go2rtc_receiving = AsyncMock(return_value=False)
+    asyncio.run(cam._note_failed_snapshot())
+    asyncio.run(cam._note_failed_snapshot())
+    cam._go2rtc_receiving.assert_not_called()
+
+
+# What go2rtc 1.9.14 answered on the test box (R78, #46).
+_SILENT = {"producers": [{"id": 2, "format_name": "webrtc/creality", "remote_addr": "172.31.78.10:38191 host",
+                          "receivers": [{"id": 3, "codec": {"codec_name": "h264"}, "childs": [4]}]}]}
+_FLOWING = {"producers": [{"id": 1, "remote_addr": "172.31.77.10:8080", "bytes_recv": 343471,
+                           "receivers": [{"id": 3, "codec": {"codec_name": "mjpeg"}, "bytes": 343471, "packets": 32}]}]}
+_IDLE = {"producers": [{"url": "http://172.31.77.10:8000/call/webrtc_local"}], "consumers": []}
+
+
+def _receiving(reply):
+    import asyncio
+
+    cam = _camera()
+    cam._stream_name = "creality_k2_1_2_3_4"
+    resp = MagicMock()
+    resp.json = AsyncMock(return_value=reply)
+    cam._go2rtc_client = MagicMock()
+    cam._go2rtc_client._client.request = AsyncMock(return_value=resp)
+    return asyncio.run(cam._go2rtc_receiving())
+
+
+def test_go2rtc_replies_are_read_as_go2rtc_writes_them():
+    assert _receiving(_SILENT) is False
+    assert _receiving(_FLOWING) is True
+    assert _receiving(_IDLE) is None
+    assert _receiving({}) is None
+
+
+def test_the_video_check_runs_while_the_snapshot_is_still_waiting(monkeypatch):
+    """Home Assistant cancels a still image at 10 s, so a check placed after a
+    failed snapshot never ran on the box: the check is its own task (#46)."""
+    import asyncio
+    import custom_components.ha_creality_ws.camera as camera_mod
+
+    monkeypatch.setattr(camera_mod, "NO_VIDEO_CHECK_AFTER", 0)
+
+    def run(succeeded):
+        cam = _camera()
+        cam._note_failed_snapshot = AsyncMock()
+        cam._silent_snapshots = 1
+        cam._video_check_pending = True
+        started = 100.0
+        cam._last_snapshot_ts = started if succeeded else 50.0
+        asyncio.run(cam._check_video_soon(started))
+        return cam
+
+    stalled = run(succeeded=False)
+    stalled._note_failed_snapshot.assert_awaited_once()
+    assert stalled._video_check_pending is False
+    fine = run(succeeded=True)
+    fine._note_failed_snapshot.assert_not_awaited()
+    assert fine._silent_snapshots == 0

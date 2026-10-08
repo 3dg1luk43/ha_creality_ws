@@ -5,14 +5,15 @@ Two approaches here:
 
 * ``tools/tests/js/`` runs the real card in a node sandbox with a small DOM shim
   and asserts on what it collects and renders. That catches logic errors, which
-  is what actually matters. Skipped when node is unavailable (CI installs only
-  pytest).
+  is what actually matters. Skipped where node is missing, except in CI, which
+  installs it: there a missing node fails.
 * Source-level guards for properties that are structural rather than behavioural
   -- a second copy of the collection loop, leftover debug logging, a card asset
   that quietly bloats every install.
 """
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -30,6 +31,16 @@ NODE = shutil.which("node")
 requires_node = pytest.mark.skipif(
     NODE is None, reason="node is not installed (expected in CI)"
 )
+
+# The last line each suite prints: "N passed", or "M/N passed".
+SUMMARY = re.compile(r"^(?:(\d+)/)?(\d+) passed$")
+
+
+def test_node_is_there_in_ci():
+    """Without node, every card suite skips, and a green run proves nothing
+    about either card."""
+    if os.environ.get("CI"):
+        assert NODE, "node is not on PATH; the card suites would all skip"
 
 
 def _card() -> str:
@@ -68,7 +79,9 @@ def test_the_javascript_suites_are_discoverable():
         "test_presets.mjs", "test_time_left.mjs",
         # The printer card runs in the same sandbox; see test_printer_card_editor.py.
         "test_printer_editor.mjs", "test_printer_telemetry.mjs",
-        "test_printer_migration.mjs",
+        "test_printer_migration.mjs", "test_printer_render.mjs", "test_cfs_editor.mjs",
+        "test_card_language.mjs", "test_accessibility.mjs", "test_config_defaults.mjs",
+        "test_printer_actions.mjs",
     ):
         assert expected in JS_SUITES, f"{expected} is missing from {JS_SUITES}"
 
@@ -76,17 +89,28 @@ def test_the_javascript_suites_are_discoverable():
 @requires_node
 @pytest.mark.parametrize("suite", JS_SUITES)
 def test_javascript_suite(suite):
-    """Run a node test file and surface its output on failure."""
+    """Run a node test file and surface its output on failure.
+
+    Exit code 0 alone is not a pass: a suite whose runner is not awaited exits
+    0 when a test hangs on a promise that never settles, having run nothing
+    after it. The summary line is what says every test ran.
+    """
     result = subprocess.run(
         [NODE, str(JS_TESTS / suite)],
         capture_output=True,
         text=True,
         cwd=str(ROOT),
         check=False,  # the return code is asserted on below
+        timeout=120,
     )
     assert result.returncode == 0, (
         f"{suite} failed:\n{result.stdout}\n{result.stderr}"
     )
+    lines = result.stdout.strip().splitlines()
+    summary = SUMMARY.match(lines[-1].strip()) if lines else None
+    assert summary, f"{suite} ended without its summary line:\n{result.stdout}"
+    ran, total = summary.group(1), summary.group(2)
+    assert int(total) > 0 and (ran is None or ran == total), lines[-1]
 
 
 @requires_node

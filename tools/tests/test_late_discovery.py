@@ -100,20 +100,15 @@ class HassStub:
 
 @pytest.fixture(autouse=True)
 def _event_loop():
-    # The previous loop is restored, not dropped: closing without restoring left
-    # the policy handing this closed loop to anything that later called
-    # `asyncio.get_event_loop()`, making the rest of the session order-dependent.
-    try:
-        previous = asyncio.get_event_loop_policy().get_event_loop()
-    except Exception:  # pylint: disable=broad-except
-        previous = None
+    # Cleared afterwards: closing a loop does not uninstall it, and a closed
+    # loop left installed broke whatever later called asyncio.get_event_loop().
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         yield
     finally:
         loop.close()
-        asyncio.set_event_loop(previous)
+        asyncio.set_event_loop(None)
 
 
 @pytest.fixture
@@ -357,6 +352,33 @@ def test_a_direct_data_write_of_a_gating_field_still_announces(coord):
     assert len(coord.signals) == 1
 
 
+def _boxes(*boxes):
+    return {"boxsInfo": {"materialBoxs": [
+        {"id": box_id, "type": 0, "materials": [{"id": s, "percent": 50} for s in slots]}
+        for box_id, slots in boxes
+    ]}}
+
+
+def test_a_cfs_box_added_later_fires_discovery_again(coord):
+    """R21. A second CFS unit chained on later, or the CFS reporting after the
+    external holder at boot, arrives in a boxsInfo whose key is no longer new,
+    so its sensors were never created."""
+    _feed(coord, _boxes((1, [0, 1, 2, 3])))
+    assert len(coord.signals) == 1
+    _feed(coord, _boxes((1, [0, 1, 2, 3]), (2, [0, 1, 2, 3])))
+    assert len(coord.signals) == 2, "the second box never triggered discovery"
+
+
+def test_a_changing_reading_in_the_same_boxes_does_not(coord):
+    """Filament percentages change constantly; only the set of boxes and slots
+    is a reason to look for new entities."""
+    _feed(coord, _boxes((1, [0, 1, 2, 3])))
+    _feed(coord, {"boxsInfo": {"materialBoxs": [
+        {"id": 1, "type": 0, "temp": 30, "materials": [{"id": s, "percent": 10} for s in range(4)]}
+    ]}})
+    assert len(coord.signals) == 1
+
+
 def test_the_moonraker_fallback_uses_the_announcing_merge():
     """Pins the call site, since the bug was a direct dict write."""
     from pathlib import Path
@@ -577,3 +599,47 @@ def test_deferred_entity_adds_are_dropped_after_unload(monkeypatch):
 
 def teardown_module(_module):
     restore_stubs(__name__)
+
+
+# --- the external spool holder without a CFS (R20) ------------------------- #
+
+EXTERNAL_ONLY = {
+    "boxsInfo": {
+        "materialBoxs": [
+            {"id": 0, "type": 1, "materials": [{"id": 0, "type": "PLA", "color": "#0ffffff", "percent": 100}]},
+        ]
+    }
+}
+
+
+def _cfs_ids(run):
+    return sorted(
+        e._attr_unique_id.split("-", 1)[1]
+        for e in run.added
+        if "cfs_" in (getattr(e, "_attr_unique_id", "") or "")
+    )
+
+
+def test_an_external_spool_without_a_cfs_gets_one_set_of_sensors(monkeypatch):
+    """Without a CFS the external holder's box was not skipped in the per-box
+    pass, so the one spool got "Box 0 Slot 1" sensors next to the "External"
+    ones."""
+    run = _run_sensor_setup(_bare_coord(monkeypatch, EXTERNAL_ONLY), {})
+    assert _cfs_ids(run) == ["cfs_external_color", "cfs_external_filament", "cfs_external_percent"]
+
+
+def test_an_install_that_already_has_the_box_sensors_keeps_them(monkeypatch):
+    """A dashboard built on the old duplicates must not lose its entities."""
+    from unittest.mock import MagicMock
+
+    import custom_components.ha_creality_ws.sensor as sensor_mod
+
+    registered = {"1.2.3.4-cfs_box_0_slot_0_filament"}
+    registry = MagicMock()
+    registry.async_get_entity_id = lambda domain, platform, uid: "sensor.x" if uid in registered else None
+    monkeypatch.setattr(sensor_mod.er, "async_get", lambda hass: registry)
+
+    run = _run_sensor_setup(_bare_coord(monkeypatch, EXTERNAL_ONLY), {})
+    ids = _cfs_ids(run)
+    assert "cfs_box_0_slot_0_filament" in ids
+    assert "cfs_external_filament" in ids

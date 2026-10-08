@@ -67,19 +67,15 @@ def _run(coro):
 
 @pytest.fixture(autouse=True)
 def _event_loop():
-    # Restore the previous loop: closing does not uninstall it, so the policy
-    # keeps handing this closed loop to any later module without its own fixture.
-    try:
-        previous = asyncio.get_event_loop_policy().get_event_loop()
-    except Exception:  # pylint: disable=broad-except
-        previous = None
+    # Cleared afterwards: closing a loop does not uninstall it, and a closed
+    # loop left installed broke whatever later called asyncio.get_event_loop().
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         yield
     finally:
         loop.close()
-        asyncio.set_event_loop(previous)
+        asyncio.set_event_loop(None)
 
 
 def test_finished_job_at_startup_does_not_notify(monkeypatch):
@@ -187,6 +183,33 @@ def test_minutes_to_end_reads_the_real_telemetry_field(monkeypatch):
     assert sent == [_STRINGS["finishing_soon"].format(device="1.2.3.4", minutes=2)]
 
 
+def test_the_last_minute_is_not_announced_as_zero_minutes(monkeypatch):
+    """40 seconds left was truncated to "0 minutes" (R33)."""
+    coord, sent = _coordinator(monkeypatch)
+    coord.data = {"printFileName": "job.gcode", "printProgress": 10, "printLeftTime": 3600}
+    _run(coord._check_notifications({}))
+    coord.data = {"printFileName": "job.gcode", "printProgress": 99, "printLeftTime": 40}
+    _run(coord._check_notifications({}))
+    assert sent == [_STRINGS["finishing_soon"].format(device="1.2.3.4", minutes=1)]
+
+
+def test_a_runout_names_the_print_state_in_words(monkeypatch):
+    """The bare slug ("printing") went into every language (R33)."""
+    coord, sent = _coordinator(monkeypatch)
+    frame = {"printFileName": "job.gcode", "printProgress": 40, "state": 1, "materialStatus": 0}
+    coord.data = dict(frame)
+    _run(coord._check_notifications({}))
+    coord.data = {**frame, "materialStatus": 1}
+    _run(coord._check_notifications({}))
+    status = json.loads(
+        (Path(__file__).resolve().parents[2] / "custom_components/ha_creality_ws/strings.json")
+        .read_text(encoding="utf-8")
+    )["entity"]["sensor"]["print_status"]["state"]
+    assert sent == [
+        _STRINGS["filament_runout"].format(device="1.2.3.4", state=status["printing"])
+    ]
+
+
 def test_minutes_to_end_already_inside_window_at_startup_is_silent(monkeypatch):
     coord, sent = _coordinator(monkeypatch)
     coord.data = {"printFileName": "job.gcode", "printProgress": 97, "printLeftTime": 120}
@@ -208,7 +231,9 @@ def test_reprinting_the_same_file_notifies_again(monkeypatch):
     assert len(sent) == 1
 
     # Same file printed again: progress drops, then climbs back to 100.
-    coord.data = {"printFileName": "job.gcode", "printProgress": 3}
+    # `state: 1`: a reprint is a running job, and only a running job re-arms
+    # (R10: the idle "processing" a finished print is left in must not).
+    coord.data = {"printFileName": "job.gcode", "printProgress": 3, "state": 1}
     _run(coord._check_notifications({}))
     assert coord._notified_completed is False
 
@@ -231,7 +256,7 @@ def test_a_genuine_zero_percent_frame_re_arms_completion(monkeypatch):
     assert coord._notified_completed is True
 
     # Reprint starts: printProgress resets, dProgress still holds the old 100.
-    coord.data = {"printFileName": "job.gcode", "printProgress": 0, "dProgress": 100}
+    coord.data = {"printFileName": "job.gcode", "printProgress": 0, "dProgress": 100, "state": 1}
     _run(coord._check_notifications({}))
     assert coord._notified_completed is False, "a real 0% must re-arm completion"
 
@@ -276,7 +301,7 @@ def test_a_new_job_does_not_notify_off_the_previous_jobs_progress(monkeypatch):
     assert sent == [], "a new job must not inherit the old job's completion"
 
     # Real progress arrives, then the job genuinely finishes.
-    coord.data = {"printFileName": "job_b.gcode", "printProgress": 4}
+    coord.data = {"printFileName": "job_b.gcode", "printProgress": 4, "state": 1}
     _run(coord._check_notifications({}))
     coord.data = {"printFileName": "job_b.gcode", "printProgress": 100}
     _run(coord._check_notifications({}))
@@ -320,7 +345,7 @@ def test_reprint_after_a_stale_startup_completion_notifies(monkeypatch):
     assert sent == []
     assert coord._notified_completed is True
 
-    coord.data = {"printFileName": "demo.gcode", "printProgress": 7}
+    coord.data = {"printFileName": "demo.gcode", "printProgress": 7, "state": 1}
     _run(coord._check_notifications({}))
     assert coord._notified_completed is False
 
@@ -374,7 +399,7 @@ def test_a_restarted_job_clock_re_arms_completion(monkeypatch):
     coord.data = {"printFileName": "job.gcode", "printProgress": 100, "printJobTime": 1200}
     _run(coord._check_notifications({}))  # baseline: already complete
 
-    coord.data = {"printFileName": "job.gcode", "printProgress": 95, "printJobTime": 4}
+    coord.data = {"printFileName": "job.gcode", "printProgress": 95, "printJobTime": 4, "state": 1}
     _run(coord._check_notifications({}))
     assert coord._notified_completed is False, "a restarted job clock is a new cycle"
 
@@ -400,6 +425,7 @@ def test_reprinting_the_same_file_notifies_again_with_a_job_clock(monkeypatch):
             "printFileName": "job.gcode",
             "printProgress": progress,
             "printJobTime": job_time,
+            "state": 1,
         }
         _run(coord._check_notifications({}))
 

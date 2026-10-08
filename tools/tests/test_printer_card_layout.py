@@ -28,10 +28,9 @@ def test_printer_card_size_tracks_measured_telemetry_lines():
     assert "@container (max-width:" not in source
     assert "@media (max-width:" not in source
     assert "telemetry-scroll" not in source
-    assert re.search(
-        r"getCardSize\(\)\s*\{\s*return\s+this\._cardSize\s*\|\|\s*3;\s*\}",
-        source,
-    )
+    # The size survives Lovelace rebuilding the element; the behaviour itself is
+    # driven in tools/tests/js/test_printer_render.mjs.
+    assert "_measuredCardSize" in source
     assert "_setupTelemetrySizeObserver()" in source
     assert "_updateTelemetryCardSize()" in source
     assert "ResizeObserver" in source
@@ -102,6 +101,10 @@ def test_card_print_states_match_the_integration():
     assert in_card == declared, (
         f"card has {sorted(in_card)}, derive_print_state declares {sorted(declared)}"
     )
+    # The print status sensor offers PRINT_STATES as its options (R36).
+    from custom_components.ha_creality_ws.utils import PRINT_STATES
+
+    assert set(PRINT_STATES) == declared
 
 
 def _declared_print_states() -> set:
