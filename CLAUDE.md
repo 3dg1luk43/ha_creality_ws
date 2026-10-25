@@ -84,7 +84,9 @@ verify on the test box (`tools/testbox`) or a real HA, and say which in the comm
 - **`diagnostic_dump` answers three ways**: the data as its response (redacted unless
   `include_sensitive_data`), a "CREALITY DIAGNOSTIC DATA" block at WARNING, and a notification.
 - **Telemetry is cumulative:** `ws_client._state` is never cleared, so a key the printer stops
-  sending keeps its last value, and a blank `""` persists until re-sent.
+  sending keeps its last value, and a blank `""` persists until re-sent. Every frame is that whole
+  state, so a value written into `coordinator.data` alone is reverted by the next frame; setters
+  go through `assume_commanded` (#132).
 - **Capabilities are cached in `entry.data`** (model, camera type, firmware). The firmware and the
   camera type follow telemetry (R40, R5); the rest is re-cached on an integration upgrade, a moved
   printer or a missing key, never mid-session.

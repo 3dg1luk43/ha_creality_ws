@@ -11,7 +11,25 @@ and versions are numbered major.minor.patch, with a fourth number for a hotfix r
 
 ### TL;DR
 
+- A K1C print is announced as finished when the printer ends it, not 15 seconds early, and Print Status no longer jumps back to Printing just before the end.
+- A K1C no longer reports a filament runout at the first print after power-on. Filament Status follows the same rule.
+- Nozzle, bed and chamber targets set from a script no longer snap back to the old value before the printer confirms them.
+- iPhone notifications show the current print's thumbnail.
+- Custom live-card text no longer shows "0/0" and "0s" while the printer warms up and self-tests.
+- Print Status stops adding a database row of attributes every second while printing.
+
 ### Fixes
+
+- **A K1C print was announced as finished 15 seconds early, and Print Status went back to Printing**: the printer rounds progress up to 100% while still printing (86 s left in a captured print), drops back to 99, and only then reports the job finished. Completion followed the first 100. It now waits until the printer stops printing or has no time left.
+- **A K1C reported "filament ran out" at the first print after power-on, with filament loaded**: this firmware raises its "consumable not detected" flag as that print starts and keeps it until power-off while printing normally. A runout now needs the flag on a paused print, and a flag that stays up while the printer keeps printing is ignored until the printer clears it.
+- **Targets set from a script snapped back to their old value** ([#132](https://github.com/3dg1luk43/ha_creality_ws/issues/132)): every frame from the printer carries everything it has reported so far, so a target shown before the printer confirmed it was overwritten by the next frame of any kind. The value set now stays until the printer reports that target itself. A K1C confirms within 0.2 s and did not show it; thanks to @chammp for the report.
+- **iPhone notifications showed an earlier print's thumbnail** ([#131](https://github.com/3dg1luk43/ha_creality_ws/issues/131)): the preview's address was the same for every print, so iOS reused its cached picture. The address now changes whenever the picture does. Thanks to @sammyke007 for the diagnosis and the tested fix.
+- **Custom live-card text read "0% - 0/0 - 0s" during warm-up and self-test**: `{eta}`, `{layer}` and `{total_layers}` passed on the printer's zeros, which mean "not known yet". They are now empty, so an optional `[...]` segment around them drops out, as the built-in text already did.
+- **Print Status wrote a new set of attributes to the database every second while printing**: its job time, time left, used filament and flow attributes change every second and duplicate their own sensors. They are no longer recorded, and still update for templates.
+
+### Internal
+
+- Two real K1C traces, a print starting and a print finishing, are test fixtures; the tests replay them through the real coordinator.
 
 
 ## 0.9.9 - 2026-10-08

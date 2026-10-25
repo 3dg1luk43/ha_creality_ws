@@ -203,9 +203,11 @@ class NozzleTargetNumber(KEntity, NumberEntity):
             v = min(int(max_v), v)
 
         # Sent first: a target the printer never received must not show (R32).
+        before = self.coordinator.client.reported("targetNozzleTemp")
         await self._send(nozzleTempControl=v)
-        self.coordinator.data["targetNozzleTemp"] = v
-        self.coordinator.async_update_listeners()
+        self.coordinator.assume_commanded(
+            {"targetNozzleTemp": v}, reported_before={"targetNozzleTemp": before}
+        )
 
 
 class BedTargetNumber(KEntity, NumberEntity):
@@ -242,9 +244,10 @@ class BedTargetNumber(KEntity, NumberEntity):
         if max_v is not None:
             v = min(int(max_v), v)
 
+        key = f"targetBedTemp{self._idx}"
+        before = self.coordinator.client.reported(key)
         await self._send(bedTempControl={"num": self._idx, "val": v})
-        self.coordinator.data[f"targetBedTemp{self._idx}"] = v
-        self.coordinator.async_update_listeners()
+        self.coordinator.assume_commanded({key: v}, reported_before={key: before})
 
 
 class BoxTargetNumber(KEntity, NumberEntity):
@@ -289,11 +292,11 @@ class BoxTargetNumber(KEntity, NumberEntity):
         if max_v is not None:
             v = min(int(max_v), v)
 
+        before = self.coordinator.client.reported("targetBoxTemp")
         await self._send(boxTempControl=v)
-        # Optimistic update. Via the coordinator helper, not a direct write:
-        # targetBoxTemp is a LATE_DISCOVERY_FIELDS entry, and writing it straight
-        # into .data consumes the one-shot that other gates depend on. Harmless
-        # today (this entity only exists once that gate is already satisfied) but
-        # the invariant has been broken this way before.
-        self.coordinator.merge_telemetry({"targetBoxTemp": v})
-        self.coordinator.async_update_listeners()
+        # Optimistic update, which goes through merge_telemetry: targetBoxTemp
+        # is a LATE_DISCOVERY_FIELDS entry, and writing it straight into .data
+        # consumes the one-shot that other gates depend on.
+        self.coordinator.assume_commanded(
+            {"targetBoxTemp": v}, reported_before={"targetBoxTemp": before}
+        )

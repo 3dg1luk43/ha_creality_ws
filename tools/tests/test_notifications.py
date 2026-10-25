@@ -199,14 +199,15 @@ def test_a_runout_names_the_print_state_in_words(monkeypatch):
     frame = {"printFileName": "job.gcode", "printProgress": 40, "state": 1, "materialStatus": 0}
     coord.data = dict(frame)
     _run(coord._check_notifications({}))
-    coord.data = {**frame, "materialStatus": 1}
+    # A runout pauses the job; the flag alone is not one (R82).
+    coord.data = {**frame, "materialStatus": 1, "state": 5}
     _run(coord._check_notifications({}))
     status = json.loads(
         (Path(__file__).resolve().parents[2] / "custom_components/ha_creality_ws/strings.json")
         .read_text(encoding="utf-8")
     )["entity"]["sensor"]["print_status"]["state"]
     assert sent == [
-        _STRINGS["filament_runout"].format(device="1.2.3.4", state=status["printing"])
+        _STRINGS["filament_runout"].format(device="1.2.3.4", state=status["paused"])
     ]
 
 

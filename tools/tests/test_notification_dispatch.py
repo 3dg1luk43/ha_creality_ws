@@ -711,4 +711,7 @@ def test_the_error_code_baseline_advances_with_notifications_off():
     coord._notify_error = False
     _drive_frames(coord)
     assert coord._last_error_code == 7
+    # A runout is the flag on a paused job (R82); its latch advances too.
+    coord.data = dict(coord.data, printProgress=50, state=5)
+    _run(coord._check_notifications({}))
     assert coord._notified_filament_runout is True

@@ -22,6 +22,7 @@ from custom_components.ha_creality_ws.const import (
     NOTIFY_LIVE_MILESTONE_STEP,
     NOTIFY_LIVE_MIN_INTERVAL_SECS,
     NOTIFY_LIVE_STALE_CLEAR_SECS,
+    RUNOUT_FLAG_STALE_SECS,
     STALE_AFTER_SECS,
 )
 from custom_components.ha_creality_ws.coordinator import KCoordinator
@@ -403,20 +404,25 @@ def test_the_tick_does_nothing_without_a_card():
 
 def test_end_of_print_jitter_produces_one_card_push_and_one_completion():
     """The recorded 99/100/99/99/100 sequence behind b2ac2ea, now with a live
-    card layered on top of the same predicate."""
+    card layered on top of the same predicate. The last 100 is the end as a
+    K1C reports it (state 2, no time left, R81); the earlier one is the printer
+    rounding up while it is still printing."""
     coord, hass = _coordinator()
     live_pushes = 0
     completions = 0
     for tick, progress in enumerate((99, 100, 99, 99, 100)):
         coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+        end = {"state": 2, "printLeftTime": 0} if tick == 4 else {"printLeftTime": 90 - tick}
         payloads = _frame(
-            coord, hass, **_printing(progress, printJobTime=1600 + tick)
+            coord, hass, **_printing(progress, printJobTime=1600 + tick, **end)
         )
         live_pushes += len(_live(payloads))
         completions += len(
             [p for p in _events(payloads) if p["message"] == _COMPLETED]
         )
-    assert (live_pushes, completions) == (1, 1)
+    # The start, and the card reaching 100% while the printer finishes; the dip
+    # back to 99 pushes nothing.
+    assert (live_pushes, completions) == (2, 1)
 
 
 def test_a_reprint_starts_a_fresh_card():
@@ -1138,7 +1144,8 @@ def test_a_recovered_printer_has_its_alert_taken_away():
     coord, hass = _coordinator()
     _frame(coord, hass, **_printing(39))
     coord.hass.loop.advance(1)
-    _frame(coord, hass, **_printing(40, materialStatus=1))
+    # A runout pauses the job; the flag alone is not one (R82).
+    _frame(coord, hass, **_printing(40, materialStatus=1, state=5))
     assert coord._alert_showing is True
 
     coord.hass.loop.advance(1)
@@ -1154,7 +1161,7 @@ def test_one_condition_resolving_does_not_dismiss_the_others_alert():
     coord, hass = _coordinator()
     _frame(coord, hass, **_printing(39))
     coord.hass.loop.advance(1)
-    _frame(coord, hass, **_printing(40, materialStatus=1, err={"errcode": 521, "key": 1}))
+    _frame(coord, hass, **_printing(40, materialStatus=1, state=5, err={"errcode": 521, "key": 1}))
     coord.hass.loop.advance(1)
 
     # Runout resolved, error still live.
@@ -1541,11 +1548,46 @@ def test_a_runout_flag_left_set_does_not_alert_at_the_next_print():
     coord, hass = _coordinator()
     _frame(coord, hass, **_printing(19))
     hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
-    first = _frame(coord, hass, **_printing(20, materialStatus=1))
+    first = _frame(coord, hass, **_printing(20, materialStatus=1, state=5))
     assert len(_alerts(first)) == 1
     hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
-    second = _frame(coord, hass, **_printing(1, printFileName="/usr/data/printer_data/gcodes/next.gcode", printJobTime=5, materialStatus=1))
+    second = _frame(coord, hass, **_printing(1, printFileName="/usr/data/printer_data/gcodes/next.gcode", printJobTime=5, materialStatus=1, state=5))
     assert _alerts(second) == []
+
+
+def test_the_material_flag_rising_at_print_start_is_not_a_runout():
+    """A K1C raises materialStatus as a print starts, with filament loaded, and
+    keeps it up while it prints on (R82). That alerted at every first print."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(0, materialStatus=0))
+    alerts = []
+    for progress in range(0, 5):
+        hass.loop.advance(10)
+        alerts += _alerts(_frame(coord, hass, **_printing(progress, materialStatus=1)))
+    assert alerts == []
+
+
+def test_a_latched_flag_does_not_turn_a_manual_pause_into_a_runout():
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(10, materialStatus=0))
+    for progress in range(11, 15):
+        hass.loop.advance(RUNOUT_FLAG_STALE_SECS / 3)
+        _frame(coord, hass, **_printing(progress, materialStatus=1))
+    hass.loop.advance(1)
+    assert _alerts(_frame(coord, hass, **_printing(15, materialStatus=1, state=5))) == []
+
+
+def test_a_runout_that_pauses_the_print_alerts_even_after_a_latch_clears():
+    coord, hass = _coordinator()
+    for progress in range(10, 15):
+        hass.loop.advance(RUNOUT_FLAG_STALE_SECS / 3)
+        _frame(coord, hass, **_printing(progress, materialStatus=1))
+    hass.loop.advance(1)
+    _frame(coord, hass, **_printing(16, materialStatus=0))
+    hass.loop.advance(1)
+    _frame(coord, hass, **_printing(17, materialStatus=1))
+    hass.loop.advance(2)
+    assert len(_alerts(_frame(coord, hass, **_printing(17, materialStatus=1, state=5)))) == 1
 
 
 # --------------------------------------------------------------------------- #

@@ -1,0 +1,86 @@
+"""A real K1C print, start and end (R81, R83), replayed through the real coordinator.
+
+`fixtures/k1c_print_end.jsonl` is the last 90 s of a 38-minute print on firmware
+1.3.5.22, captured on 2026-10-25. The printer reports 100% while it is still
+printing with 86 s left, goes back to 99 fifteen seconds later, and only then
+ends the job (state 2, no time left). The integration announced the completion
+on the first 100 and the status went completed -> printing -> completed.
+
+`fixtures/k1c_print_start.jsonl` is the same print starting: state 9, state 1,
+then the start-of-print self-test with no layer count and no estimate yet.
+"""
+
+import json
+from pathlib import Path
+
+from test_notification_live import CLEAR_NOTIFICATION_MARKER, _coordinator, _frame_calls
+
+from custom_components.ha_creality_ws.utils import coerce_numbers, derive_print_state
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _replay(name, *, templates=None):
+    coord, hass = _coordinator(targets=("notify.mobile_app_pixel",))
+    coord._notify_primed = False
+    if templates:
+        coord._notify_templates = dict(templates)
+    merged: dict = {}
+    statuses: list[tuple[float, str]] = []
+    pushes: list[tuple[float, str, dict]] = []
+    lines = (FIXTURES / name).read_text(encoding="utf-8").splitlines()[1:]
+    for line in lines:
+        rec = json.loads(line)
+        hass.loop.now = 1000.0 + rec["t"]
+        merged.update(coerce_numbers(rec["frame"]))
+        for call in _frame_calls(coord, hass, **merged):
+            pushes.append((rec["t"], call[2]["message"], call[2].get("data") or {}))
+        status = derive_print_state(coord.data)
+        if not statuses or statuses[-1][1] != status:
+            statuses.append((rec["t"], status))
+    return statuses, pushes, hass.events, lines
+
+
+def _end_time(lines):
+    return next(
+        json.loads(line)["t"]
+        for line in lines
+        if json.loads(line)["frame"].get("state") == 2
+    )
+
+
+def test_the_status_does_not_flap_back_to_printing_at_the_end():
+    statuses, _pushes, _events, lines = _replay("k1c_print_end.jsonl")
+    assert [s for _t, s in statuses] == ["printing", "completed"]
+    assert statuses[1][0] == _end_time(lines)
+
+
+def test_the_completion_is_announced_once_when_the_printer_ends_the_job():
+    _statuses, pushes, events, lines = _replay("k1c_print_end.jsonl")
+    banners = [
+        (t, m) for t, m, _d in pushes
+        if m != CLEAR_NOTIFICATION_MARKER and "finished" in m.lower()
+    ]
+    assert [t for t, _m in banners] == [_end_time(lines)]
+    finished = [data for name, data in events if name == "ha_creality_ws_print_finished"]
+    assert len(finished) == 1
+    # The event describes the end, not the printer's early rounding.
+    assert finished[0]["progress"] == 100 and finished[0]["left_seconds"] == 0
+
+
+def test_a_live_template_gets_no_zero_estimate_or_layer_count_during_self_test():
+    """The user's template read "0% - 0/0 - 0s" for the whole self-test (R83)."""
+    _statuses, pushes, _events, _lines = _replay(
+        "k1c_print_start.jsonl",
+        templates={"live": "{progress}%[ - {layer}/{total_layers}][ - {eta}]"},
+    )
+    cards = [m for _t, m, d in pushes if d.get("tag", "").endswith("_live") and m != CLEAR_NOTIFICATION_MARKER]
+    assert cards, "the print start should put a card up"
+    assert set(cards) == {"0%"}
+
+
+def test_the_latched_material_flag_never_raises_a_runout_alert():
+    """materialStatus is 1 through this whole start, filament loaded (R82)."""
+    _statuses, pushes, _events, lines = _replay("k1c_print_start.jsonl")
+    assert all(json.loads(line)["frame"].get("materialStatus", 1) == 1 for line in lines[:1])
+    assert not [d for _t, _m, d in pushes if d.get("tag", "").endswith("_alert")]

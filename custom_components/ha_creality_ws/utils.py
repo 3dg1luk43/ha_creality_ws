@@ -625,6 +625,37 @@ BUSY_PRINT_STATES = frozenset({"printing", "paused", "processing", "self-testing
 PREVIEW_PRINT_STATES = frozenset(BUSY_PRINT_STATES | {"completed"})
 
 
+def print_seconds_left(data: Mapping[str, Any]) -> float | None:
+    """Seconds remaining in the current print, or None.
+
+    The printer streams this as `printLeftTime`; `printTimeLeft` is only kept
+    as a fallback because the notification code used to look for that name
+    exclusively, which meant the minutes-to-end notification never fired.
+    """
+    for key in ("printLeftTime", "printTimeLeft"):
+        value = safe_float(data.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def print_finishing(data: Mapping[str, Any]) -> bool:
+    """A job the printer has rounded up to 100% but is still running.
+
+    A K1C reports 100 with time still on the clock (86 s in the 2026-10-25
+    capture), drops back to 99, and only then ends the job, with state 2 and no
+    time left. Reading 100% as the end announced the completion early and
+    flapped the status back to printing for the 99 (R81). Only an explicit
+    "printing or paused, with time left" holds the end back: a printer that
+    reports no estimate, or one that leaves state 1 at the end, still finishes
+    on its 100.
+    """
+    if data.get("state") not in (1, 5):
+        return False
+    left = print_seconds_left(data)
+    return left is not None and math.isfinite(left) and left > 0
+
+
 def derive_print_state(
     data: dict[str, Any],
     *,
@@ -672,7 +703,7 @@ def derive_print_state(
         progress = int(progress)
 
     if filename:
-        if progress >= 100:
+        if progress >= 100 and not print_finishing(data):
             return "completed"
         if state == 5 or paused_flag:
             return "paused"

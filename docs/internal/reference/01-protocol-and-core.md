@@ -151,7 +151,7 @@ All are compact JSON (`separators=(",", ":")`, `ws_client.py:530`) sent through 
 | `deviceState` | `coordinator.py:444`, `button.py:49` | 7 means homing |
 | `printJobTime` | `coordinator.py:896-903` | going backwards means a new job |
 | `printLeftTime`, fallback `printTimeLeft` | `coordinator.py:749-760` | seconds remaining |
-| `materialStatus` | `coordinator.py:1064-1084` | 1 means filament runout |
+| `materialStatus` | `coordinator.py` `_runout_reported`, `_track_material_flag` | 1 is Creality's "consumable not detected" (the printer's web UI shows that, with a Resume button). A K1C on 1.3.5.22 raises it at the first print after boot, filament loaded, and keeps it until power-off while printing normally (R82). A runout is the flag on a paused job; a flag up for `RUNOUT_FLAG_STALE_SECS` (30 s) of printing is a latch and is discounted until it clears |
 | `layer`, `TotalLayer`, `usedMaterialLength`, `nozzleTemp`, `bedTemp0` | notification payloads/templates | |
 | `model`, `modelVersion` | `utils.py:207-319`, `coordinator.py:700-703` | friendly name and board-code string (`F008`, `F012`, `F021`...) |
 | `hostname` | `__init__.py:312`, `coordinator.py:1830` | device name, notification title |
@@ -305,7 +305,7 @@ The watcher subscribes to the raw `power_switch` option (`__init__.py:217`, `:46
 | 2 | `not available` | `unknown` |
 | 3 | `err.errcode` (or bare `err`) non-zero | `error` |
 | 4 | `withSelfTest` in 1..99 | `self-testing` |
-| 5 | file name and progress >= 100 | `completed` |
+| 5 | file name, progress >= 100, and not `print_finishing` (state 1 or 5 with time left; R81) | `completed` |
 | 6 | file name and (`state == 5` or paused flag) | `paused` |
 | 7 | file name and `state == 4` | `stopped` |
 | 8 | file name and `state == 1` | `printing` |
@@ -456,7 +456,7 @@ Targets resolve through `_coordinators_for_devices` (`:508-540`), device registr
 
 ## 13. Traps for future maintainers
 
-1. **Frames are cumulative.** `on_message` receives the client's whole merged state each time (`ws_client.py:275`). "Is this key in the payload" means "has it ever been seen on this client", not "did this frame carry it". Editing the frame (the K2 Base pop) does not edit `_state`.
+1. **Frames are cumulative.** `on_message` receives the client's whole merged state each time (`ws_client.py:275`). "Is this key in the payload" means "has it ever been seen on this client", not "did this frame carry it". Editing the frame (the K2 Base pop) does not edit `_state`. The same goes for a value written into `coordinator.data` alone: the next frame of any kind overwrites it with `_state`'s copy. A setter's optimistic value goes through `KCoordinator.assume_commanded`, which also writes it into `_state` (`KClient.assume`) unless the printer reported the key while the command was in flight (#132, R86). The merge itself is `KClient._absorb`.
 2. **The frame handler is inline in the receive loop.** Awaiting network I/O in `_handle_message` stalls RX, `last_rx` goes stale and every entity flips unavailable at 15 s (`coordinator.py:2127-2131`).
 3. **`power_is_off()` means "switch off and not connected".** It cannot detect the moment a plug cuts a connected printer (section 4.3).
 4. **Backoff state lives in `_loop` locals** and survives across sessions that end in an exception (section 2.2). Only `stop()`/`start()` gives a clean slate.

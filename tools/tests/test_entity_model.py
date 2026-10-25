@@ -14,6 +14,7 @@ import pytest
 from custom_components.ha_creality_ws.sensor import (
     MAPPED_SPECS,
     SPECS,
+    FilamentStatusSensor,
     KMappedSensor,
     KMaxTempSensor,
     KPrintControlSensor,
@@ -72,6 +73,25 @@ def test_the_filament_status_is_always_one_of_its_options(raw):
     assert sensor.native_value is None or sensor.native_value in sensor._attr_options
     if raw in (1, "1"):
         assert sensor.native_value == "runout"
+
+
+@pytest.mark.parametrize("runout", [False, True])
+def test_the_filament_status_says_runout_only_when_the_coordinator_does(runout):
+    """A K1C keeps materialStatus at 1 through whole prints (R82)."""
+    coord = _coord({"materialStatus": 1})
+    coord.filament_runout = lambda: runout
+    sensor = FilamentStatusSensor(coord, MAPPED_SPECS[0])
+    assert sensor.native_value == ("runout" if runout else "normal")
+    assert sensor.native_value in sensor._attr_options
+
+
+def test_the_per_second_print_status_attributes_stay_out_of_the_recorder():
+    """Each changes every second while printing; recorded, one print wrote
+    ~5,500 distinct attribute rows for this one entity (R84)."""
+    sensor = PrintStatusSensor(_coord({"printFileName": "a.gcode", "state": 1}))
+    per_second = {"job_time_s", "left_time_s", "used_material_mm", "real_time_flow_mm3_s"}
+    assert per_second <= set(sensor.extra_state_attributes)
+    assert sensor._unrecorded_attributes == per_second
 
 
 def test_the_print_control_is_an_enum_and_a_diagnostic():

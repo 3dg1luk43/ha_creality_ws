@@ -159,9 +159,14 @@ class CurrentPrintPreviewImage(KEntity, ImageEntity):
                     if resp.status == 200:
                         data = await resp.read()
                         if data:
+                            # Only a different picture is a new one. The state is
+                            # this timestamp, and notifications version their
+                            # preview URL by it (#131): moving it on every fetch
+                            # re-keyed the URL each time a phone downloaded it.
+                            if data != self._last_image:
+                                self._attr_image_last_updated = dt_util.utcnow()
                             self._last_image = data
                             self._last_source_url = url
-                            self._attr_image_last_updated = dt_util.utcnow()
                             self._last_reason = "ok"
                             self._last_fetch_ts = now
                             return data

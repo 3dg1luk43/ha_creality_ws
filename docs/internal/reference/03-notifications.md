@@ -72,7 +72,7 @@ Priority order, first match wins:
 | no frame for `STALE_AFTER_SECS` (15 s, `const.py:48`) | `unknown` | `utils.py:510-511`, `coordinator.py:420-422` |
 | `err.errcode != 0` | `error` | `utils.py:518-520` |
 | `1 <= withSelfTest <= 99` | `self-testing` | `utils.py:522-524` |
-| file name and progress >= 100 | `completed` | `utils.py:540-541` |
+| file name and progress >= 100, not `print_finishing` (R81) | `completed` | `utils.py` `derive_print_state` |
 | file name and (`state == 5` or paused flag) | `paused` | `utils.py:542-543` |
 | file name and `state == 4` | `stopped` | `utils.py:544-545` |
 | file name and `state == 1` | `printing` | `utils.py:546-547` |
@@ -102,7 +102,7 @@ Priority order, first match wins:
 The printer keeps reporting the last job's file and 100% indefinitely (`coordinator.py:765-769`). Until primed, frames only build a baseline:
 
 - Prime on the first frame carrying both a file name and a progress, or after `NOTIFY_PRIME_GRACE_SECS` = 10 s (`const.py:128`, `coordinator.py:865-871`).
-- `_prime_notification_state` (`coordinator.py:762-847`) marks already-true conditions as already notified: completion if progress >= 100 (`785`), the current error code (`787-790`), runout if `materialStatus == 1` (`792-795`), finishing-soon if already inside the window (`797-800`), started always (`807`), stopped if the state is `stopped` (`808-814`).
+- `_prime_notification_state` (`coordinator.py:762-847`) marks already-true conditions as already notified: completion if progress >= 100 and not `print_finishing` (R81), the current error code (`787-790`), runout if `_runout_reported` (R82), finishing-soon if already inside the window (`797-800`), started always (`807`), stopped if the state is `stopped` (`808-814`).
 - The live card is baselined (`820`) and, when the printer is not busy and the card is enabled, a dismiss sentinel is sent for the live tag (`831-836`, kind `live:clear:adopt`), because `card_active` is in memory and a card from before the restart would otherwise never be removed (`822-830`).
 - Pinned by `tools/tests/test_notifications.py:84-174` (startup baseline, grace window, stale error).
 
@@ -112,7 +112,7 @@ The printer keeps reporting the last job's file and 100% indefinitely (`coordina
 
 ### 5.1 File name change (`coordinator.py:950-962`)
 
-Any change of `printFileName`, including to empty: resets finishing-soon and runout latches, sets `_last_error_code = 0`, baselines `_notified_completed = progress >= 100` (the first frame of a new job usually still carries the old 100), and calls `_reset_for_new_job` (`coordinator.py:1201-1220`), which dismisses any active card before clearing its state, then re-arms started, stopped and finishing-soon.
+Any change of `printFileName`, including to empty: resets finishing-soon and runout latches, sets `_last_error_code = 0`, baselines `_notified_completed = progress >= 100 and not print_finishing` (the first frame of a new job usually still carries the old 100), and calls `_reset_for_new_job` (`coordinator.py:1201-1220`), which dismisses any active card before clearing its state, then re-arms started, stopped and finishing-soon.
 
 ### 5.2 `is_new_job_cycle` (`notification_rules.py:472-509`)
 
@@ -184,7 +184,7 @@ Retirement:
 
 | | |
 |---|---|
-| Trigger | `progress >= 100` and not `_notified_completed` (`coordinator.py:1022`) |
+| Trigger | `progress >= 100`, not `print_finishing(d)` and not `_notified_completed`. A K1C reports 100 with 86 s left, drops to 99, then ends with state 2 and no time left (`fixtures/k1c_print_end.jsonl`); `print_finishing` holds the end back while state is 1 or 5 with time left (R81) |
 | Option | `notify_completed` (`coordinator.py:1023`) |
 | Text | `completed` template, else `completed_detailed` when `usedMaterialLength` is real, else `completed` (`coordinator.py:2014-2037`) |
 | Payload | `build_event_payload(kind=completed, tag=_live, channel_finished, ends_activity=True)`, preview plus snapshot (`coordinator.py:1988-1998`) |
@@ -224,7 +224,7 @@ Same payload shape and delivery as completed, `kind=stopped`, icon `mdi:stop-cir
 
 ### 6.6 Filament runout
 
-`materialStatus == 1` and not latched (`coordinator.py:1064-1081`); re-arms when it clears (`coordinator.py:1082-1084`) and on a file name change (`coordinator.py:953`). Shares `notify_error` and the `_alert` tag. No debounce. No bus event.
+`_runout_reported`: `materialStatus == 1` on a paused job, the flag not proven a latch (`_track_material_flag`: up for `RUNOUT_FLAG_STALE_SECS` of state 1, unpaused; cleared when the flag drops), and not latched. A K1C keeps the flag up through whole prints from the first print after boot (R82, `fixtures/k1c_print_start.jsonl`); re-arms when it clears (`coordinator.py:1082-1084`) and on a file name change (`coordinator.py:953`). Shares `notify_error` and the `_alert` tag. No debounce. No bus event.
 
 ### 6.7 Alert dismissal
 
@@ -283,7 +283,7 @@ Live card (`notification_rules.py:983-1080`):
 | `progress_bar_direction`, `progress_bar_color`, `notification_icon_color` | `increasing`, phase colour | `live_update` (`1055-1057`) |
 | `chronometer`, `when` | `True`, epoch seconds | `live_update`, not paused, ETA known (`1058-1061`) |
 | `chronometer`, `critical_text` | `False`, status word | `live_update` otherwise (`1062-1071`) |
-| `icon_url` | `/api/image_proxy/<image entity>` | preview usable (`1076-1077`, `coordinator.py:1275-1280`) |
+| `icon_url` | `/api/image_proxy/<image entity>?v=<picture epoch>` (#131) | preview usable (`1076-1077`, `coordinator.py:1275-1280`) |
 | `group`, `clickAction`, `url`, `actions` | see 6, 9 | `_apply_common` (`931-948`) |
 
 Terminal and finishing-soon banner (`notification_rules.py:1119-1141`): `tag, notification_icon, notification_icon_color, color, channel, importance: high, push.interruption-level: time-sensitive, activity: end` (terminal only), `icon_url, image` (snapshot `/api/camera_proxy/<camera>` when `snapshot_supported`, `coordinator.py:1282-1288`), `group, clickAction, url`. No progress keys, no `alert_once`, no actions (`notification_rules.py:1096-1117`).
@@ -331,7 +331,7 @@ The integration's own `activity` key is read by none of the three (tests use it 
 - Durations and filament length use translated templates with pre-formatted numbers (`notification_rules.py:178-241`).
 - File names are basenamed for bodies only (`notification_rules.py:160-175`, `coordinator.py:969`).
 - Custom templates: one option per notification (`const.py:171-190`, mapping at `183-190`), allowed placeholders per notification (`notification_rules.py:253-290`), `[optional]` segments and `[[`/`]]` escapes (`notification_rules.py:296-387`). Unknown placeholders are refused by the options flow (`config_flow.py:588-603`) and fall back to the shipped text at run time with one warning per template (`coordinator.py:1784-1813`). Values come from one frame (`coordinator.py:1719-1770`).
-- `{state}` in the built-in `filament_runout` is the print status sensor's state name in the server language (`_state_label`, which also loads `entity.sensor.print_status.state.*`; R33). In custom templates it stays the raw slug, as the README documents it. `finishing_soon` rounds the minutes up (40 s left is "1 min", not "0 minutes") and uses "min", since `str.format` has no plurals.
+- `{state}` in the built-in `filament_runout` is the print status sensor's state name in the server language (`_state_label`, which also loads `entity.sensor.print_status.state.*`; R33). In custom templates it stays the raw slug, as the README documents it. `{eta}` is empty when the printer reports 0 s or less, and `{layer}`/`{total_layers}` are empty while the layer count is 0, the same "not known yet" rule as the built-in body (R25, R83). `finishing_soon` rounds the minutes up (40 s left is "1 min", not "0 minutes") and uses "min", since `str.format` has no plurals.
 
 ---
 
@@ -410,6 +410,10 @@ Verified by reading the code end to end and by driving `_check_notifications` wi
 | FIXED (R10): a completed print whose progress later resets to 0 in `state` 0 stood up a phantom card and fired `print_started`. The `is_new_job_cycle` re-arm now also requires `REARM_JOB_STATES` (printing, paused, self-testing), and the started event is checked after the re-arm so a same-file reprint is announced on the frame that re-arms it | `coordinator.py` `_check_notifications` |
 | FIXED (R11, by R10's gate): a `state` 4 stop that also reset `printJobTime` was announced twice and fired `print_started`, because the clock reset re-armed the stop latch. `stopped` is not a `REARM_JOB_STATES` state. Pinned by `test_a_stop_reported_with_its_clock_reset_is_announced_once` | `coordinator.py` `_check_notifications` |
 | FIXED (R12): a sticky error code or `materialStatus` fired an alert at every new print. A file change now baselines both to the current report (`_error_code`, `_runout_reported`), as priming does; a fault that appears, or clears and returns, during the job still alerts. Runout still has no debounce (S6) | `coordinator.py` `_check_notifications` |
+| FIXED (R81): a K1C completion was announced on the first 100%, 15 s before the job ended, and the status flapped completed -> printing -> completed (real trace `fixtures/k1c_print_end.jsonl`). `print_finishing` holds it back while the printer prints with time left | `utils.py` `print_finishing`; `coordinator.py` completion |
+| FIXED (R82): a K1C's latched `materialStatus` alerted "filament ran out" at the first print after boot. A runout now needs a paused job, and a flag up for 30 s of printing is discounted until it clears | `coordinator.py` `_runout_reported`, `_track_material_flag` |
+| FIXED (R83): custom templates got `{eta}` "0s" and `{layer}/{total_layers}` "0/0" before the self-test ended; now empty | `coordinator.py` `_template_values` |
+| FIXED (#131, R85): the preview URL was the same for every print, so iOS showed a cached earlier thumbnail; now versioned by the picture | `coordinator.py` `_picture_version`; `image.py` |
 | FIXED (R13): dismiss-then-banner order was not guaranteed (non-blocking service call) | `coordinator.py` `_async_deliver_one` |
 | FIXED (R25): "Finishing" during warm-up and self-test, "Starting" for any first push, "0s" as time left. `_live_status_text` now reads the printer: self-testing, processing or 0% is Starting; a reported time left of 0 or less is Finishing; otherwise Printing (`status_printing`, new). Time left of 0 or less is omitted from the body | `coordinator.py` `_live_status_text`, `_live_message` |
 | A finishing-soon dismissal is sent at every completion even with that option off | `coordinator.py:1120`, `1436`, `1134-1140` |

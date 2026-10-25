@@ -160,7 +160,7 @@ Each model only sets `box_sensor`, `box_control`, `light` and `camera`. Several 
    - `state=0` with the file kept and progress reset;
    - the file cleared.
 3. **Finish:**
-   - progress rounds up to 100 with minutes still left, reports 99 once more, then finishes;
+   - progress rounds up to 100 with minutes still left, reports 99 once more, then finishes (a real K1C on 1.3.5.22 finishes with state 2, then state 0 about 50 s later; the simulator goes straight to 0, R88);
    - the file stays selected at 100%;
    - later, progress resets to 0 while the file is still selected (R10).
 4. **Pause** freezes progress and the time left.

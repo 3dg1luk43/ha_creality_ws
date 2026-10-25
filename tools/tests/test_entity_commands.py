@@ -14,7 +14,7 @@ import pytest
 
 from homeassistant.exceptions import HomeAssistantError
 
-from custom_components.ha_creality_ws.coordinator import send_command
+from custom_components.ha_creality_ws.coordinator import KCoordinator, send_command
 from custom_components.ha_creality_ws.number import (
     BedTargetNumber,
     BoxTargetNumber,
@@ -42,26 +42,38 @@ def _run(coro):
 
 
 class Client:
-    def __init__(self, fail=False):
+    def __init__(self, fail=False, echo=None):
         self._host = "10.0.0.5"
         self.fail = fail
         self.sent = []
+        # The client's cumulative state; `echo` is the printer reporting a
+        # value while the command is still in flight.
+        self.state = {"targetNozzleTemp": 0, "targetBedTemp0": 0, "targetBoxTemp": 0}
+        self.echo = echo or {}
 
     async def send_set_retry(self, **params):
         if self.fail:
             raise RuntimeError("printer link not available after 6.0s")
         self.sent.append(params)
+        self.state.update(self.echo)
+
+    def reported(self, key):
+        return self.state.get(key)
+
+    def assume(self, values):
+        self.state.update(values)
 
 
-def _coordinator(fail=False):
+def _coordinator(fail=False, echo=None):
     coord = SimpleNamespace(
-        client=Client(fail),
+        client=Client(fail, echo),
         data={"targetNozzleTemp": 0, "targetBedTemp0": 0, "targetBoxTemp": 0},
         config_entry=SimpleNamespace(data={}, options={}),
         async_update_listeners=lambda: None,
         async_add_listener=lambda *a, **k: (lambda: None),
     )
     coord.merge_telemetry = coord.data.update
+    coord.assume_commanded = KCoordinator.assume_commanded.__get__(coord)
     return coord
 
 
@@ -102,6 +114,26 @@ def test_a_target_that_was_sent_is_shown_straight_away():
     _run(entity.async_set_native_value(210))
     assert coord.client.sent == [{"nozzleTempControl": 210}]
     assert coord.data["targetNozzleTemp"] == 210
+    # Into the state frames are built from too, or the next frame reverts it (#132).
+    assert coord.client.state["targetNozzleTemp"] == 210
+
+
+@pytest.mark.parametrize(
+    ("cls", "key"),
+    [
+        (NozzleTargetNumber, "targetNozzleTemp"),
+        (BedTargetNumber, "targetBedTemp0"),
+        (BoxTargetNumber, "targetBoxTemp"),
+    ],
+)
+def test_a_value_the_printer_reported_during_the_send_is_kept(cls, key):
+    """It may have clamped the command; showing ours instead would lie."""
+    coord = _coordinator(echo={key: 55})
+    entity = cls(coord)
+    entity._attr_native_min_value, entity._attr_native_max_value = 0, 300
+    _run(entity.async_set_native_value(60))
+    assert coord.client.state[key] == 55
+    assert coord.data[key] == 0  # the echo reaches .data with its frame
 
 
 def test_the_speed_control_reports_a_failed_send():

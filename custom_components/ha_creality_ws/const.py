@@ -255,6 +255,9 @@ NOTIFY_LIVE_INTERVAL_SECS = 300.0
 # Floor under everything, including a forced refresh. Telemetry arrives several
 # times a second, so this is what stops a frame storm becoming a push storm.
 NOTIFY_LIVE_MIN_INTERVAL_SECS = 30.0
+# A material flag still up after this long with the printer printing on is a
+# firmware latch, not a runout: a runout pauses the job within seconds (R82).
+RUNOUT_FLAG_STALE_SECS = 30.0
 # Pause and resume are deliberate user actions and must show up at once, so a
 # state change bypasses both intervals above. Safe because `decide()` requires
 # the derived state to have actually *changed*: a printer sitting in one state

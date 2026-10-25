@@ -6,6 +6,7 @@ import json
 import math
 import time
 from collections.abc import Iterable, Mapping
+from datetime import datetime
 from typing import Any
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator  # type: ignore[import]
 from homeassistant.helpers.aiohttp_client import async_get_clientsession  # type: ignore[import]
@@ -24,6 +25,8 @@ from .utils import (
     derive_activity_state,
     detect_camera_type,
     parse_model_version,
+    print_finishing,
+    print_seconds_left,
     safe_float,
 )
 from .notification_rules import (
@@ -71,6 +74,7 @@ from .notification_rules import (
 )
 from .const import (
     DOMAIN,
+    RUNOUT_FLAG_STALE_SECS,
     STALE_AFTER_SECS,
     POWER_SWITCH_MISSING_GRACE_SECS,
     CLEAR_NOTIFICATION_MARKER,
@@ -296,6 +300,11 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         
         # Extended status tracking
         self._notified_filament_runout = False
+        # The material flag latched on by firmware rather than by a runout (R82):
+        # since when it has been up while the printer went on printing, and
+        # whether that has lasted long enough to prove it says nothing.
+        self._material_flag_since: float | None = None
+        self._material_flag_stale = False
         self._notified_started = False
         self._notified_stopped = False
         
@@ -768,6 +777,28 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as exc:
                 _LOGGER.warning("Queued resume failed; will retry. Error: %s", exc)
 
+    def assume_commanded(
+        self, values: dict[str, Any], *, reported_before: Mapping[str, Any]
+    ) -> None:
+        """Show values just sent to the printer until it reports them itself.
+
+        Written into the client's cumulative state as well as here: frames are
+        built from that state, so a value set here alone was reverted by the
+        next frame of any kind until the printer echoed it (#132). A key the
+        printer reported while the command was in flight keeps the printer's
+        value, since it may have clamped or refused it.
+        """
+        fresh = {
+            key: value
+            for key, value in values.items()
+            if self.client.reported(key) == reported_before.get(key)
+        }
+        if not fresh:
+            return
+        self.client.assume(fresh)
+        self.merge_telemetry(fresh)
+        self.async_update_listeners()
+
     def merge_telemetry(self, payload: dict[str, Any]) -> None:
         """Merge telemetry into self.data, firing the discovery signal once.
 
@@ -965,17 +996,8 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @staticmethod
     def _print_seconds_left(d: dict[str, Any]) -> float | None:
-        """Seconds remaining in the current print, or None.
-
-        The printer streams this as `printLeftTime`; `printTimeLeft` is only kept
-        as a fallback because the notification code used to look for that name
-        exclusively, which meant the minutes-to-end notification never fired.
-        """
-        for key in ("printLeftTime", "printTimeLeft"):
-            value = safe_float(d.get(key))
-            if value is not None:
-                return value
-        return None
+        """Seconds remaining in the current print, or None (`print_seconds_left`)."""
+        return print_seconds_left(d)
 
     def _prime_notification_state(self, d: dict[str, Any]) -> None:
         """Record the printer's state at startup without notifying about it.
@@ -1000,17 +1022,16 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             prog_val = int(progress) if progress is not None else 0
         except (ValueError, TypeError):
             prog_val = 0
-        self._notified_completed = prog_val >= 100
+        # A start inside the last seconds of a job, while the printer still
+        # reports it printing at 100%, is not a finish to swallow (R81).
+        self._notified_completed = prog_val >= 100 and not print_finishing(d)
 
         try:
             self._last_error_code = int((d.get("err") or {}).get("errcode", 0))
         except (AttributeError, ValueError, TypeError):
             self._last_error_code = 0
 
-        try:
-            self._notified_filament_runout = int(d.get("materialStatus") or 0) == 1
-        except (ValueError, TypeError):
-            self._notified_filament_runout = False
+        self._notified_filament_runout = self._runout_reported(d)
 
         left_s = self._print_seconds_left(d)
         self._notified_minutes_to_end = bool(
@@ -1076,6 +1097,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         progress = d.get("printProgress")
         if progress is None:
             progress = d.get("dProgress")
+
+        # Every frame, priming or not: the latch is proven by time spent printing.
+        self._track_material_flag(d)
 
         # Baseline the current state before anything can be notified. Telemetry
         # arrives incrementally, so wait for a frame that carries both the file
@@ -1182,7 +1206,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # carries the *previous* job's 100 -- arming here unconditionally
             # fired "completed" the instant a new job started, and then swallowed
             # the real completion.
-            self._notified_completed = prog_val >= 100
+            self._notified_completed = prog_val >= 100 and not print_finishing(d)
             self._reset_for_new_job(prog_val)
 
         if not fname:
@@ -1245,7 +1269,12 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         #   * The bus events are documented to fire regardless of notification
         #     settings; they exist precisely for the user who writes their own
         #     text instead of using ours.
-        if prog_val >= 100 and not self._notified_completed:
+        #
+        # 100% is not the end while the printer still says it is printing with
+        # time left: a K1C rounds up 15 s early, goes back to 99, and only then
+        # reports the job finished (R81). Same predicate as derive_print_state,
+        # so the notification and the status sensor change on the same frame.
+        if prog_val >= 100 and not print_finishing(d) and not self._notified_completed:
             if self._notify_completed and deliver:
                 await self._notify_event(
                     self._completion_message(d, job), kind=EVENT_COMPLETED
@@ -1285,8 +1314,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._fire_print_event(BUS_EVENT_PRINT_ERROR, d, job)
         self._last_error_code = code
 
-        # 3) Filament runout (materialStatus == 1). Shares the error toggle,
-        # being an error-like state the user wants to hear about together.
+        # 3) Filament runout (materialStatus == 1 on a paused job, R82). Shares
+        # the error toggle, being an error-like state the user wants to hear
+        # about together.
         is_runout = self._runout_reported(d)
 
         if is_runout and not self._notified_filament_runout:
@@ -1511,7 +1541,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 and self._job_state() in PREVIEW_PRINT_STATES
             )
             if state is not None and (reason not in PREVIEW_REASONS_UNUSABLE or stale):
-                preview_url = f"/api/image_proxy/{entity_id}"
+                preview_url = f"/api/image_proxy/{entity_id}{self._picture_version(state)}"
 
         snapshot_url = None
         if include_snapshot and self._notify_camera_snapshot:
@@ -1522,6 +1552,22 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 snapshot_url = f"/api/camera_proxy/{entity_id}"
 
         return NotifyVisuals(preview_url=preview_url, snapshot_url=snapshot_url)
+
+    @staticmethod
+    def _picture_version(state: Any) -> str:
+        """`?v=` and when the preview last changed, or nothing when unknown.
+
+        The image entity's state is the time its picture last changed. iOS
+        caches an attachment by its URL, and this one used to be the same for
+        every print, so a finished print showed an earlier print's thumbnail
+        (#131). Keyed to the picture rather than the clock: the card's refreshes
+        during one job keep one URL, and the phone fetches the picture once.
+        """
+        try:
+            changed = datetime.fromisoformat(str(getattr(state, "state", "")))
+        except ValueError:
+            return ""
+        return f"?v={int(changed.timestamp())}"
 
     def _notify_links(self) -> NotifyLinks:
         """Tap targets, sent as both dialects at once.
@@ -1834,12 +1880,54 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return 0
 
     @staticmethod
-    def _runout_reported(d: dict[str, Any]) -> bool:
+    def _material_flag(d: dict[str, Any]) -> bool:
+        """`materialStatus` 1, Creality's "consumable not detected"."""
         try:
             mat_status = d.get("materialStatus")
             return mat_status is not None and int(mat_status) == 1
         except (ValueError, TypeError):
             return False
+
+    def _track_material_flag(self, d: dict[str, Any]) -> None:
+        """Notice a material flag that firmware latched rather than a runout raised.
+
+        A K1C on 1.3.5.22 raises the flag at the first print after boot, with
+        filament loaded, and keeps it up while printing normally until it is
+        powered off (R82). A real runout pauses the print within seconds, so a
+        flag that stays up while the printer keeps printing for
+        `RUNOUT_FLAG_STALE_SECS` is that latch. It stays discounted, across jobs,
+        until the printer clears it.
+        """
+        if not self._material_flag(d):
+            self._material_flag_since = None
+            self._material_flag_stale = False
+            return
+        if d.get("state") != 1 or self._paused_flag:
+            self._material_flag_since = None
+            return
+        now = self.hass.loop.time()
+        if self._material_flag_since is None:
+            self._material_flag_since = now
+        elif now - self._material_flag_since >= RUNOUT_FLAG_STALE_SECS:
+            self._material_flag_stale = True
+
+    def _runout_reported(self, d: dict[str, Any]) -> bool:
+        """Whether the printer is reporting a filament runout right now.
+
+        The flag alone is not one: the printer's own web UI pairs it with a
+        Resume button, because a runout pauses the job, and a K1C keeps the flag
+        up through whole prints (R82). So only a paused job with the flag up
+        counts, and not while the flag is a proven latch.
+        """
+        return (
+            self._material_flag(d)
+            and not self._material_flag_stale
+            and self._job_state() == "paused"
+        )
+
+    def filament_runout(self) -> bool:
+        """The Filament Status sensor's "runout", by the notification's rule."""
+        return self._runout_reported(self.data or {})
 
     def _notify_action_ids(self) -> dict[str, str]:
         """Action ids for this printer, namespaced by config entry."""
@@ -2032,6 +2120,16 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         progress = self._notify_progress()
         layer = self._int_or_none(d.get("layer"))
         total_layers = self._int_or_none(d.get("TotalLayer"))
+        # Before the self-test ends a K1C reports 0 layers of 0 and 0 s left.
+        # Those are "not known yet", the same rule the built-in card body
+        # follows (R25), not a count and an estimate (R83).
+        if total_layers is not None and total_layers <= 0:
+            total_layers = None
+            if layer is not None and layer <= 0:
+                layer = None
+        seconds_left = self._print_seconds_left(d)
+        if seconds_left is not None and seconds_left <= 0:
+            seconds_left = None
         code = self._error_code(d)
         values: dict[str, str] = {
             "device": self._notify_title(),
@@ -2039,7 +2137,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "progress": "" if progress is None else str(progress),
             "layer": "" if layer is None else str(layer),
             "total_layers": "" if total_layers is None else str(total_layers),
-            "eta": format_duration(self._print_seconds_left(d), strings),
+            "eta": format_duration(seconds_left, strings),
             "elapsed": format_duration(d.get("printJobTime"), strings),
             "filament": format_filament_length(
                 d.get("usedMaterialLength"), strings.get("filament_length")
