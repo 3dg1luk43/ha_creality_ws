@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and versions are numbered major.minor.patch, with a fourth number for a hotfix release (0.9.6.1).
 
 
+## 0.9.10 - Unreleased
+> [List of issues (0.9.10)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.10)
+
+### TL;DR
+
+### Fixes
+
+
 ## 0.9.9 - 2026-10-08
 > [List of issues (0.9.9)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.9)
 
