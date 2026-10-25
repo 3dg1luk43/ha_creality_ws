@@ -95,6 +95,9 @@ verify on the test box (`tools/testbox`) or a real HA, and say which in the comm
   WebRTC on `:8000`, preview on `:80`, Moonraker on `:7125` (K2 Base). Changing its model on the same
   IP leaves the integration's cached camera type behind (by design, #46): re-add the entry.
   Camera media is pre-rendered in `tools/simulator/media/`; never encode at runtime.
+- Never post the real K1C's `:8000/call/webrtc_local` an SDP with bare LF line endings: its WebRTC
+  server dies and stays down until the printer is power-cycled (R90). Probe scripts must keep CRLF
+  (read SDP files in binary or with `newline=""`).
 - On the test box, go2rtc receives no RTP from the simulator (old or new) although ICE connects and an
   aiortc client decodes it fine (R78); WebRTC snapshots through go2rtc time out there.
 - `tools/test_files/` is gitignored and holds a secret (`deploy_to_ha.sh`). Never copy from it

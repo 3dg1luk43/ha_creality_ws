@@ -76,7 +76,7 @@ Priority order, first match wins:
 | file name and (`state == 5` or paused flag) | `paused` | `utils.py:542-543` |
 | file name and `state == 4` | `stopped` | `utils.py:544-545` |
 | file name and `state == 1` | `printing` | `utils.py:546-547` |
-| file name and `state == 0` | `processing` | `utils.py:548-549` |
+| file name and `state` 0, 7 or 9 | `processing` | `utils.py` `derive_print_state` |
 | anything else (including `state` 2 or 3 below 100%) | `idle` | `utils.py:551` |
 
 `self-testing` outranks `stopped`, a cleared file name and 100%: while `withSelfTest` is mid-range nothing else about the job is visible.
@@ -93,7 +93,7 @@ Priority order, first match wins:
 | `RUNNING_JOB_STATES` | printing, paused | arming the stop watch | `notification_rules.py:533` |
 | `UNOBSERVABLE_JOB_STATES` | unknown, off | stop watch ignores the frame and clears its timer | `notification_rules.py:538`, `626-632` |
 
-`processing` is both pre-print warm-up and what a cancelled job idles in (`notification_rules.py:527-532`), which is why the watch never arms on it.
+`processing` is both pre-print warm-up and what a cancelled job idles in (`notification_rules.py:527-532`), which is why the watch never arms on it. For the same reason the live card never *starts* on it (`LiveCardState.decide`); a card already up stays up through it (R89).
 
 ---
 

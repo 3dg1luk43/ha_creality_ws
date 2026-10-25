@@ -65,6 +65,19 @@ def test_a_print_ends_100_then_99_then_completed_with_the_file_kept():
     assert (v["targetNozzleTemp"], v["targetBedTemp0"]) == (0, 0)
 
 
+def test_a_k1c_on_1_3_5_ends_with_state_2_then_0():
+    """As the real one streamed it on 2026-10-25: state 2 with progress 100 and
+    no time left, then state 0 about 50 s later (R88)."""
+    state, clock = _printer("k1c-1.3.5", seconds=100)
+    state.start_print("benchy.gcode")
+    seen = _run(state, clock, 130)
+    phase, code, progress, _ = seen[-1]
+    assert (phase, code, progress) == (Phase.COMPLETED, 2, 100)
+    assert state.values()["printLeftTime"] == 0
+    tail = _run(state, clock, 60)
+    assert [code for _ph, code, _p, _w in tail][-1] == 0
+
+
 def test_progress_reads_100_while_time_is_still_left():
     state, clock = _printer(seconds=100)
     state.start_print()

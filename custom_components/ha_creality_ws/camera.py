@@ -14,6 +14,7 @@ import asyncio
 import base64
 import json
 import logging
+import re
 from collections.abc import Callable
 
 from urllib.parse import urlparse
@@ -46,6 +47,45 @@ GO2RTC_DOMAIN = "go2rtc"
 # Hosts that mean "this machine". HA addresses its own go2rtc as one of
 # these, and a bare host with no scheme parses to None.
 _GO2RTC_LOOPBACK_HOSTS = (None, "localhost", "127.0.0.1", "::1")
+
+# A browser's host candidate with its address hidden behind a random mDNS name,
+# "a=candidate:<foundation> <component> <transport> <priority> <uuid>.local ..."
+# (R87). Groups: everything before the host, the host, everything after.
+_MDNS_CANDIDATE_RE = re.compile(r"^(a=candidate:\S+ \d+ \S+ \d+ )(\S+\.local)( .*)$")
+# Per name; the names are resolved together. A browser on the LAN answered in
+# 0.27 s on the test network.
+MDNS_RESOLVE_TIMEOUT_MS = 1500
+
+
+async def _async_resolve_mdns_hosts(hass: HomeAssistant, names: list[str]) -> dict[str, str]:
+    """IPv4 addresses for browsers' mDNS host names, through HA's zeroconf.
+
+    Names that do not answer are left out. Imported here rather than at the top:
+    zeroconf is only an `after_dependencies` entry, and only direct WebRTC with
+    a hidden browser address ever needs it.
+    """
+    try:
+        from homeassistant.components import zeroconf as ha_zeroconf
+        from zeroconf import AddressResolverIPv4, IPVersion
+
+        aiozc = await ha_zeroconf.async_get_async_instance(hass)
+    except Exception as exc:  # pylint: disable=broad-except
+        _LOGGER.debug("ha_creality_ws: cannot resolve browser mDNS candidates: %s", exc)
+        return {}
+
+    async def _resolve(name: str) -> tuple[str, str | None]:
+        resolver = AddressResolverIPv4(f"{name}.")
+        try:
+            if await resolver.async_request(aiozc.zeroconf, MDNS_RESOLVE_TIMEOUT_MS):
+                addresses = resolver.parsed_addresses(IPVersion.V4Only)
+                if addresses:
+                    return name, addresses[0]
+        except Exception as exc:  # pylint: disable=broad-except
+            _LOGGER.debug("ha_creality_ws: mDNS lookup of %s failed: %s", name, exc)
+        return name, None
+
+    results = await asyncio.gather(*(_resolve(name) for name in names))
+    return {name: address for name, address in results if address}
 
 from .const import (
     DOMAIN,
@@ -1173,9 +1213,11 @@ class CrealityWebRTCCamera(_BaseCamera):
         session = async_get_clientsession(self.hass)
         printer_origin = self._upstream_signaling_url.rsplit("/", 2)[0]
         try:
-            printer_offer = self._printer_direct_offer_sdp(
-                offer_sdp,
-                self._direct_sessions.get(session_id, []),
+            printer_offer = await self._printer_reachable_candidates(
+                self._printer_direct_offer_sdp(
+                    offer_sdp,
+                    self._direct_sessions.get(session_id, []),
+                )
             )
             async with session.post(
                 self._upstream_signaling_url,
@@ -1241,6 +1283,36 @@ class CrealityWebRTCCamera(_BaseCamera):
             )
         finally:
             self._direct_sessions.pop(session_id, None)
+
+    async def _printer_reachable_candidates(self, sdp: str) -> str:
+        """The offer with browsers' mDNS host candidates given their address (R87).
+
+        A browser hides its local address behind a random `<uuid>.local` name
+        unless the page holds camera or microphone permission. A K1C on
+        1.3.5.22 never checks such a candidate, so it never starts its side of
+        ICE and the stream stays at 0 bytes; given the address, it streams. The
+        name answers mDNS on the LAN, the only place direct WebRTC can work.
+        A name that does not answer is left as it was.
+        """
+        names = sorted(
+            {m.group(2) for line in sdp.splitlines() if (m := _MDNS_CANDIDATE_RE.match(line))}
+        )
+        if not names:
+            return sdp
+        resolved = await _async_resolve_mdns_hosts(self.hass, names)
+        _LOGGER.debug(
+            "ha_creality_ws: browser mDNS candidates resolved %d of %d", len(resolved), len(names)
+        )
+        if not resolved:
+            return sdp
+        out: list[str] = []
+        for line in sdp.splitlines(keepends=True):
+            body = line.rstrip("\r\n")
+            m = _MDNS_CANDIDATE_RE.match(body)
+            if m and m.group(2) in resolved:
+                line = f"{m.group(1)}{resolved[m.group(2)]}{m.group(3)}{line[len(body):]}"
+            out.append(line)
+        return "".join(out)
 
     def _wrap_direct_offer_payload(self, offer_sdp: str) -> str:
         """Wrap an SDP offer in the printer's base64 JSON signaling format."""

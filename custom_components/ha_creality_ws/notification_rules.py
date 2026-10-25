@@ -804,6 +804,12 @@ class LiveCardState:
         if self.pushes_this_job >= NOTIFY_LIVE_MAX_PUSHES_PER_JOB:
             return None
         if not self.card_active:
+            if snap.activity_state == "processing":
+                # A job about to start (state 9, under a second) or a cancel
+                # finishing (7): neither is worth standing a card up for, and
+                # starting on the first cost a push 90 ms before the "printing"
+                # one (R89). A card already up stays up through it.
+                return None
             # Also the mid-print restart resync: priming clears card_active
             # without notifying, so the first frame of an already-running job
             # starts the card rather than leaving a frozen one on the phone.

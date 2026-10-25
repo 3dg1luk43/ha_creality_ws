@@ -84,3 +84,19 @@ def test_the_latched_material_flag_never_raises_a_runout_alert():
     _statuses, pushes, _events, lines = _replay("k1c_print_start.jsonl")
     assert all(json.loads(line)["frame"].get("materialStatus", 1) == 1 for line in lines[:1])
     assert not [d for _t, _m, d in pushes if d.get("tag", "").endswith("_alert")]
+
+
+def test_a_job_start_never_reads_idle_and_starts_one_card():
+    """State 9 read "idle" for under a second, so every start went
+    stopped -> idle -> printing and fired automations waiting for idle (R89).
+    As "processing" it must not stand the card up before "printing" does."""
+    statuses, pushes, _events, _lines = _replay("k1c_print_start.jsonl")
+    assert [s for _t, s in statuses] == ["stopped", "processing", "printing", "self-testing"]
+    starts = [d for _t, _m, d in pushes if d.get("activity") == "start"]
+    assert len(starts) == 1
+    first_card = next(
+        t for t, m, d in pushes
+        if d.get("tag", "").endswith("_live") and m != CLEAR_NOTIFICATION_MARKER
+    )
+    printing_at = next(t for t, s in statuses if s == "printing")
+    assert first_card >= printing_at

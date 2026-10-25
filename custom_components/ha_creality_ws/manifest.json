@@ -1,7 +1,7 @@
 {
   "domain": "ha_creality_ws",
   "name": "Creality WebSocket Integration",
-  "after_dependencies": ["go2rtc"],
+  "after_dependencies": ["go2rtc", "zeroconf"],
   "codeowners": ["@3dg1luk43"],
   "config_flow": true,
   "dependencies": ["lovelace", "http", "frontend", "persistent_notification"],

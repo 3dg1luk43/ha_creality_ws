@@ -142,7 +142,7 @@ All are compact JSON (`separators=(",", ":")`, `ws_client.py:530`) sent through 
 
 | Key | Consumer | Interpretation |
 |---|---|---|
-| `state` | `utils.py:526-550`, `coordinator.py:473` | 0 processing (with a file), 1 printing, 4 stopped, 5 paused; any other value with a file name derives as `idle` |
+| `state` | `utils.py:526-550`, `coordinator.py:473` | 0, 7 and 9 processing (with a file; 7 a cancel finishing, R29; 9 a K1C job starting, R89), 1 printing, 2 a K1C job just finished (completed via progress 100), 4 stopped, 5 paused; any other value with a file name derives as `idle` |
 | `printFileName` | `utils.py:527`, `coordinator.py:641`, `:669`, `:852` | non-empty means a job exists; a change re-arms per-job latches; full path on K1C |
 | `printProgress`, fallback `dProgress` | `utils.py:528-538`, `coordinator.py:778-780`, `:857-859` | explicit `is None` fallback, never `or` (a real 0 must not fall back to the previous job's 100) |
 | `withSelfTest` | `utils.py:522-524` | 1..99 means self-testing; outranks every job state |
@@ -309,7 +309,7 @@ The watcher subscribes to the raw `power_switch` option (`__init__.py:217`, `:46
 | 6 | file name and (`state == 5` or paused flag) | `paused` |
 | 7 | file name and `state == 4` | `stopped` |
 | 8 | file name and `state == 1` | `printing` |
-| 9 | file name and `state == 0` | `processing` |
+| 9 | file name and `state` 0, 7 or 9 (R29, R89) | `processing` |
 | 10 | anything else (including other `state` codes with a file) | `idle` |
 
 Non-finite progress is treated as absent (`:532-538`). `derive_activity_state` (`utils.py:555-584`) re-derives with `err={}` when the result is `error`, so it never returns `error`; it is what pause/resume (`coordinator.py:461-466`), the live card (`:1319-1324`), the CFS write guard (`__init__.py:630-640`) and the notification watch use. `PREVIEW_PRINT_STATES = BUSY | {completed}` (`utils.py:491`).

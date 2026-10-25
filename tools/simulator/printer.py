@@ -48,6 +48,10 @@ _M106_RE = re.compile(r"^M106\b(?:\s+P(?P<p>\d+))?(?:\s+S(?P<s>\d+(?:\.\d+)?))?"
 _SET_PIN_RE = re.compile(r"^SET_PIN\s+PIN=(?P<pin>\S+)\s+VALUE=(?P<value>[0-9.]+)", re.IGNORECASE)
 
 
+# How long a "state2" firmware reports state 2 after a job ends (R88).
+FINISHED_STATE2_SECS = 50.0
+
+
 class Phase(str, Enum):
     IDLE = "idle"
     STARTING = "starting"  # heating before the first layer
@@ -212,6 +216,7 @@ class PrinterState:
         self.real_time_flow = 0.0
         self.real_time_speed = 0.0
         self.finished_at: float | None = None
+        self._finished_state2 = False
         self.excluded: list[str] = []
 
         attached = {"auto": self.profile.cfs, "on": True, "off": False}.get(cfs, self.profile.cfs)
@@ -265,6 +270,7 @@ class PrinterState:
         self.print_job_time = 0
         self.print_left_time = int(self.job.duration)
         self.finished_at = None
+        self._finished_state2 = False
         self.with_self_test = 0 if self.with_self_test != 100 else 100
         self.nozzle_target = self.job_targets["nozzle"]
         self.bed_target = self.job_targets["bed"]
@@ -594,6 +600,10 @@ class PrinterState:
                 self._stopped("state4")
             return
         if job is None or self.phase not in ACTIVE_PHASES:
+            if self._finished_state2 and self.finished_at is not None:
+                if now - self.finished_at >= FINISHED_STATE2_SECS:
+                    self._finished_state2 = False
+                    self._log("finished job now reports state 0")
             if self.phase == Phase.COMPLETED and self.sim.finished_reset_seconds and self.finished_at:
                 if now - self.finished_at >= self.sim.finished_reset_seconds and self.progress:
                     self.progress = 0
@@ -666,6 +676,7 @@ class PrinterState:
         self.nozzle_target = self.bed_target = 0.0
         self.real_time_flow = self.real_time_speed = 0.0
         self.finished_at = now
+        self._finished_state2 = self.profile.finish_style == "state2"
         self._log("print completed")
 
     def _tick_motion(self, dt: float) -> None:
@@ -700,6 +711,8 @@ class PrinterState:
             return 4
         if self.phase == Phase.STOPPING:
             return 7
+        if self.phase == Phase.COMPLETED and self._finished_state2:
+            return 2
         return 0
 
     def device_state(self) -> int:

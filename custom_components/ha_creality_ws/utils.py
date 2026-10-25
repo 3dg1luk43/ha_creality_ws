@@ -715,9 +715,11 @@ def derive_print_state(
         # 30 s, raised Z, then reported 4, and read "idle" meanwhile (R29).
         # Busy, not an end: from one capture 7 cannot be ruled out elsewhere in
         # a print, and calling it "stopped" would announce a stop that did not
-        # happen. (9, for half a second as a job starts, stays idle: mapping it
-        # only added a live push 90 ms before the "printing" one.)
-        if state in (0, 7):
+        # happen. 9 is the K1C starting a job, for under a second before 1;
+        # read as "idle" it made every start stopped -> idle -> printing, which
+        # fires automations waiting for idle (R89). The live card does not
+        # start on "processing", so it costs no extra push.
+        if state in (0, 7, 9):
             return "processing"
 
     return "idle"
