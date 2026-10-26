@@ -141,8 +141,13 @@ def test_the_start_trace_clears_the_last_jobs_card_and_starts_on_its_own_tag():
     live = [(t, d.get("tag", ""), m) for t, m, d in pushes if d.get("tag", "").endswith("_live")]
     cleared = {tag for _t, tag, m in live if m == CLEAR_NOTIFICATION_MARKER}
     assert any(tag.endswith("_1792915251_live") for tag in cleared)
-    # The shared tag: the integration's base and `_live`, no job time between.
-    assert any(tag.startswith(base) and not re.search(r"_\d{9,}_live$", tag) for tag in cleared)
+    # The shared tag (the integration's base and `_live`, no job time between),
+    # cleared at the baseline itself, before any card.
+    first_card = min(t for t, _tag, m in live if m != CLEAR_NOTIFICATION_MARKER)
+    assert any(
+        t < first_card and tag.startswith(base) and not re.search(r"_\d{9,}_live$", tag)
+        for t, tag, m in live if m == CLEAR_NOTIFICATION_MARKER
+    )
     cards = [(t, tag) for t, tag, m in live if m != CLEAR_NOTIFICATION_MARKER]
     assert cards and all(tag.endswith("_1792915744_live") for _t, tag in cards)
     assert not any(tag.endswith("_1792915744_live") for tag in cleared)

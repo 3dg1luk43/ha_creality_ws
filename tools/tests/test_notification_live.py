@@ -1782,8 +1782,8 @@ def test_a_print_the_printer_dates_gets_a_card_tag_of_its_own_and_no_clear():
     coord, hass = _coordinator(targets=("notify.mobile_app_iphone",))
     _as_iphone(coord)
     calls = _live_tag_calls(_frame_calls(coord, hass, **_printing(10, printStartTime=T2)))
-    assert [tag for tag, _m in calls] == [f"{coord._notify_tag_base()}_{T2}_live"]
-    assert calls[0][1] != CLEAR_NOTIFICATION_MARKER
+    job_tag = f"{coord._notify_tag_base()}_{T2}_live"
+    assert [m != CLEAR_NOTIFICATION_MARKER for tag, m in calls if tag == job_tag] == [True]
 
 
 def test_a_reprint_gets_a_new_card_tag_and_the_finished_job_keeps_its_own():
@@ -1795,13 +1795,13 @@ def test_a_reprint_gets_a_new_card_tag_and_the_finished_job_keeps_its_own():
     first += _live_tag_calls(_frame_calls(
         coord, hass, **_printing(100, printStartTime=T1, state=2, printLeftTime=0, printJobTime=1900)
     ))
-    assert {tag for tag, _m in first} == {f"{base}_{T1}_live"}
+    assert {tag for tag, m in first if m != CLEAR_NOTIFICATION_MARKER} == {f"{base}_{T1}_live"}
     assert any(m == _COMPLETED for _t, m in first), "the banner replaces the card on its tag"
 
     hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
     second = _live_tag_calls(_frame_calls(coord, hass, **_printing(1, printStartTime=T2, printJobTime=5)))
-    assert second and {tag for tag, _m in second} == {f"{base}_{T2}_live"}
-    assert CLEAR_NOTIFICATION_MARKER not in [m for _t, m in second]
+    assert {tag for tag, m in second if m != CLEAR_NOTIFICATION_MARKER} == {f"{base}_{T2}_live"}
+    assert (f"{base}_{T2}_live", CLEAR_NOTIFICATION_MARKER) not in second
 
 
 def test_a_card_is_cleared_on_its_own_tag_after_the_next_job_moved_on():
@@ -1829,8 +1829,12 @@ def test_a_restart_mid_print_picks_the_card_up_on_the_same_tag():
     _frame_calls(coord, hass, **_printing(40, printStartTime=T1))  # the baseline
     hass.loop.advance(1)
     calls = _live_tag_calls(_frame_calls(coord, hass, **_printing(41, printStartTime=T1)))
-    assert calls and {tag for tag, _m in calls} == {f"{coord._notify_tag_base()}_{T1}_live"}
-    assert CLEAR_NOTIFICATION_MARKER not in [m for _t, m in calls]
+    base = coord._notify_tag_base()
+    assert {tag for tag, m in calls if m != CLEAR_NOTIFICATION_MARKER} == {f"{base}_{T1}_live"}
+    assert (f"{base}_{T1}_live", CLEAR_NOTIFICATION_MARKER) not in calls
+    # A card an older version left on the shared tag (an upgrade mid-print)
+    # is taken away; a different tag, so its order does not matter.
+    assert (f"{base}_live", CLEAR_NOTIFICATION_MARKER) in calls
 
 
 def test_an_android_card_starts_without_a_clear():

@@ -1795,6 +1795,12 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # most likely the card still on screen.
         clear_first = None
         if new_card:
+            if live_tag != f"{tag_base}_live":
+                # A card from before 0.9.10 sits on the shared tag, the case on
+                # an upgrade mid-print. Another tag, so order does not matter.
+                self._notify_dispatch(
+                    build_clear_payload(f"{tag_base}_live"), kind="live:clear:shared", live_only=True
+                )
             if self._live_resync:
                 self._live_resync = False
             elif live_tag == f"{tag_base}_live":
