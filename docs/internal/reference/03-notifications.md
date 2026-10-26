@@ -224,7 +224,7 @@ Same payload shape and delivery as completed, `kind=stopped`, icon `mdi:stop-cir
 
 ### 6.6 Filament runout
 
-`_runout_reported`: `materialStatus == 1` on a paused job, the flag not proven a latch (`_track_material_flag`: up for `RUNOUT_FLAG_STALE_SECS` of state 1, unpaused; cleared when the flag drops), and not latched. A K1C keeps the flag up through whole prints from the first print after boot (R82, `fixtures/k1c_print_start.jsonl`); re-arms when it clears (`coordinator.py:1082-1084`) and on a file name change (`coordinator.py:953`). Shares `notify_error` and the `_alert` tag. No debounce. No bus event.
+`_runout_reported`: `materialStatus == 1` and, where reported, `materialDetector1 == 1` (the K1C's sensor; captured real runout in `fixtures/k1c_runout.jsonl`: alert at the flags, cleared at reload, not at the cancel). Without the sensor field: the flag on a paused job, the flag not proven a latch (`_track_material_flag`: up for `RUNOUT_FLAG_STALE_SECS` of state 1, unpaused; cleared when the flag drops), and not latched. A K1C keeps the flag up through whole prints from the first print after boot (R82, `fixtures/k1c_print_start.jsonl`); re-arms when it clears (`coordinator.py:1082-1084`) and on a file name change (`coordinator.py:953`). Shares `notify_error` and the `_alert` tag. No debounce. No bus event.
 
 ### 6.7 Alert dismissal
 

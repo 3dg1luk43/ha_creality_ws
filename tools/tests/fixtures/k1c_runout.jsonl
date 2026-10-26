@@ -1,0 +1,628 @@
+{"_about":"A real K1C (firmware 1.3.5.22) running out of filament, as it streamed it on 2026-10-26: the filament was pulled from the runout sensor mid-print. The printer pauses (state 5), and 27 ms later reports materialStatus 1 and materialDetector1 1; the print is then cancelled (state 7, then 4) with the filament still out; it is reloaded (feedState 1, then 2), and both flags return to 0. The first line is the merged state the printer had sent before the window (marked merged_state). One line per frame, in order; t is seconds since the first frame. Heartbeats, the print history (historyList) and the file listing (retGcodeFileInfo2) removed, hostname anonymised; values otherwise as received, numbers-as-strings included."}
+{"t":0.0,"frame":{"TotalLayer":35,"accelToDecelLimits":4000,"accelerationLimits":4000,"aiDetection":0,"aiFirstFloor":0,"aiPausePrint":0,"aiSw":0,"autoLevelResult":"","autohome":"X:1 Y:1 Z:1","auxiliaryFanPct":0,"bedTemp0":"100.480000","bedTemp1":"0.000000","bedTemp2":"0.000000","bedTempAutoPid":0,"boxTemp":25,"caseFanPct":0,"cfsConnect":0,"connect":1,"connectionCount":2,"cornerVelocityLimits":6,"curFeedratePct":100,"curFlowratePct":100,"curPosition":"X:93.44 Y:105.87 Z:0.66","dProgress":0,"deviceState":1,"enableSelfTest":1,"err":{"errcode":0,"key":0,"value":""},"fan":0,"fanAuxiliary":0,"fanCase":0,"features":["videoInfo.videoEncryption"],"feedState":0,"hostname":"K1C-0000","layer":3,"lightSw":1,"materialDetect":1,"materialDetector1":0,"materialStatus":0,"maxBedTemp":100,"maxBoxTemp":60,"maxNozzleTemp":300,"model":"K1C","modelFanPct":0,"modelVersion":"printer hw ver:;printer sw ver:;DWIN hw ver:CR4CU220812S11;DWIN sw ver:1.3.5.22;","nozzleMoveSnapshot":0,"nozzleTemp":"254.720000","nozzleTempAutoPid":0,"powerLoss":0,"pressureAdvance":"0.040000","printFileName":"/usr/data/printer_data/gcodes/fitting_guide_ABS_9m6s.gcode","printFileType":1,"printId":"local_1793003621","printJobTime":56,"printLeftTime":397,"printProgress":9,"printStartTime":1793003621,"realTimeFlow":"4.750000","realTimeSpeed":"54.030000","repoPlrStatus":0,"smoothTime":"0.040000","state":1,"targetBedTemp0":100,"targetBedTemp1":0,"targetBedTemp2":0,"targetBoxTemp":0,"targetNozzleTemp":255,"tfCard":1,"upgradeStatus":0,"usedMaterialLength":67,"velocityLimits":600,"video":1,"video1":0,"videoElapse":1,"videoElapseFrame":15,"videoElapseInterval":1,"webrtcSupport":1,"withSelfTest":100,"boxConfig":{"autoRefill":1,"cAutoFeed":1,"cSelfTest":1,"cAutoUpdateFilament":0},"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]","curZOffset":"0.000","linuxOtaInfo":{"version":"","url":"","name":"","size":0},"totalJob":50,"totalUsageTime":226359,"totalUsageMaterial":448764},"merged_state":true}
+{"t":0.0,"frame":{"printJobTime":57,"realTimeFlow":"3.390000","curPosition":"X:102.73 Y:102.48 Z:0.66"}}
+{"t":0.092,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":0.245,"frame":{"nozzleTemp":"254.760000","bedTemp0":"100.470000","curPosition":"X:116.28 Y:102.48 Z:0.66"}}
+{"t":0.501,"frame":{"nozzleTemp":"254.780000","curPosition":"X:126.57 Y:105.18 Z:0.66"}}
+{"t":0.634,"frame":{"curPosition":"X:126.57 Y:105.18 Z:0.66","autohome":"X:1 Y:1 Z:1","curZOffset":"0.000"}}
+{"t":0.644,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":0.752,"frame":{"accelerationLimits":10000,"cornerVelocityLimits":8}}
+{"t":0.767,"frame":{"accelToDecelLimits":10000}}
+{"t":0.778,"frame":{"nozzleTemp":"254.850000","printLeftTime":396,"realTimeSpeed":"500.000000","curPosition":"X:117.84 Y:103.30 Z:0.66"}}
+{"t":1.013,"frame":{"accelerationLimits":4000}}
+{"t":1.078,"frame":{"cornerVelocityLimits":6,"accelToDecelLimits":4000}}
+{"t":1.078,"frame":{"nozzleTemp":"254.890000","printJobTime":58,"realTimeSpeed":"54.030000","curPosition":"X:114.23 Y:103.69 Z:1.01"}}
+{"t":1.296,"frame":{"accelerationLimits":10000,"cornerVelocityLimits":8}}
+{"t":1.312,"frame":{"accelToDecelLimits":10000}}
+{"t":1.327,"frame":{"nozzleTemp":"254.930000","bedTemp0":"100.460000","printProgress":10,"realTimeSpeed":"500.000000","curPosition":"X:103.14 Y:103.69 Z:0.66"}}
+{"t":1.558,"frame":{"accelerationLimits":4000,"cornerVelocityLimits":6}}
+{"t":1.647,"frame":{"accelToDecelLimits":4000}}
+{"t":1.647,"frame":{"nozzleTemp":"254.970000","printLeftTime":395,"usedMaterialLength":68,"realTimeSpeed":"54.030000","curPosition":"X:94.65 Y:107.11 Z:0.66"}}
+{"t":1.802,"frame":{"bedTemp0":"100.450000","curPosition":"X:99.41 Y:102.08 Z:0.66"}}
+{"t":2.048,"frame":{"nozzleTemp":"255.060000","bedTemp0":"100.440000","printJobTime":59,"usedMaterialLength":69,"curPosition":"X:112.95 Y:102.08 Z:0.66"}}
+{"t":2.105,"frame":{"realTimeFlow":"2.960000"}}
+{"t":2.135,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":2.319,"frame":{"nozzleTemp":"255.120000","curPosition":"X:126.97 Y:102.14 Z:0.66"}}
+{"t":2.568,"frame":{"nozzleTemp":"255.170000","bedTemp0":"100.430000","printLeftTime":394,"curPosition":"X:122.57 Y:105.92 Z:0.66"}}
+{"t":2.638,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":2.838,"frame":{"nozzleTemp":"255.230000","usedMaterialLength":71,"curPosition":"X:108.55 Y:107.39 Z:0.94"}}
+{"t":3.093,"frame":{"nozzleTemp":"255.250000","bedTemp0":"100.420000","printJobTime":60,"curPosition":"X:94.11 Y:117.52 Z:0.68"}}
+{"t":3.346,"frame":{"bedTemp0":"100.410000","usedMaterialLength":72,"curPosition":"X:97.15 Y:115.38 Z:0.67"}}
+{"t":3.44,"frame":{"accelerationLimits":2000,"accelToDecelLimits":2000}}
+{"t":3.595,"frame":{"nozzleTemp":"255.270000","bedTemp0":"100.400000","printLeftTime":393,"curPosition":"X:104.49 Y:117.63 Z:1.08"}}
+{"t":3.845,"frame":{"nozzleTemp":"255.290000","bedTemp0":"100.390000","curPosition":"X:122.71 Y:117.92 Z:0.68"}}
+{"t":4.096,"frame":{"nozzleTemp":"255.250000","bedTemp0":"100.380000","printJobTime":61,"realTimeFlow":"4.020000","curPosition":"X:109.18 Y:117.87 Z:0.68"}}
+{"t":4.172,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":4.346,"frame":{"nozzleTemp":"255.220000","curPosition":"X:95.66 Y:117.92 Z:0.68"}}
+{"t":4.604,"frame":{"nozzleTemp":"255.160000","bedTemp0":"100.370000","printProgress":11,"printLeftTime":392,"usedMaterialLength":74,"curPosition":"X:95.61 Y:110.50 Z:0.67"}}
+{"t":4.639,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":4.841,"frame":{"nozzleTemp":"255.110000","bedTemp0":"100.360000","curPosition":"X:105.24 Y:117.36 Z:0.68"}}
+{"t":5.106,"frame":{"bedTemp0":"100.350000","printJobTime":62,"curPosition":"X:118.78 Y:117.27 Z:0.68"}}
+{"t":5.357,"frame":{"nozzleTemp":"255.070000","bedTemp0":"100.340000","curPosition":"X:126.26 Y:112.36 Z:0.67"}}
+{"t":5.602,"frame":{"accelerationLimits":10000}}
+{"t":5.62,"frame":{"cornerVelocityLimits":8,"accelToDecelLimits":10000}}
+{"t":5.632,"frame":{"nozzleTemp":"255.040000","bedTemp0":"100.320000","printLeftTime":391,"realTimeSpeed":"40.000000","curPosition":"X:124.63 Y:118.34 Z:0.68"}}
+{"t":5.848,"frame":{"nozzleTemp":"255.020000","curPosition":"X:111.07 Y:118.34 Z:0.68"}}
+{"t":6.105,"frame":{"accelerationLimits":2000,"cornerVelocityLimits":6}}
+{"t":6.155,"frame":{"accelToDecelLimits":2000}}
+{"t":6.155,"frame":{"nozzleTemp":"254.980000","bedTemp0":"100.310000","printJobTime":63,"realTimeSpeed":"54.030000","realTimeFlow":"2.620000","curPosition":"X:97.52 Y:118.34 Z:0.68"}}
+{"t":6.173,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":6.393,"frame":{"nozzleTemp":"254.930000","bedTemp0":"100.290000","usedMaterialLength":76,"curPosition":"X:94.51 Y:111.22 Z:0.67"}}
+{"t":6.637,"frame":{"bedTemp0":"100.280000","printLeftTime":390,"curPosition":"X:92.69 Y:101.66 Z:0.66"}}
+{"t":6.743,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":6.892,"frame":{"nozzleTemp":"254.890000","bedTemp0":"100.260000","curPosition":"X:105.91 Y:101.66 Z:0.66"}}
+{"t":7.149,"frame":{"accelerationLimits":10000}}
+{"t":7.156,"frame":{"cornerVelocityLimits":8,"accelToDecelLimits":10000}}
+{"t":7.181,"frame":{"nozzleTemp":"254.840000","bedTemp0":"100.250000","printJobTime":64,"realTimeSpeed":"500.000000","curPosition":"X:119.48 Y:101.66 Z:0.66"}}
+{"t":7.386,"frame":{"nozzleTemp":"254.810000","bedTemp0":"100.240000","curPosition":"X:127.39 Y:106.11 Z:0.66"}}
+{"t":7.659,"frame":{"nozzleTemp":"254.830000","printLeftTime":389,"realTimeSpeed":"54.030000","curPosition":"X:127.39 Y:114.20 Z:0.67"}}
+{"t":7.891,"frame":{"nozzleTemp":"254.790000","bedTemp0":"100.220000","curPosition":"X:118.84 Y:116.76 Z:0.79"}}
+{"t":8.153,"frame":{"bedTemp0":"100.200000","printProgress":12,"printJobTime":65,"usedMaterialLength":77,"realTimeFlow":"2.900000","curPosition":"X:123.93 Y:110.47 Z:0.67"}}
+{"t":8.198,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":8.396,"frame":{"bedTemp0":"100.190000","curPosition":"X:114.00 Y:104.11 Z:0.66"}}
+{"t":8.645,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":8.659,"frame":{"nozzleTemp":"254.800000","bedTemp0":"100.170000","printLeftTime":388,"curPosition":"X:100.50 Y:104.42 Z:0.66"}}
+{"t":8.901,"frame":{"nozzleTemp":"254.830000","bedTemp0":"100.150000","usedMaterialLength":78,"curPosition":"X:98.30 Y:115.35 Z:0.67"}}
+{"t":9.149,"frame":{"nozzleTemp":"254.810000","printJobTime":66,"usedMaterialLength":79,"curPosition":"X:111.50 Y:116.90 Z:0.68"}}
+{"t":9.428,"frame":{"nozzleTemp":"254.850000","bedTemp0":"100.140000","curPosition":"X:123.57 Y:112.63 Z:0.67"}}
+{"t":9.692,"frame":{"nozzleTemp":"254.900000","bedTemp0":"100.120000","printLeftTime":387,"curPosition":"X:95.59 Y:110.04 Z:0.66"}}
+{"t":9.95,"frame":{"bedTemp0":"100.100000","curPosition":"X:124.40 Y:110.06 Z:0.67"}}
+{"t":10.185,"frame":{"nozzleTemp":"254.940000","bedTemp0":"100.080000","printJobTime":67,"realTimeFlow":"2.910000","curPosition":"X:125.75 Y:103.24 Z:0.66"}}
+{"t":10.232,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":10.429,"frame":{"nozzleTemp":"254.960000","bedTemp0":"100.060000","usedMaterialLength":80,"curPosition":"X:125.25 Y:104.73 Z:0.66"}}
+{"t":10.641,"frame":{"curPosition":"X:125.25 Y:104.73 Z:0.66","autohome":"X:1 Y:1 Z:1","curZOffset":"0.000"}}
+{"t":10.653,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":10.694,"frame":{"nozzleTemp":"254.990000","bedTemp0":"100.050000","printLeftTime":386,"realTimeSpeed":"500.000000","curPosition":"X:124.82 Y:105.90 Z:0.66"}}
+{"t":10.943,"frame":{"nozzleTemp":"255.060000","curPosition":"X:123.25 Y:105.40 Z:0.66"}}
+{"t":11.197,"frame":{"bedTemp0":"100.030000","printJobTime":68,"usedMaterialLength":81,"realTimeSpeed":"54.030000","curPosition":"X:121.01 Y:103.95 Z:0.66"}}
+{"t":11.439,"frame":{"bedTemp0":"100.010000","curPosition":"X:104.49 Y:102.89 Z:0.66"}}
+{"t":11.688,"frame":{"nozzleTemp":"255.090000","bedTemp0":"99.990000","printProgress":13,"printLeftTime":385,"curPosition":"X:118.01 Y:102.90 Z:0.66"}}
+{"t":11.949,"frame":{"nozzleTemp":"255.150000","bedTemp0":"99.970000","curPosition":"X:95.10 Y:103.65 Z:0.66"}}
+{"t":12.192,"frame":{"nozzleTemp":"255.190000","bedTemp0":"99.950000","printJobTime":69,"usedMaterialLength":82,"realTimeSpeed":"40.000000","realTimeFlow":"2.670000","curPosition":"X:95.54 Y:103.55 Z:0.66"}}
+{"t":12.287,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":12.438,"frame":{"nozzleTemp":"255.220000","realTimeSpeed":"54.030000","curPosition":"X:94.88 Y:103.69 Z:0.66"}}
+{"t":12.645,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":12.696,"frame":{"nozzleTemp":"255.200000","bedTemp0":"99.930000","printLeftTime":384,"curPosition":"X:95.74 Y:106.15 Z:0.66"}}
+{"t":12.948,"frame":{"bedTemp0":"99.910000","curPosition":"X:93.64 Y:105.55 Z:0.66"}}
+{"t":13.197,"frame":{"bedTemp0":"99.890000","printJobTime":70,"curPosition":"X:96.07 Y:114.39 Z:0.67","fan":1,"modelFanPct":14}}
+{"t":13.207,"frame":{"realTimeSpeed":"500.000000","layer":4}}
+{"t":13.449,"frame":{"accelerationLimits":4000}}
+{"t":13.512,"frame":{"cornerVelocityLimits":6,"accelToDecelLimits":4000}}
+{"t":13.513,"frame":{"nozzleTemp":"255.180000","bedTemp0":"99.870000","usedMaterialLength":83,"realTimeSpeed":"53.350000","curPosition":"X:95.52 Y:114.90 Z:0.67"}}
+{"t":13.693,"frame":{"nozzleTemp":"255.130000","bedTemp0":"99.850000","printLeftTime":383,"curPosition":"X:93.91 Y:114.36 Z:0.67"}}
+{"t":13.958,"frame":{"accelerationLimits":10000}}
+{"t":13.962,"frame":{"realTimeSpeed":"40.000000","curPosition":"X:93.94 Y:116.53 Z:0.68"}}
+{"t":13.976,"frame":{"cornerVelocityLimits":8,"accelToDecelLimits":10000}}
+{"t":14.201,"frame":{"accelerationLimits":4000,"cornerVelocityLimits":6}}
+{"t":14.246,"frame":{"accelToDecelLimits":4000}}
+{"t":14.246,"frame":{"nozzleTemp":"255.110000","bedTemp0":"99.830000","printJobTime":71,"usedMaterialLength":84,"realTimeSpeed":"53.350000","realTimeFlow":"2.790000","curPosition":"X:97.35 Y:115.48 Z:0.67"}}
+{"t":14.269,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":14.445,"frame":{"nozzleTemp":"255.080000","bedTemp0":"99.810000","printProgress":14,"curPosition":"X:121.28 Y:117.12 Z:0.80"}}
+{"t":14.649,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":14.705,"frame":{"bedTemp0":"99.800000","printLeftTime":382,"curPosition":"X:125.13 Y:112.57 Z:0.67"}}
+{"t":14.956,"frame":{"nozzleTemp":"255.040000","bedTemp0":"99.780000","usedMaterialLength":86,"curPosition":"X:125.80 Y:114.54 Z:0.67"}}
+{"t":15.205,"frame":{"nozzleTemp":"255.030000","bedTemp0":"99.750000","printJobTime":72,"curPosition":"X:125.16 Y:113.92 Z:0.67"}}
+{"t":15.45,"frame":{"curPosition":"X:125.67 Y:117.02 Z:1.08"}}
+{"t":15.714,"frame":{"nozzleTemp":"255.000000","bedTemp0":"99.730000","printLeftTime":381,"curPosition":"X:120.04 Y:117.52 Z:0.88"}}
+{"t":15.957,"frame":{"bedTemp0":"99.710000","curPosition":"X:126.41 Y:112.66 Z:0.87"}}
+{"t":15.973,"frame":{"accelerationLimits":10000,"cornerVelocityLimits":8,"accelToDecelLimits":10000}}
+{"t":16.019,"frame":{"realTimeSpeed":"500.000000"}}
+{"t":16.207,"frame":{"accelerationLimits":4000,"cornerVelocityLimits":6}}
+{"t":16.223,"frame":{"accelToDecelLimits":4000}}
+{"t":16.249,"frame":{"bedTemp0":"99.680000","printJobTime":73,"usedMaterialLength":87,"realTimeSpeed":"53.350000","realTimeFlow":"3.290000","curPosition":"X:115.80 Y:107.40 Z:1.26"}}
+{"t":16.277,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":16.455,"frame":{"accelerationLimits":10000,"cornerVelocityLimits":8}}
+{"t":16.471,"frame":{"accelToDecelLimits":10000}}
+{"t":16.483,"frame":{"bedTemp0":"99.660000","realTimeSpeed":"500.000000","curPosition":"X:106.33 Y:103.29 Z:0.86"}}
+{"t":16.646,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":16.764,"frame":{"accelerationLimits":4000,"cornerVelocityLimits":6}}
+{"t":16.782,"frame":{"accelToDecelLimits":4000}}
+{"t":16.799,"frame":{"bedTemp0":"99.640000","printLeftTime":380,"realTimeSpeed":"53.350000","curPosition":"X:94.29 Y:106.51 Z:0.86"}}
+{"t":17.005,"frame":{"nozzleTemp":"255.010000","bedTemp0":"99.620000","printJobTime":74,"curPosition":"X:101.19 Y:102.48 Z:0.86"}}
+{"t":17.258,"frame":{"nozzleTemp":"255.030000","usedMaterialLength":88,"curPosition":"X:114.55 Y:102.48 Z:0.86"}}
+{"t":17.5,"frame":{"nozzleTemp":"255.050000","bedTemp0":"99.590000","printLeftTime":379,"usedMaterialLength":89,"curPosition":"X:126.57 Y:103.27 Z:0.86"}}
+{"t":17.765,"frame":{"nozzleTemp":"255.070000","bedTemp0":"99.570000","curPosition":"X:120.23 Y:103.82 Z:0.86"}}
+{"t":18.029,"frame":{"accelerationLimits":2000}}
+{"t":18.042,"frame":{"bedTemp0":"99.550000","printProgress":15,"printJobTime":75,"usedMaterialLength":90,"realTimeFlow":"3.820000","curPosition":"X:103.64 Y:111.73 Z:1.27"}}
+{"t":18.057,"frame":{"accelToDecelLimits":2000}}
+{"t":18.286,"frame":{"nozzleTemp":"255.110000","bedTemp0":"99.520000","curPosition":"X:93.44 Y:117.52 Z:0.88"}}
+{"t":18.303,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":18.557,"frame":{"nozzleTemp":"255.170000","bedTemp0":"99.500000","printLeftTime":378,"curPosition":"X:97.21 Y:115.45 Z:0.87"}}
+{"t":18.65,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":18.779,"frame":{"nozzleTemp":"255.220000","bedTemp0":"99.480000","usedMaterialLength":91,"curPosition":"X:108.18 Y:117.20 Z:1.27"}}
+{"t":19.033,"frame":{"nozzleTemp":"255.260000","printJobTime":76,"curPosition":"X:123.68 Y:113.43 Z:0.87"}}
+{"t":19.286,"frame":{"bedTemp0":"99.460000","usedMaterialLength":92,"curPosition":"X:117.86 Y:103.71 Z:0.86"}}
+{"t":19.537,"frame":{"accelerationLimits":4000,"accelToDecelLimits":4000}}
+{"t":19.572,"frame":{"bedTemp0":"99.430000","printLeftTime":377,"curPosition":"X:104.48 Y:103.69 Z:0.86"}}
+{"t":19.777,"frame":{"bedTemp0":"99.410000","curPosition":"X:95.69 Y:111.15 Z:0.87"}}
+{"t":20.028,"frame":{"bedTemp0":"99.400000","printJobTime":77,"usedMaterialLength":93,"realTimeFlow":"3.440000","curPosition":"X:105.73 Y:117.36 Z:0.88"}}
+{"t":20.287,"frame":{"bedTemp0":"99.380000","curPosition":"X:119.12 Y:117.15 Z:0.88"}}
+{"t":20.301,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":20.551,"frame":{"nozzleTemp":"255.230000","printLeftTime":376,"usedMaterialLength":95,"curPosition":"X:123.88 Y:109.67 Z:0.87"}}
+{"t":20.645,"frame":{"curPosition":"X:123.88 Y:109.67 Z:0.87","autohome":"X:1 Y:1 Z:1","curZOffset":"0.000"}}
+{"t":20.661,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":20.806,"frame":{"nozzleTemp":"255.210000","bedTemp0":"99.370000","curPosition":"X:113.38 Y:104.11 Z:0.86"}}
+{"t":21.049,"frame":{"nozzleTemp":"255.150000","bedTemp0":"99.350000","printProgress":16,"printJobTime":78,"curPosition":"X:100.08 Y:104.57 Z:0.86"}}
+{"t":21.307,"frame":{"curPosition":"X:98.52 Y:115.53 Z:0.87"}}
+{"t":21.554,"frame":{"nozzleTemp":"255.110000","bedTemp0":"99.340000","printLeftTime":375,"curPosition":"X:111.61 Y:116.90 Z:0.88"}}
+{"t":21.808,"frame":{"nozzleTemp":"255.090000","bedTemp0":"99.330000","curPosition":"X:122.83 Y:114.08 Z:0.87"}}
+{"t":22.057,"frame":{"accelerationLimits":2000,"accelToDecelLimits":2000}}
+{"t":22.141,"frame":{"nozzleTemp":"255.010000","printJobTime":79,"usedMaterialLength":96,"realTimeFlow":"4.490000","curPosition":"X:124.85 Y:117.92 Z:0.88"}}
+{"t":22.307,"frame":{"nozzleTemp":"254.930000","bedTemp0":"99.320000","usedMaterialLength":97,"curPosition":"X:111.49 Y:117.87 Z:0.88"}}
+{"t":22.322,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":22.561,"frame":{"nozzleTemp":"254.870000","printLeftTime":374,"curPosition":"X:98.03 Y:117.92 Z:0.88"}}
+{"t":22.65,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":22.801,"frame":{"curPosition":"X:94.55 Y:111.50 Z:0.87"}}
+{"t":23.165,"frame":{"nozzleTemp":"254.760000","printJobTime":80,"usedMaterialLength":98,"curPosition":"X:99.80 Y:102.08 Z:0.86"}}
+{"t":23.405,"frame":{"curPosition":"X:113.17 Y:102.08 Z:0.86"}}
+{"t":23.65,"frame":{"nozzleTemp":"254.720000","printLeftTime":373,"curPosition":"X:126.56 Y:102.08 Z:0.86"}}
+{"t":23.905,"frame":{"nozzleTemp":"254.690000","curPosition":"X:126.35 Y:112.20 Z:0.87"}}
+{"t":24.172,"frame":{"accelerationLimits":10000,"cornerVelocityLimits":8}}
+{"t":24.194,"frame":{"accelToDecelLimits":10000}}
+{"t":24.199,"frame":{"nozzleTemp":"254.670000","bedTemp0":"99.330000","printJobTime":81,"usedMaterialLength":99,"realTimeFlow":"2.780000","curPosition":"X:123.98 Y:118.34 Z:0.88"}}
+{"t":24.433,"frame":{"curPosition":"X:110.61 Y:118.34 Z:0.88"}}
+{"t":24.576,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":24.65,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":24.674,"frame":{"nozzleTemp":"254.660000","bedTemp0":"99.340000","printLeftTime":372,"curPosition":"X:97.21 Y:118.34 Z:0.88"}}
+{"t":24.934,"frame":{"usedMaterialLength":100,"curPosition":"X:92.99 Y:112.01 Z:0.87"}}
+{"t":25.181,"frame":{"nozzleTemp":"254.680000","bedTemp0":"99.350000","printJobTime":82,"curPosition":"X:92.61 Y:102.27 Z:0.86"}}
+{"t":25.437,"frame":{"nozzleTemp":"254.690000","bedTemp0":"99.360000","curPosition":"X:104.29 Y:101.66 Z:0.86"}}
+{"t":25.692,"frame":{"nozzleTemp":"254.740000","printLeftTime":371,"usedMaterialLength":101,"curPosition":"X:118.40 Y:101.66 Z:0.86"}}
+{"t":25.959,"frame":{"nozzleTemp":"254.810000","curPosition":"X:127.39 Y:104.96 Z:0.86"}}
+{"t":26.198,"frame":{"nozzleTemp":"254.880000","bedTemp0":"99.380000","printProgress":17,"printJobTime":83,"realTimeFlow":"3.390000","curPosition":"X:127.39 Y:113.39 Z:0.87"}}
+{"t":26.475,"frame":{"nozzleTemp":"254.930000","usedMaterialLength":102,"curPosition":"X:125.21 Y:117.05 Z:0.92"}}
+{"t":26.587,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":26.652,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":26.715,"frame":{"bedTemp0":"99.400000","curPosition":"X:125.69 Y:115.67 Z:0.87"}}
+{"t":26.975,"frame":{"nozzleTemp":"254.970000","bedTemp0":"99.410000","printLeftTime":370,"curPosition":"X:125.30 Y:114.46 Z:0.87"}}
+{"t":26.981,"frame":{"state":5}}
+{"t":27.008,"frame":{"materialStatus":1,"materialDetector1":1}}
+{"t":27.229,"frame":{"nozzleTemp":"255.000000","bedTemp0":"99.430000","curPosition":"X:124.77 Y:113.92 Z:0.87"}}
+{"t":27.487,"frame":{"nozzleTemp":"255.040000","bedTemp0":"99.440000","curPosition":"X:125.12 Y:112.51 Z:0.87","targetNozzleTemp":140}}
+{"t":27.723,"frame":{"nozzleTemp":"255.070000","curPosition":"X:126.17 Y:104.58 Z:0.86"}}
+{"t":27.979,"frame":{"nozzleTemp":"255.090000","bedTemp0":"99.460000","curPosition":"X:125.92 Y:103.70 Z:0.86"}}
+{"t":28.224,"frame":{"bedTemp0":"99.480000","curPosition":"X:125.08 Y:103.98 Z:0.86"}}
+{"t":28.483,"frame":{"nozzleTemp":"255.110000","bedTemp0":"99.500000","curPosition":"X:104.33 Y:102.89 Z:0.86"}}
+{"t":28.61,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":28.654,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":28.727,"frame":{"nozzleTemp":"255.100000","bedTemp0":"99.510000","curPosition":"X:117.71 Y:102.89 Z:0.86"}}
+{"t":28.975,"frame":{"nozzleTemp":"255.070000","bedTemp0":"99.530000","curPosition":"X:122.74 Y:102.88 Z:0.86"}}
+{"t":29.236,"frame":{"nozzleTemp":"255.000000","curPosition":"X:119.64 Y:102.88 Z:0.86"}}
+{"t":29.483,"frame":{"nozzleTemp":"254.880000","bedTemp0":"99.550000","curPosition":"X:119.64 Y:102.88 Z:1.03"}}
+{"t":30.234,"frame":{"nozzleTemp":"254.590000","bedTemp0":"99.610000"}}
+{"t":30.617,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":30.651,"frame":{"curPosition":"X:119.64 Y:102.88 Z:1.03","autohome":"X:1 Y:1 Z:1","curZOffset":"0.000"}}
+{"t":30.694,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":30.983,"frame":{"nozzleTemp":"253.800000","bedTemp0":"99.650000"}}
+{"t":31.983,"frame":{"nozzleTemp":"252.800000","bedTemp0":"99.730000"}}
+{"t":32.244,"frame":{"nozzleTemp":"252.440000"}}
+{"t":32.627,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":32.654,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":32.986,"frame":{"nozzleTemp":"251.670000","bedTemp0":"99.800000"}}
+{"t":33.496,"frame":{"nozzleTemp":"250.840000","bedTemp0":"99.850000","curPosition":"X:119.64 Y:102.88 Z:41.48"}}
+{"t":33.749,"frame":{"nozzleTemp":"250.420000","curPosition":"X:119.64 Y:102.88 Z:43.99"}}
+{"t":33.993,"frame":{"nozzleTemp":"249.970000","bedTemp0":"99.870000","curPosition":"X:119.64 Y:102.88 Z:46.50"}}
+{"t":34.244,"frame":{"bedTemp0":"99.890000","curPosition":"X:119.64 Y:102.88 Z:49.01"}}
+{"t":34.505,"frame":{"nozzleTemp":"249.580000","bedTemp0":"99.920000","curPosition":"X:119.64 Y:102.88 Z:50.06"}}
+{"t":34.638,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":34.661,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":34.743,"frame":{"nozzleTemp":"249.100000","bedTemp0":"99.940000","curPosition":"X:145.05 Y:105.59 Z:50.06","boxTemp":26}}
+{"t":35.007,"frame":{"nozzleTemp":"248.650000","bedTemp0":"99.970000","curPosition":"X:219.00 Y:113.50 Z:50.06"}}
+{"t":35.511,"frame":{"nozzleTemp":"247.830000","bedTemp0":"99.990000"}}
+{"t":35.776,"frame":{"nozzleTemp":"247.400000","bedTemp0":"100.010000"}}
+{"t":36.257,"frame":{"nozzleTemp":"246.990000","bedTemp0":"100.060000"}}
+{"t":36.655,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":36.673,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":37.008,"frame":{"nozzleTemp":"245.740000","bedTemp0":"100.110000"}}
+{"t":37.511,"frame":{"nozzleTemp":"245.360000","bedTemp0":"100.150000"}}
+{"t":37.762,"frame":{"nozzleTemp":"244.940000","bedTemp0":"100.170000"}}
+{"t":38.017,"frame":{"nozzleTemp":"244.540000","bedTemp0":"100.190000"}}
+{"t":38.265,"frame":{"nozzleTemp":"244.120000","bedTemp0":"100.210000"}}
+{"t":38.516,"frame":{"nozzleTemp":"243.730000"}}
+{"t":38.664,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":38.683,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":38.763,"frame":{"nozzleTemp":"243.310000","bedTemp0":"100.220000"}}
+{"t":39.021,"frame":{"bedTemp0":"100.240000"}}
+{"t":39.273,"frame":{"nozzleTemp":"242.910000","bedTemp0":"100.260000"}}
+{"t":39.512,"frame":{"nozzleTemp":"242.480000","bedTemp0":"100.270000"}}
+{"t":39.78,"frame":{"nozzleTemp":"242.090000","bedTemp0":"100.280000"}}
+{"t":40.022,"frame":{"nozzleTemp":"241.690000"}}
+{"t":40.27,"frame":{"nozzleTemp":"241.280000","bedTemp0":"100.290000"}}
+{"t":40.667,"frame":{"curPosition":"X:219.00 Y:113.50 Z:50.06","autohome":"X:1 Y:1 Z:1","curZOffset":"0.000"}}
+{"t":40.689,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":40.704,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":40.779,"frame":{"nozzleTemp":"240.870000","bedTemp0":"100.300000"}}
+{"t":41.281,"frame":{"nozzleTemp":"239.940000"}}
+{"t":41.776,"frame":{"nozzleTemp":"238.950000"}}
+{"t":42.024,"frame":{"boxTemp":27}}
+{"t":42.28,"frame":{"nozzleTemp":"238.430000","bedTemp0":"100.310000"}}
+{"t":42.527,"frame":{"nozzleTemp":"237.900000","bedTemp0":"100.300000"}}
+{"t":42.666,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":42.686,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":43.024,"frame":{"nozzleTemp":"236.800000"}}
+{"t":43.786,"frame":{"nozzleTemp":"235.690000","bedTemp0":"100.290000"}}
+{"t":44.287,"frame":{"nozzleTemp":"234.630000","bedTemp0":"100.270000"}}
+{"t":44.67,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":44.693,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":44.785,"frame":{"nozzleTemp":"233.620000","bedTemp0":"100.260000"}}
+{"t":45.537,"frame":{"nozzleTemp":"232.670000","bedTemp0":"100.230000"}}
+{"t":46.037,"frame":{"nozzleTemp":"231.520000","bedTemp0":"100.220000"}}
+{"t":46.297,"frame":{"nozzleTemp":"231.020000","bedTemp0":"100.200000"}}
+{"t":46.675,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":46.706,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":46.793,"frame":{"nozzleTemp":"230.540000","bedTemp0":"100.170000"}}
+{"t":47.289,"frame":{"nozzleTemp":"229.660000","bedTemp0":"100.140000"}}
+{"t":47.798,"frame":{"nozzleTemp":"228.830000","bedTemp0":"100.130000"}}
+{"t":48.3,"frame":{"nozzleTemp":"228.440000","bedTemp0":"100.100000"}}
+{"t":48.674,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":48.728,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":48.807,"frame":{"nozzleTemp":"227.670000","bedTemp0":"100.070000"}}
+{"t":49.301,"frame":{"nozzleTemp":"226.920000","bedTemp0":"100.050000"}}
+{"t":50.307,"frame":{"nozzleTemp":"225.800000","bedTemp0":"99.980000"}}
+{"t":50.67,"frame":{"curPosition":"X:219.00 Y:113.50 Z:50.06","autohome":"X:1 Y:1 Z:1","curZOffset":"0.000"}}
+{"t":50.684,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":50.746,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":51.055,"frame":{"nozzleTemp":"224.780000","bedTemp0":"99.930000"}}
+{"t":52.062,"frame":{"nozzleTemp":"223.770000","bedTemp0":"99.860000"}}
+{"t":52.312,"frame":{"nozzleTemp":"223.410000"}}
+{"t":52.676,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":52.748,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":53.066,"frame":{"nozzleTemp":"222.730000","bedTemp0":"99.800000"}}
+{"t":53.821,"frame":{"nozzleTemp":"221.720000","bedTemp0":"99.750000"}}
+{"t":54.327,"frame":{"nozzleTemp":"221.400000","bedTemp0":"99.700000"}}
+{"t":54.678,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":54.757,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":54.83,"frame":{"nozzleTemp":"220.750000","bedTemp0":"99.660000"}}
+{"t":55.585,"frame":{"nozzleTemp":"219.760000","bedTemp0":"99.620000"}}
+{"t":56.334,"frame":{"nozzleTemp":"219.120000","bedTemp0":"99.550000"}}
+{"t":56.577,"frame":{"nozzleTemp":"218.790000","bedTemp0":"99.520000"}}
+{"t":56.675,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":56.772,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":57.586,"frame":{"nozzleTemp":"217.810000","bedTemp0":"99.450000"}}
+{"t":58.34,"frame":{"nozzleTemp":"216.800000","bedTemp0":"99.410000","boxTemp":28}}
+{"t":58.787,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":58.807,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ { \"name\": \"BODY2.STL_ID_0_COPY_0\", \"center\": [ 110, 110 ], \"polygon\": [ [ 92.5, 101.5 ], [ 127.5, 101.5 ], [ 127.5, 118.5 ], [ 92.5, 118.5 ], [ 92.5, 101.5 ] ] } ]"}}
+{"t":58.95,"frame":{"nozzleTemp":"216.490000","bedTemp0":"99.380000","state":7}}
+{"t":59.163,"frame":{"accelerationLimits":5000,"accelToDecelLimits":2500}}
+{"t":59.191,"frame":{"nozzleTemp":"215.850000","bedTemp0":"99.370000","curPosition":"X:0.00 Y:0.00 Z:0.00","targetNozzleTemp":0,"targetBedTemp0":0,"modelFanPct":100}}
+{"t":59.21,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":59.409,"frame":{"bedTemp0":"99.350000"}}
+{"t":59.649,"frame":{"nozzleTemp":"215.530000","bedTemp0":"99.340000"}}
+{"t":59.902,"frame":{"nozzleTemp":"215.220000","bedTemp0":"99.330000","curPosition":"X:219.00 Y:113.50 Z:52.17"}}
+{"t":60.159,"frame":{"nozzleTemp":"214.890000","curPosition":"X:219.00 Y:113.50 Z:54.68"}}
+{"t":60.413,"frame":{"nozzleTemp":"214.590000","bedTemp0":"99.320000","curPosition":"X:219.00 Y:113.50 Z:57.19"}}
+{"t":60.655,"frame":{"nozzleTemp":"214.260000","bedTemp0":"99.310000","curPosition":"X:219.00 Y:113.50 Z:59.69"}}
+{"t":60.67,"frame":{"curPosition":"X:219.00 Y:113.50 Z:59.69","autohome":"X:1 Y:1 Z:1","curZOffset":"0.000"}}
+{"t":60.713,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":60.809,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":60.904,"frame":{"bedTemp0":"99.300000","curPosition":"X:219.00 Y:113.50 Z:62.20"}}
+{"t":61.161,"frame":{"nozzleTemp":"213.930000","curPosition":"X:219.00 Y:113.50 Z:64.70"}}
+{"t":61.418,"frame":{"nozzleTemp":"213.640000","curPosition":"X:219.00 Y:113.50 Z:67.22"}}
+{"t":61.657,"frame":{"nozzleTemp":"213.330000","curPosition":"X:219.00 Y:113.50 Z:69.73"}}
+{"t":61.914,"frame":{"nozzleTemp":"213.030000","curPosition":"X:219.00 Y:113.50 Z:72.24"}}
+{"t":62.173,"frame":{"nozzleTemp":"212.720000","curPosition":"X:219.00 Y:113.50 Z:74.75"}}
+{"t":62.417,"frame":{"bedTemp0":"99.290000","curPosition":"X:219.00 Y:113.50 Z:77.26"}}
+{"t":62.675,"frame":{"nozzleTemp":"212.410000","curPosition":"X:219.00 Y:113.50 Z:79.76"}}
+{"t":62.689,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":62.822,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":62.915,"frame":{"nozzleTemp":"212.100000","curPosition":"X:219.00 Y:113.50 Z:82.27"}}
+{"t":63.169,"frame":{"nozzleTemp":"211.780000","bedTemp0":"99.280000","curPosition":"X:219.00 Y:113.50 Z:84.78"}}
+{"t":63.425,"frame":{"nozzleTemp":"211.480000","curPosition":"X:219.00 Y:113.50 Z:87.29"}}
+{"t":63.669,"frame":{"nozzleTemp":"211.170000","curPosition":"X:219.00 Y:113.50 Z:89.80"}}
+{"t":63.915,"frame":{"bedTemp0":"99.270000","curPosition":"X:219.00 Y:113.50 Z:92.31"}}
+{"t":64.181,"frame":{"nozzleTemp":"210.860000","curPosition":"X:219.00 Y:113.50 Z:94.81"}}
+{"t":64.425,"frame":{"nozzleTemp":"210.560000","bedTemp0":"99.260000","curPosition":"X:219.00 Y:113.50 Z:97.33"}}
+{"t":64.682,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":64.693,"frame":{"nozzleTemp":"210.240000","bedTemp0":"99.250000","curPosition":"X:219.00 Y:113.50 Z:99.84"}}
+{"t":64.844,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":64.928,"frame":{"nozzleTemp":"209.940000","curPosition":"X:219.00 Y:113.50 Z:102.35"}}
+{"t":65.177,"frame":{"nozzleTemp":"209.630000","curPosition":"X:219.00 Y:113.50 Z:104.85"}}
+{"t":65.467,"frame":{"nozzleTemp":"209.320000","bedTemp0":"99.240000","printJobTime":122,"curPosition":"X:219.00 Y:113.50 Z:107.60"}}
+{"t":65.8,"frame":{"bedTemp0":"99.230000","curPosition":"X:219.00 Y:113.50 Z:110.11","autohome":"X:0 Y:0 Z:0","deviceState":0,"state":4,"layer":0,"TotalLayer":0}}
+{"t":65.819,"frame":{"totalJob":50,"totalUsageTime":226481,"totalUsageMaterial":448866}}
+{"t":65.952,"frame":{"nozzleTemp":"209.000000","bedTemp0":"99.220000","curPosition":"X:219.00 Y:113.50 Z:112.61"}}
+{"t":66.205,"frame":{"nozzleTemp":"208.680000","bedTemp0":"99.210000","curPosition":"X:219.00 Y:113.50 Z:115.12"}}
+{"t":66.45,"frame":{"nozzleTemp":"208.380000","curPosition":"X:219.00 Y:113.50 Z:117.63"}}
+{"t":66.68,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":66.703,"frame":{"nozzleTemp":"208.080000","bedTemp0":"99.200000","curPosition":"X:219.00 Y:113.50 Z:120.14"}}
+{"t":66.857,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":66.951,"frame":{"nozzleTemp":"207.770000","bedTemp0":"99.180000","curPosition":"X:219.00 Y:113.50 Z:122.66"}}
+{"t":67.206,"frame":{"bedTemp0":"99.170000","curPosition":"X:219.00 Y:113.50 Z:125.00"}}
+{"t":67.957,"frame":{"nozzleTemp":"206.870000","bedTemp0":"99.130000"}}
+{"t":68.464,"frame":{"nozzleTemp":"206.270000","bedTemp0":"99.110000"}}
+{"t":68.679,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":68.874,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":68.963,"frame":{"nozzleTemp":"205.970000","bedTemp0":"99.080000"}}
+{"t":69.963,"frame":{"nozzleTemp":"204.730000","bedTemp0":"99.030000"}}
+{"t":70.467,"frame":{"nozzleTemp":"204.420000","bedTemp0":"99.000000","boxTemp":27}}
+{"t":70.679,"frame":{"curPosition":"X:219.00 Y:113.50 Z:125.00","autohome":"X:0 Y:0 Z:0","curZOffset":"0.000"}}
+{"t":70.686,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":70.715,"frame":{"nozzleTemp":"204.080000","bedTemp0":"98.990000"}}
+{"t":70.881,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":70.97,"frame":{"nozzleTemp":"203.760000","bedTemp0":"98.970000"}}
+{"t":71.971,"frame":{"nozzleTemp":"202.740000","bedTemp0":"98.910000"}}
+{"t":72.481,"frame":{"nozzleTemp":"202.060000","bedTemp0":"98.870000"}}
+{"t":72.682,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":72.722,"frame":{"nozzleTemp":"201.710000"}}
+{"t":72.887,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":73.727,"frame":{"nozzleTemp":"200.680000","bedTemp0":"98.790000"}}
+{"t":74.237,"frame":{"nozzleTemp":"199.990000","bedTemp0":"98.770000"}}
+{"t":74.684,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":74.908,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":75.233,"frame":{"nozzleTemp":"198.960000","bedTemp0":"98.680000"}}
+{"t":75.987,"frame":{"nozzleTemp":"197.890000","bedTemp0":"98.630000"}}
+{"t":76.24,"frame":{"bedTemp0":"98.610000"}}
+{"t":76.685,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":76.919,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":76.99,"frame":{"nozzleTemp":"196.860000","bedTemp0":"98.540000"}}
+{"t":77.996,"frame":{"nozzleTemp":"195.820000","bedTemp0":"98.470000"}}
+{"t":78.242,"frame":{"nozzleTemp":"195.470000","bedTemp0":"98.450000"}}
+{"t":78.686,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":78.758,"frame":{"nozzleTemp":"194.790000","bedTemp0":"98.420000"}}
+{"t":78.933,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":79.401,"frame":{"nozzleTemp":"194.100000","bedTemp0":"98.370000","feedState":1}}
+{"t":79.749,"frame":{"nozzleTemp":"193.760000","bedTemp0":"98.320000"}}
+{"t":80.255,"frame":{"nozzleTemp":"193.080000","bedTemp0":"98.290000","targetNozzleTemp":260}}
+{"t":80.503,"frame":{"nozzleTemp":"192.740000","bedTemp0":"98.260000"}}
+{"t":80.688,"frame":{"curPosition":"X:219.00 Y:113.50 Z:125.00","autohome":"X:0 Y:0 Z:0","curZOffset":"0.000"}}
+{"t":80.697,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":80.945,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":81.507,"frame":{"nozzleTemp":"191.740000","bedTemp0":"98.160000"}}
+{"t":82.262,"frame":{"nozzleTemp":"191.140000","bedTemp0":"98.100000"}}
+{"t":82.51,"frame":{"bedTemp0":"98.070000","boxTemp":28}}
+{"t":82.688,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":82.956,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":83.26,"frame":{"nozzleTemp":"191.480000","bedTemp0":"97.990000"}}
+{"t":83.763,"frame":{"nozzleTemp":"192.260000","bedTemp0":"97.960000"}}
+{"t":84.513,"frame":{"nozzleTemp":"193.420000","bedTemp0":"97.870000"}}
+{"t":84.691,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":84.762,"frame":{"nozzleTemp":"194.100000","bedTemp0":"97.850000"}}
+{"t":84.963,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":85.273,"frame":{"nozzleTemp":"195.660000","bedTemp0":"97.810000"}}
+{"t":85.774,"frame":{"nozzleTemp":"196.520000","bedTemp0":"97.750000"}}
+{"t":86.023,"frame":{"nozzleTemp":"197.410000","bedTemp0":"97.720000"}}
+{"t":86.282,"frame":{"nozzleTemp":"198.320000","bedTemp0":"97.690000"}}
+{"t":86.533,"frame":{"nozzleTemp":"199.260000"}}
+{"t":86.69,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":86.78,"frame":{"nozzleTemp":"200.220000","bedTemp0":"97.660000"}}
+{"t":86.975,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":87.281,"frame":{"nozzleTemp":"201.190000","bedTemp0":"97.600000"}}
+{"t":87.525,"frame":{"nozzleTemp":"202.180000","bedTemp0":"97.570000"}}
+{"t":87.782,"frame":{"nozzleTemp":"203.160000","bedTemp0":"97.530000"}}
+{"t":88.029,"frame":{"nozzleTemp":"204.150000"}}
+{"t":88.283,"frame":{"nozzleTemp":"205.160000","bedTemp0":"97.500000"}}
+{"t":88.712,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":88.781,"frame":{"nozzleTemp":"206.160000","bedTemp0":"97.420000"}}
+{"t":89.006,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":89.035,"frame":{"nozzleTemp":"207.170000","bedTemp0":"97.390000"}}
+{"t":89.283,"frame":{"nozzleTemp":"208.160000","bedTemp0":"97.350000"}}
+{"t":89.542,"frame":{"nozzleTemp":"209.160000"}}
+{"t":89.783,"frame":{"nozzleTemp":"210.160000","bedTemp0":"97.310000"}}
+{"t":90.285,"frame":{"nozzleTemp":"211.120000","bedTemp0":"97.240000"}}
+{"t":90.539,"frame":{"nozzleTemp":"212.090000","bedTemp0":"97.210000"}}
+{"t":90.714,"frame":{"curPosition":"X:219.00 Y:113.50 Z:125.00","autohome":"X:0 Y:0 Z:0","curZOffset":"0.000"}}
+{"t":90.723,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":90.788,"frame":{"nozzleTemp":"213.070000","bedTemp0":"97.170000"}}
+{"t":91.018,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":91.042,"frame":{"nozzleTemp":"214.040000"}}
+{"t":91.795,"frame":{"nozzleTemp":"215.980000","bedTemp0":"97.060000"}}
+{"t":92.041,"frame":{"nozzleTemp":"216.940000","bedTemp0":"97.020000"}}
+{"t":92.291,"frame":{"nozzleTemp":"217.880000","bedTemp0":"96.980000"}}
+{"t":92.544,"frame":{"nozzleTemp":"218.830000"}}
+{"t":92.707,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":92.794,"frame":{"nozzleTemp":"219.760000","bedTemp0":"96.950000"}}
+{"t":93.049,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":93.298,"frame":{"nozzleTemp":"220.690000","bedTemp0":"96.870000"}}
+{"t":93.558,"frame":{"nozzleTemp":"221.610000","bedTemp0":"96.830000"}}
+{"t":93.808,"frame":{"nozzleTemp":"222.530000","bedTemp0":"96.790000"}}
+{"t":94.047,"frame":{"nozzleTemp":"223.460000"}}
+{"t":94.307,"frame":{"nozzleTemp":"224.360000","bedTemp0":"96.750000"}}
+{"t":94.557,"frame":{"nozzleTemp":"225.270000","bedTemp0":"96.710000"}}
+{"t":94.712,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":95.058,"frame":{"nozzleTemp":"226.140000","bedTemp0":"96.630000"}}
+{"t":95.088,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":95.309,"frame":{"nozzleTemp":"227.040000","bedTemp0":"96.590000"}}
+{"t":95.812,"frame":{"nozzleTemp":"228.930000","bedTemp0":"96.550000"}}
+{"t":96.061,"frame":{"nozzleTemp":"229.900000","bedTemp0":"96.510000"}}
+{"t":96.305,"frame":{"bedTemp0":"96.460000"}}
+{"t":96.564,"frame":{"nozzleTemp":"230.840000","bedTemp0":"96.420000"}}
+{"t":96.709,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":96.81,"frame":{"nozzleTemp":"231.760000","bedTemp0":"96.380000"}}
+{"t":97.073,"frame":{"nozzleTemp":"232.660000","bedTemp0":"96.340000","boxTemp":29}}
+{"t":97.089,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":97.313,"frame":{"nozzleTemp":"233.530000"}}
+{"t":97.568,"frame":{"nozzleTemp":"234.400000","bedTemp0":"96.300000"}}
+{"t":98.073,"frame":{"nozzleTemp":"235.240000","bedTemp0":"96.210000"}}
+{"t":98.312,"frame":{"nozzleTemp":"236.090000","bedTemp0":"96.170000"}}
+{"t":98.71,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":98.815,"frame":{"nozzleTemp":"237.770000","bedTemp0":"96.120000"}}
+{"t":99.073,"frame":{"nozzleTemp":"238.630000","bedTemp0":"96.080000"}}
+{"t":99.112,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":99.572,"frame":{"nozzleTemp":"239.450000","bedTemp0":"95.990000"}}
+{"t":99.829,"frame":{"nozzleTemp":"240.260000","bedTemp0":"95.940000"}}
+{"t":100.081,"frame":{"nozzleTemp":"241.070000","bedTemp0":"95.900000"}}
+{"t":100.333,"frame":{"nozzleTemp":"241.880000"}}
+{"t":100.578,"frame":{"nozzleTemp":"242.700000","bedTemp0":"95.850000"}}
+{"t":100.721,"frame":{"curPosition":"X:219.00 Y:113.50 Z:125.00","autohome":"X:0 Y:0 Z:0","curZOffset":"0.000"}}
+{"t":100.731,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":101.086,"frame":{"nozzleTemp":"243.500000","bedTemp0":"95.760000"}}
+{"t":101.098,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":101.329,"frame":{"nozzleTemp":"244.280000","bedTemp0":"95.710000"}}
+{"t":101.571,"frame":{"nozzleTemp":"245.040000","bedTemp0":"95.660000"}}
+{"t":102.077,"frame":{"nozzleTemp":"246.630000","bedTemp0":"95.620000"}}
+{"t":102.343,"frame":{"bedTemp0":"95.570000"}}
+{"t":102.575,"frame":{"nozzleTemp":"247.430000","bedTemp0":"95.530000"}}
+{"t":102.699,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":102.826,"frame":{"nozzleTemp":"248.250000","bedTemp0":"95.480000"}}
+{"t":103.096,"frame":{"nozzleTemp":"249.050000","bedTemp0":"95.430000"}}
+{"t":103.108,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":103.59,"frame":{"nozzleTemp":"250.600000","bedTemp0":"95.380000"}}
+{"t":104.091,"frame":{"nozzleTemp":"251.360000","bedTemp0":"95.270000"}}
+{"t":104.337,"frame":{"nozzleTemp":"252.110000","bedTemp0":"95.220000"}}
+{"t":104.787,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":104.835,"frame":{"nozzleTemp":"253.600000","bedTemp0":"95.170000"}}
+{"t":105.102,"frame":{"nozzleTemp":"254.320000","bedTemp0":"95.130000"}}
+{"t":105.122,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":105.594,"frame":{"nozzleTemp":"255.000000","bedTemp0":"95.030000"}}
+{"t":105.845,"frame":{"nozzleTemp":"255.660000","bedTemp0":"94.980000"}}
+{"t":106.101,"frame":{"nozzleTemp":"256.270000","bedTemp0":"94.930000"}}
+{"t":106.35,"frame":{"nozzleTemp":"256.830000"}}
+{"t":106.602,"frame":{"nozzleTemp":"257.330000","bedTemp0":"94.880000"}}
+{"t":106.701,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":107.143,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":107.35,"frame":{"nozzleTemp":"258.130000","bedTemp0":"94.730000"}}
+{"t":108.356,"frame":{"nozzleTemp":"259.180000","bedTemp0":"94.580000"}}
+{"t":108.777,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":109.117,"frame":{"nozzleTemp":"259.450000","bedTemp0":"94.430000"}}
+{"t":109.173,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":109.185,"frame":{"feedState":2}}
+{"t":109.375,"frame":{"nozzleTemp":"259.610000","bedTemp0":"94.380000"}}
+{"t":109.629,"frame":{"nozzleTemp":"259.690000"}}
+{"t":109.875,"frame":{"nozzleTemp":"259.810000","bedTemp0":"94.330000"}}
+{"t":110.123,"frame":{"bedTemp0":"94.280000"}}
+{"t":110.377,"frame":{"nozzleTemp":"259.890000","bedTemp0":"94.230000"}}
+{"t":110.621,"frame":{"nozzleTemp":"259.980000","bedTemp0":"94.180000"}}
+{"t":110.701,"frame":{"curPosition":"X:219.00 Y:113.50 Z:125.00","autohome":"X:0 Y:0 Z:0","curZOffset":"0.000"}}
+{"t":110.708,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":110.88,"frame":{"nozzleTemp":"260.090000","bedTemp0":"94.130000"}}
+{"t":111.129,"frame":{"nozzleTemp":"260.210000"}}
+{"t":111.168,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":111.376,"frame":{"nozzleTemp":"260.330000","bedTemp0":"94.080000"}}
+{"t":111.63,"frame":{"bedTemp0":"94.030000"}}
+{"t":111.889,"frame":{"nozzleTemp":"260.500000","bedTemp0":"93.980000"}}
+{"t":112.125,"frame":{"nozzleTemp":"260.630000","bedTemp0":"93.930000"}}
+{"t":112.374,"frame":{"nozzleTemp":"260.780000","bedTemp0":"93.880000"}}
+{"t":112.633,"frame":{"nozzleTemp":"260.960000"}}
+{"t":112.705,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":112.881,"frame":{"nozzleTemp":"261.090000","bedTemp0":"93.830000"}}
+{"t":113.137,"frame":{"bedTemp0":"93.780000"}}
+{"t":113.179,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":113.38,"frame":{"nozzleTemp":"261.270000","bedTemp0":"93.730000"}}
+{"t":113.633,"frame":{"nozzleTemp":"261.420000","bedTemp0":"93.680000"}}
+{"t":113.883,"frame":{"nozzleTemp":"261.570000","bedTemp0":"93.630000"}}
+{"t":114.137,"frame":{"nozzleTemp":"261.660000"}}
+{"t":114.381,"frame":{"nozzleTemp":"261.700000","bedTemp0":"93.570000"}}
+{"t":114.631,"frame":{"bedTemp0":"93.530000"}}
+{"t":114.708,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":114.89,"frame":{"nozzleTemp":"261.720000","bedTemp0":"93.480000"}}
+{"t":115.147,"frame":{"nozzleTemp":"261.730000","bedTemp0":"93.420000"}}
+{"t":115.201,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":115.392,"frame":{"nozzleTemp":"261.670000","bedTemp0":"93.370000"}}
+{"t":115.643,"frame":{"nozzleTemp":"261.590000"}}
+{"t":115.901,"frame":{"nozzleTemp":"261.480000","bedTemp0":"93.320000"}}
+{"t":116.142,"frame":{"bedTemp0":"93.260000"}}
+{"t":116.393,"frame":{"nozzleTemp":"261.370000","bedTemp0":"93.210000"}}
+{"t":116.646,"frame":{"nozzleTemp":"261.250000","bedTemp0":"93.160000"}}
+{"t":116.704,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":116.89,"frame":{"nozzleTemp":"261.150000","bedTemp0":"93.100000"}}
+{"t":117.146,"frame":{"nozzleTemp":"261.020000"}}
+{"t":117.224,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":117.394,"frame":{"nozzleTemp":"260.880000","bedTemp0":"93.050000"}}
+{"t":117.649,"frame":{"bedTemp0":"93.000000"}}
+{"t":117.905,"frame":{"nozzleTemp":"260.750000","bedTemp0":"92.950000"}}
+{"t":118.152,"frame":{"nozzleTemp":"260.660000","bedTemp0":"92.900000"}}
+{"t":118.401,"frame":{"nozzleTemp":"260.610000","bedTemp0":"92.850000"}}
+{"t":118.653,"frame":{"nozzleTemp":"260.560000"}}
+{"t":118.74,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":118.901,"frame":{"nozzleTemp":"260.540000","bedTemp0":"92.800000"}}
+{"t":119.161,"frame":{"bedTemp0":"92.750000"}}
+{"t":119.233,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":119.405,"frame":{"bedTemp0":"92.700000","boxTemp":30}}
+{"t":119.657,"frame":{"nozzleTemp":"260.560000","bedTemp0":"92.650000","boxTemp":29}}
+{"t":119.908,"frame":{"bedTemp0":"92.600000"}}
+{"t":120.165,"frame":{"nozzleTemp":"260.620000"}}
+{"t":120.404,"frame":{"nozzleTemp":"260.660000","bedTemp0":"92.550000"}}
+{"t":120.661,"frame":{"nozzleTemp":"260.700000","bedTemp0":"92.500000"}}
+{"t":120.727,"frame":{"curPosition":"X:219.00 Y:113.50 Z:125.00","autohome":"X:0 Y:0 Z:0","curZOffset":"0.000"}}
+{"t":120.769,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":120.907,"frame":{"bedTemp0":"92.450000"}}
+{"t":121.165,"frame":{"nozzleTemp":"260.770000","bedTemp0":"92.400000","boxTemp":30}}
+{"t":121.261,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":121.411,"frame":{"nozzleTemp":"260.830000","bedTemp0":"92.340000"}}
+{"t":121.661,"frame":{"nozzleTemp":"260.870000","bedTemp0":"92.290000"}}
+{"t":121.909,"frame":{"nozzleTemp":"260.900000"}}
+{"t":122.001,"frame":{"materialStatus":0,"materialDetector1":0}}
+{"t":122.167,"frame":{"bedTemp0":"92.240000"}}
+{"t":122.416,"frame":{"bedTemp0":"92.190000"}}
+{"t":122.662,"frame":{"nozzleTemp":"260.920000","bedTemp0":"92.140000"}}
+{"t":122.708,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":122.913,"frame":{"nozzleTemp":"260.890000","bedTemp0":"92.090000"}}
+{"t":123.169,"frame":{"nozzleTemp":"260.880000","bedTemp0":"92.040000"}}
+{"t":123.277,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":123.418,"frame":{"nozzleTemp":"260.860000"}}
+{"t":123.677,"frame":{"nozzleTemp":"260.810000","bedTemp0":"91.990000"}}
+{"t":123.918,"frame":{"bedTemp0":"91.940000"}}
+{"t":124.173,"frame":{"nozzleTemp":"260.730000","bedTemp0":"91.890000"}}
+{"t":124.423,"frame":{"nozzleTemp":"260.660000","bedTemp0":"91.840000"}}
+{"t":124.671,"frame":{"nozzleTemp":"260.580000","bedTemp0":"91.790000"}}
+{"t":124.724,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":124.925,"frame":{"nozzleTemp":"260.540000"}}
+{"t":125.175,"frame":{"nozzleTemp":"260.500000","bedTemp0":"91.740000"}}
+{"t":125.374,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":125.421,"frame":{"bedTemp0":"91.690000"}}
+{"t":125.681,"frame":{"nozzleTemp":"260.400000","bedTemp0":"91.640000"}}
+{"t":125.922,"frame":{"nozzleTemp":"260.320000","bedTemp0":"91.590000"}}
+{"t":126.173,"frame":{"nozzleTemp":"260.270000","bedTemp0":"91.540000"}}
+{"t":126.43,"frame":{"nozzleTemp":"260.230000"}}
+{"t":126.681,"frame":{"nozzleTemp":"260.200000","bedTemp0":"91.490000"}}
+{"t":126.73,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":126.934,"frame":{"bedTemp0":"91.440000"}}
+{"t":127.178,"frame":{"nozzleTemp":"260.130000","bedTemp0":"91.390000"}}
+{"t":127.326,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":127.425,"frame":{"nozzleTemp":"260.120000","bedTemp0":"91.340000"}}
+{"t":127.686,"frame":{"bedTemp0":"91.290000"}}
+{"t":127.934,"frame":{"nozzleTemp":"260.130000"}}
+{"t":128.193,"frame":{"nozzleTemp":"260.110000","bedTemp0":"91.240000"}}
+{"t":128.428,"frame":{"bedTemp0":"91.200000"}}
+{"t":128.693,"frame":{"nozzleTemp":"260.140000","bedTemp0":"91.150000"}}
+{"t":128.809,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":128.94,"frame":{"bedTemp0":"91.090000"}}
+{"t":129.197,"frame":{"nozzleTemp":"260.170000","bedTemp0":"91.030000"}}
+{"t":129.345,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":129.69,"frame":{"nozzleTemp":"260.220000","bedTemp0":"90.980000"}}
+{"t":129.952,"frame":{"bedTemp0":"90.930000"}}
+{"t":130.189,"frame":{"nozzleTemp":"260.270000","bedTemp0":"90.880000"}}
+{"t":130.441,"frame":{"nozzleTemp":"260.310000","bedTemp0":"90.830000"}}
+{"t":130.693,"frame":{"nozzleTemp":"260.340000","bedTemp0":"90.780000"}}
+{"t":130.769,"frame":{"curPosition":"X:219.00 Y:113.50 Z:125.00","autohome":"X:0 Y:0 Z:0","curZOffset":"0.000"}}
+{"t":130.811,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":130.944,"frame":{"nozzleTemp":"260.370000"}}
+{"t":131.198,"frame":{"nozzleTemp":"260.390000","bedTemp0":"90.730000"}}
+{"t":131.358,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":131.445,"frame":{"bedTemp0":"90.680000"}}
+{"t":131.691,"frame":{"nozzleTemp":"260.420000","bedTemp0":"90.630000"}}
+{"t":131.957,"frame":{"nozzleTemp":"260.460000","bedTemp0":"90.590000"}}
+{"t":132.195,"frame":{"nozzleTemp":"260.490000","bedTemp0":"90.540000"}}
+{"t":132.443,"frame":{"nozzleTemp":"260.440000"}}
+{"t":132.693,"frame":{"nozzleTemp":"260.380000","bedTemp0":"90.490000"}}
+{"t":132.735,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":132.948,"frame":{"bedTemp0":"90.440000"}}
+{"t":133.22,"frame":{"nozzleTemp":"260.310000","bedTemp0":"90.390000"}}
+{"t":133.373,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":133.452,"frame":{"nozzleTemp":"260.260000","bedTemp0":"90.340000"}}
+{"t":133.699,"frame":{"nozzleTemp":"260.170000","bedTemp0":"90.300000"}}
+{"t":133.955,"frame":{"nozzleTemp":"260.100000"}}
+{"t":134.213,"frame":{"nozzleTemp":"260.000000","bedTemp0":"90.250000"}}
+{"t":134.448,"frame":{"nozzleTemp":"259.950000","bedTemp0":"90.200000"}}
+{"t":134.698,"frame":{"bedTemp0":"90.150000"}}
+{"t":134.737,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":134.95,"frame":{"nozzleTemp":"259.880000","bedTemp0":"90.100000"}}
+{"t":135.213,"frame":{"nozzleTemp":"259.840000","bedTemp0":"90.050000"}}
+{"t":135.395,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":135.461,"frame":{"nozzleTemp":"259.790000"}}
+{"t":135.709,"frame":{"nozzleTemp":"259.740000","bedTemp0":"90.010000"}}
+{"t":135.955,"frame":{"nozzleTemp":"259.700000","bedTemp0":"89.960000"}}
+{"t":136.22,"frame":{"bedTemp0":"89.910000"}}
+{"t":136.462,"frame":{"nozzleTemp":"259.720000","bedTemp0":"89.870000"}}
+{"t":136.846,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":136.862,"frame":{"nozzleTemp":"259.760000","bedTemp0":"89.820000","feedState":3}}
+{"t":137.223,"frame":{"nozzleTemp":"259.800000","bedTemp0":"89.770000","targetNozzleTemp":0}}
+{"t":137.406,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":138.468,"frame":{"nozzleTemp":"260.030000","bedTemp0":"89.530000"}}
+{"t":138.794,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":138.964,"frame":{"nozzleTemp":"259.970000","bedTemp0":"89.490000"}}
+{"t":139.422,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}
+{"t":140.476,"frame":{"nozzleTemp":"258.900000","bedTemp0":"89.250000"}}
+{"t":140.705,"frame":{"feedState":1}}
+{"t":140.768,"frame":{"curPosition":"X:219.00 Y:113.50 Z:125.00","autohome":"X:0 Y:0 Z:0","curZOffset":"0.000"}}
+{"t":140.812,"frame":{"current_object":"BODY2.STL_ID_0_COPY_0","excluded_objects":"[ ]","objects":"[ ]"}}

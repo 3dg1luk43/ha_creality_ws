@@ -100,3 +100,28 @@ def test_a_job_start_never_reads_idle_and_starts_one_card():
     )
     printing_at = next(t for t, s in statuses if s == "printing")
     assert first_card >= printing_at
+
+
+def test_a_real_runout_alerts_once_and_holds_until_the_filament_is_back():
+    """The K1C's runout sensor, `materialDetector1`, went to 1 with the flag and
+    back to 0 on reload (`fixtures/k1c_runout.jsonl`, R82). Read through a
+    pause alone, the alert and Filament Status cleared when the print was
+    cancelled, with the filament still out."""
+    coord, hass = _coordinator(targets=("notify.mobile_app_pixel",))
+    coord._notify_primed = False
+    merged: dict = {}
+    alerts, clears, runout = [], [], []
+    for line in (FIXTURES / "k1c_runout.jsonl").read_text(encoding="utf-8").splitlines()[1:]:
+        rec = json.loads(line)
+        hass.loop.now = 1000.0 + rec["t"]
+        merged.update(coerce_numbers(rec["frame"]))
+        for call in _frame_calls(coord, hass, **merged):
+            data = call[2].get("data") or {}
+            if data.get("tag", "").endswith("_alert"):
+                (clears if call[2]["message"] == CLEAR_NOTIFICATION_MARKER else alerts).append(rec["t"])
+        now = coord.filament_runout()
+        if not runout or runout[-1][1] != now:
+            runout.append((rec["t"], now))
+    assert alerts == [27.008]
+    assert clears == [122.001]
+    assert runout == [(0.0, False), (27.008, True), (122.001, False)]

@@ -1314,7 +1314,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._fire_print_event(BUS_EVENT_PRINT_ERROR, d, job)
         self._last_error_code = code
 
-        # 3) Filament runout (materialStatus == 1 on a paused job, R82). Shares
+        # 3) Filament runout (`_runout_reported`, R82). Shares
         # the error toggle, being an error-like state the user wants to hear
         # about together.
         is_runout = self._runout_reported(d)
@@ -1914,16 +1914,20 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _runout_reported(self, d: dict[str, Any]) -> bool:
         """Whether the printer is reporting a filament runout right now.
 
-        The flag alone is not one: the printer's own web UI pairs it with a
-        Resume button, because a runout pauses the job, and a K1C keeps the flag
-        up through whole prints (R82). So only a paused job with the flag up
-        counts, and not while the flag is a proven latch.
+        The flag alone is not one: a K1C keeps it up through whole prints
+        (R82). Where the printer also reports its runout sensor,
+        `materialDetector1`, the sensor decides: on a real K1C runout it went to
+        1 with the flag and back to 0 when the filament was reloaded, and it
+        stayed 0 through the latched flag. Without it, only a paused job with
+        the flag up counts (the printer's web UI pairs the flag with a Resume
+        button), and not while the flag is a proven latch.
         """
-        return (
-            self._material_flag(d)
-            and not self._material_flag_stale
-            and self._job_state() == "paused"
-        )
+        if not self._material_flag(d):
+            return False
+        sensor = safe_float(d.get("materialDetector1"))
+        if sensor is not None:
+            return sensor == 1
+        return not self._material_flag_stale and self._job_state() == "paused"
 
     def filament_runout(self) -> bool:
         """The Filament Status sensor's "runout", by the notification's rule."""

@@ -1577,6 +1577,21 @@ def test_a_latched_flag_does_not_turn_a_manual_pause_into_a_runout():
     assert _alerts(_frame(coord, hass, **_printing(15, materialStatus=1, state=5))) == []
 
 
+def test_where_the_printer_reports_its_runout_sensor_the_sensor_decides():
+    """A K1C sends `materialDetector1`: 0 through a latched flag, 1 on a real
+    runout until the filament is back (R82). A pause with the sensor at 0 is
+    the user's; the sensor firing while the flag is already latched is not."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(10, materialStatus=1, materialDetector1=0))
+    hass.loop.advance(1)
+    assert _alerts(_frame(coord, hass, **_printing(11, materialStatus=1, materialDetector1=0, state=5))) == []
+    for progress in range(12, 16):
+        hass.loop.advance(RUNOUT_FLAG_STALE_SECS / 3)
+        _frame(coord, hass, **_printing(progress, materialStatus=1, materialDetector1=0))
+    hass.loop.advance(1)
+    assert len(_alerts(_frame(coord, hass, **_printing(16, materialStatus=1, materialDetector1=1)))) == 1
+
+
 def test_a_runout_that_pauses_the_print_alerts_even_after_a_latch_clears():
     coord, hass = _coordinator()
     for progress in range(10, 15):
