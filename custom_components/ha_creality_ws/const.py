@@ -274,6 +274,14 @@ NOTIFY_LIVE_MAX_PUSHES_PER_JOB = 600
 # this is an iOS-shaped limit we accept rather than work around -- restarting
 # the activity would burn a push-to-start slot and show a visibly new card.
 NOTIFY_LIVE_IOS_EXPIRY_SECS = 28800.0
+# An iPhone gets a new card by push-to-start, which always alerts, and Home
+# Assistant sends every live push for a tag it holds no token for as another
+# one. The phone reports a card's token only while the app runs, so until then
+# each refresh started a new card, with a chime (R99). After a start, live
+# pushes to that phone wait for the token; the start is repeated after this
+# long, in case iOS dropped it, and the wait doubles up to the maximum.
+NOTIFY_LIVE_IOS_RESTART_SECS = 1800.0
+NOTIFY_LIVE_IOS_RESTART_MAX_SECS = 7200.0
 # No telemetry for this long means the printer is gone; clear the card.
 NOTIFY_LIVE_STALE_CLEAR_SECS = 90.0
 

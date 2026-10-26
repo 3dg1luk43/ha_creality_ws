@@ -18,6 +18,7 @@ and versions are numbered major.minor.patch, with a fourth number for a hotfix r
 - Targets set from a script no longer snap back before the printer confirms them, iPhone notifications show the current print's thumbnail, and custom live-card text leaves out values the printer does not know yet.
 - Print Status no longer writes a set of attributes to the database every second while printing.
 - On an iPhone, tapping the live print card or a notification opens the printer camera, as on Android.
+- An iPhone no longer chimes at every live-card refresh after its card was re-created.
 
 ### Fixes
 
@@ -34,6 +35,7 @@ and versions are numbered major.minor.patch, with a fourth number for a hotfix r
 - **On an iPhone, tapping the live print card or a notification opened the app on its last page**: the integration sent iPhones no link, because the `entityId:` link Android uses does not exist on iOS, so a tap on the Dynamic Island, the lock-screen card or a banner just opened Home Assistant wherever it was. It now sends a link to the printer camera's dialog, which iOS opens the same way. A dashboard path set in the options still takes precedence.
 - **An iPhone's live card could fail to appear when a print started**: each print's card was posted on the same tag as every other print's, so the integration first sent a dismissal on that tag, to end a card left over from an earlier print, and then started the new one. An iPhone can process the two in either order, and when the dismissal came second it ended the new card. Each print's card now has a tag of its own, taken from the print's start time the printer reports, so nothing needs dismissing first. A printer that does not report it keeps the shared tag. Related to [#125](https://github.com/3dg1luk43/ha_creality_ws/issues/125).
 - **The iPhone live card could vanish after a change in the notification settings**: saving them re-sends the card, and the integration sent a dismissal on the same tag just before it, as it does for a new print. An iPhone can process the two in either order, and when the dismissal came second it ended the card it had just started; the card stayed away until the next refresh, up to five minutes later. A settings change now re-sends the card in place, without the dismissal.
+- **An iPhone chimed at every live-card refresh, for example after its notification settings were saved**: Home Assistant updates an iPhone's live card only once the phone has reported the card's token, which it does only while the app runs, and sends every push before that as a new card, which always alerts. So each refresh started another card, with a sound, until the app was opened. After one new card, the integration now holds an iPhone's refreshes until Home Assistant has the token, and sends the card again after half an hour, then less often, in case iOS dropped it.
 - **Print Status wrote a new set of attributes to the database every second while printing**: its job time, time left, used filament and flow attributes change every second and duplicate their own sensors. They are no longer recorded, and still update for templates.
 
 ### Internal

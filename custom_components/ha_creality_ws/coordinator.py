@@ -104,6 +104,8 @@ from .const import (
     NOTIFY_CHANNEL_KEY_DONE,
     NOTIFY_CHANNEL_KEY_LIVE,
     NOTIFY_CHANNEL_KEY_SOON,
+    NOTIFY_LIVE_IOS_RESTART_MAX_SECS,
+    NOTIFY_LIVE_IOS_RESTART_SECS,
     NOTIFY_LIVE_STALE_CLEAR_SECS,
     NOTIFY_PRIME_GRACE_SECS,
     PREVIEW_REASONS_UNUSABLE,
@@ -276,6 +278,11 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # lazily; a target the user has just added would not be in a cache
         # built at setup.
         self._target_os_cache: dict[str, tuple[str | None, str | None]] = {}
+        # notify target -> its mobile_app webhook id, filled by the same lookup.
+        self._target_webhook_cache: dict[str, str | None] = {}
+        # iPhone target -> (tag, loop time, wait) of the last card start sent
+        # while Home Assistant held no token for the tag (R99).
+        self._ios_starts: dict[str, tuple[str, float, float]] = {}
         self._notify_completed = False
         self._notify_error = False
         self._notify_minutes_to_end = False
@@ -369,6 +376,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # change is the one moment we know we are being re-read.
         self._entity_id_cache.clear()
         self._target_os_cache.clear()
+        self._target_webhook_cache.clear()
         self._notify_strings = None
         self._notify_completed = options.get(CONF_NOTIFY_COMPLETED, False)
         self._notify_error = options.get(CONF_NOTIFY_ERROR, False)
@@ -2287,6 +2295,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         payload = build_clear_payload(self._live_tag())
         for target in dropped:
+            self._forget_ios_start(target, self._live_tag())
             if is_mobile_target(target) and is_live_capable(self._target_os(target)):
                 self.hass.async_create_task(
                     self._async_deliver_one(target, payload)
@@ -2552,15 +2561,102 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         slug = notify_service_slug(target)
         found: tuple[str | None, str | None] = (None, None)
+        webhook_id = None
         if slug:
             entries = getattr(self.hass.config_entries, "async_entries", None)
             for entry in (entries("mobile_app") if entries else ()):
                 data = getattr(entry, "data", None) or {}
                 if slugify(str(data.get("device_name", ""))) == slug:
                     found = (data.get("os_name"), data.get("manufacturer"))
+                    webhook_id = data.get("webhook_id")
                     break
         self._target_os_cache[target] = found
+        self._target_webhook_cache[target] = webhook_id
         return found
+
+    def _target_webhook_id(self, target: str) -> str | None:
+        """The mobile_app webhook id behind a target, or None if unknown."""
+        if target not in self._target_webhook_cache:
+            self._target_platform(target)
+        return self._target_webhook_cache.get(target)
+
+    def _ios_has_token(self, target: str, tag: str) -> bool | None:
+        """Whether Home Assistant holds a live card token for `tag` on a phone.
+
+        None when that cannot be told: a core without Live Activity tokens, an
+        unidentified target, or a phone on local push, whose app starts and
+        updates the card itself. Read from mobile_app's own store, the one its
+        notify platform routes by (`live_activity/__init__.py`): with an
+        unexpired token a push updates the card, without one it starts another.
+        """
+        mobile = (getattr(self.hass, "data", None) or {}).get("mobile_app")
+        webhook_id = self._target_webhook_id(target)
+        if not isinstance(mobile, Mapping) or not webhook_id:
+            return None
+        channels = mobile.get("push_channel")
+        if isinstance(channels, Mapping) and webhook_id in channels:
+            return None
+        tokens = mobile.get("live_activity_tokens")
+        if not isinstance(tokens, Mapping):
+            return None
+        stored = (tokens.get(webhook_id) or {}).get(tag)
+        if not isinstance(stored, Mapping):
+            return False
+        expires = stored.get("expires_at")
+        return isinstance(expires, (int, float)) and expires > time.time()
+
+    def _hold_ios_start(
+        self, target: str, payload: dict[str, Any], clear_first: dict[str, Any] | None
+    ) -> bool:
+        """Whether a live push to an iPhone waits, rather than start another card.
+
+        A push for a tag Home Assistant holds no token for is a push-to-start,
+        and a start always alerts. The phone reports the new card's token only
+        while the app runs, so every refresh until then started yet another
+        card, with a chime each time (R99). After one start the card's pushes
+        wait for the token. The start is repeated after
+        NOTIFY_LIVE_IOS_RESTART_SECS, doubling, in case iOS dropped it.
+        """
+        data = payload.get("data") or {}
+        tag = data.get("tag")
+        if not tag or not data.get("live_update") or not self._target_is_apple(target):
+            return False
+        has_token = self._ios_has_token(target, tag)
+        if has_token is None:
+            return False
+        if clear_first is not None and (clear_first.get("data") or {}).get("tag") == tag:
+            # Delivered first, and it takes the token with it.
+            has_token = False
+        if has_token:
+            self._ios_starts.pop(target, None)
+            return False
+        now = self.hass.loop.time()
+        last = self._ios_starts.get(target)
+        if last is not None and last[0] == tag:
+            if now - last[1] < last[2]:
+                _LOGGER.debug(
+                    "Holding a live push to %s: no token for %s yet, so it "
+                    "would start another card",
+                    target,
+                    tag,
+                )
+                return True
+            wait = min(last[2] * 2, NOTIFY_LIVE_IOS_RESTART_MAX_SECS)
+        else:
+            wait = NOTIFY_LIVE_IOS_RESTART_SECS
+        self._ios_starts[target] = (tag, now, wait)
+        return False
+
+    def _forget_ios_start(self, target: str, tag: str | None) -> None:
+        """A card's clear is on its way, so its next push is a start of its own.
+
+        Called where the clear is dispatched, not where it is delivered: a
+        clear sent just ahead of a start, in the same task, would otherwise
+        forget the start it precedes.
+        """
+        last = self._ios_starts.get(target)
+        if last is not None and last[0] == tag:
+            del self._ios_starts[target]
 
     def _replace_card_with(self, payload: dict[str, Any], *, kind: str) -> None:
         """Dismiss the live card and post `payload` in its place, in that order.
@@ -2584,6 +2680,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if is_mobile_target(t) and is_live_capable(self._target_os(t))
         ]
         for target in targets:
+            self._forget_ios_start(target, self._live_tag())
             self.hass.async_create_task(
                 self._async_replace_one(target, clear, payload)
             )
@@ -2632,6 +2729,8 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         sent_to = 0
         for target in targets:
+            if payload.get("message") == CLEAR_NOTIFICATION_MARKER:
+                self._forget_ios_start(target, (payload.get("data") or {}).get("tag"))
             if (mobile_only or live_only) and not is_mobile_target(target):
                 # Live-card keys are meaningless to anything but the companion
                 # app, so a progress push has nothing to say to these.
@@ -2647,6 +2746,8 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     target,
                     self._target_os(target),
                 )
+                continue
+            if live_only and self._hold_ios_start(target, payload, clear_first):
                 continue
             sent_to += 1
             if clear_first is not None and self._target_is_apple(target):
