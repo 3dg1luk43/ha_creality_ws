@@ -65,6 +65,7 @@ from .utils import (
     ModelDetection,
     build_modify_material_payload,
     derive_activity_state,
+    camera_type_to_keep,
     detect_camera_type,
 )
 
@@ -466,8 +467,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 
                 # Re-detected from the evidence every time, not kept once set:
                 # a firmware update can move a K1C from MJPEG to WebRTC (#46).
+                # A direct-WebRTC verdict from before 0.9.10 is retried once (#134).
                 new_data["_cached_camera_type"] = detect_camera_type(
-                    d, entry.data.get("_cached_camera_type")
+                    d, camera_type_to_keep(entry.data.get("_cached_camera_type"), cached_version)
                 )
                 
                 hass.config_entries.async_update_entry(entry, data=new_data)

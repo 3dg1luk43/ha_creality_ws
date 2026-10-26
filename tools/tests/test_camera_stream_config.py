@@ -609,11 +609,16 @@ def test_a_standalone_go2rtc_on_the_default_pair_is_still_used_without_has_own()
     )
 
 
-def _strikes(answers):
-    """Run failed-snapshot checks with go2rtc answering `answers` in turn;
-    return how many times the camera asked to move to direct WebRTC."""
+def _strikes(answers, step=0.0):
+    """Run failed-snapshot checks with go2rtc answering `answers` in turn,
+    `step` seconds apart; return how many times the camera asked to move to
+    direct WebRTC."""
     import asyncio
+    import custom_components.ha_creality_ws.camera as camera_mod
 
+    clock = iter(1000.0 + step * i for i in range(len(answers)))
+    real = camera_mod._monotonic
+    camera_mod._monotonic = lambda: next(clock)
     cam = _camera()
     cam._stream_name = "creality_k2_1_2_3_4"
     moves = []
@@ -624,16 +629,28 @@ def _strikes(answers):
         for _ in answers:
             await cam._note_failed_snapshot()
 
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    finally:
+        camera_mod._monotonic = real
     return len(moves)
 
 
 def test_go2rtc_connected_without_video_twice_moves_to_direct_webrtc():
     """#46: the K1C 2025 sends a payload type its own answer did not list,
     go2rtc drops every packet, and only the browser-side path shows video."""
-    assert _strikes([False, False]) == 1
+    assert _strikes([False, False], step=600) == 1
     # Once is enough: the camera is rebuilt by then.
-    assert _strikes([False, False, False, False]) == 1
+    assert _strikes([False, False, False, False], step=600) == 1
+
+
+def test_a_short_silence_does_not_move_the_camera_for_good():
+    """Two silent snapshots 20 s apart also fit a printer still booting, and
+    the move is cached for good: a K1 Max go2rtc streams fine ended up on
+    direct WebRTC, blank outside the LAN (#134). Silence that lasts does."""
+    assert _strikes([False, False], step=20) == 0
+    assert _strikes([False] * 5, step=120) == 0
+    assert _strikes([False] * 6, step=120) == 1
 
 
 def test_one_silent_moment_or_a_dark_printer_moves_nothing():

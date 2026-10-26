@@ -15,6 +15,7 @@ import base64
 import json
 import logging
 import re
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -61,6 +62,9 @@ from homeassistant.components.camera import Camera, CameraEntityFeature
 # go2rtc is only an `after_dependencies` entry, so importing the component to
 # read one string would be an undeclared cross-component import for no gain.
 GO2RTC_DOMAIN = "go2rtc"
+
+# The no-video span clock; a name of its own so tests can move it.
+_monotonic = time.monotonic
 
 # Hosts that mean "this machine". HA addresses its own go2rtc as one of
 # these, and a bare host with no scheme parses to None.
@@ -127,6 +131,11 @@ from .utils import ModelDetection
 # Failed go2rtc snapshots in a row, each with go2rtc connected to the printer
 # and no video arriving, before an Auto camera moves to direct WebRTC (#46).
 NO_VIDEO_STRIKES = 2
+# ...and that long between the first of them and the one that decides. Two in
+# a row, 20 s apart, also fit a printer still booting or a camera service that
+# hung for a moment, and the move is cached for good: a K1 Max that go2rtc
+# streams fine ended up on direct WebRTC, blank outside the LAN (#134).
+NO_VIDEO_MIN_SPAN = 600.0
 # How long into a snapshot request go2rtc's counters are read. Before the
 # request ends: Home Assistant cancels a still image at 10 s, and go2rtc lets
 # go of the printer soon after nobody is waiting for a frame.
@@ -464,6 +473,7 @@ class CrealityWebRTCCamera(_BaseCamera):
         # Set by setup for an Auto camera that may move to direct WebRTC (#46).
         self._on_no_video: Callable[[], None] | None = None
         self._silent_snapshots = 0
+        self._silent_since = 0.0
         self._fell_back = False
         self._video_check_pending = False
 
@@ -984,16 +994,23 @@ class CrealityWebRTCCamera(_BaseCamera):
         then sends 98; go2rtc's WebRTC library drops every packet, so the
         connection is up and no frame ever arrives. A browser accepts the same
         stream, which is what direct WebRTC hands it. Only on evidence: go2rtc
-        connected to the printer and not one packet received, twice running.
-        A printer that is off or unreachable is not that.
+        connected to the printer and not one packet received, twice running
+        and for at least `NO_VIDEO_MIN_SPAN` (#134). A printer that is off or
+        unreachable is not that.
         """
         if self._on_no_video is None or self._fell_back or not self._stream_name:
             return
         if await self._go2rtc_receiving() is not False:
             self._silent_snapshots = 0
             return
+        now = _monotonic()
+        if self._silent_snapshots == 0:
+            self._silent_since = now
         self._silent_snapshots += 1
-        if self._silent_snapshots < NO_VIDEO_STRIKES:
+        if (
+            self._silent_snapshots < NO_VIDEO_STRIKES
+            or now - self._silent_since < NO_VIDEO_MIN_SPAN
+        ):
             return
         self._fell_back = True
         _LOGGER.warning(

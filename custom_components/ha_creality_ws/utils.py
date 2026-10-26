@@ -258,6 +258,30 @@ def detect_camera_type(data: Mapping[str, Any] | None, previous: str | None = No
     return previous
 
 
+# The first version whose Auto camera needs a lasting silence before it moves to
+# direct WebRTC (#134); a verdict cached by an older one is retried once.
+DIRECT_FALLBACK_RULE_VERSION = (0, 9, 10)
+
+
+def camera_type_to_keep(previous: str | None, cached_version: Any) -> str | None:
+    """The cached camera type to carry into re-detection after an upgrade.
+
+    A `webrtc_direct` verdict reached before 0.9.10 took two silent go2rtc
+    snapshots 20 s apart, which a booting printer also produces, and it is
+    cached for good: a K1 Max go2rtc streams fine sat on direct WebRTC, blank
+    outside the LAN (#134). Such a verdict is dropped once, so go2rtc is tried
+    again under the rule that needs ten minutes of silence. Anything else, or a
+    version that cannot be read as older, is kept.
+    """
+    if previous != "webrtc_direct":
+        return previous
+    try:
+        parts = tuple(int(part) for part in str(cached_version).split(".")[:3])
+    except ValueError:
+        return previous
+    return None if parts < DIRECT_FALLBACK_RULE_VERSION else previous
+
+
 def normalize_printer_hostname(value: Any) -> str | None:
     """A printer hostname comparable between mDNS and telemetry, or None.
 

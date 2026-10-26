@@ -112,3 +112,18 @@ def test_a_printer_go2rtc_got_no_video_from_stays_on_direct_webrtc():
     assert detect_camera_type(frame, None) == "webrtc"
     # A printer that stops offering WebRTC leaves direct mode too.
     assert detect_camera_type({"model": "K1C", "webrtcSupport": 0}, "webrtc_direct") == "mjpeg"
+
+
+def test_a_direct_verdict_from_before_0_9_10_is_retried_once_after_the_upgrade():
+    """Before 0.9.10 two silent go2rtc snapshots 20 s apart moved an Auto
+    camera to direct WebRTC for good, which a booting printer also produces
+    (#134). That verdict is dropped once; a newer one, and anything else, stays."""
+    from custom_components.ha_creality_ws.utils import camera_type_to_keep
+
+    frame = {"model": "CR-K1 Max", "webrtcSupport": 1}
+    assert detect_camera_type(frame, camera_type_to_keep("webrtc_direct", "0.9.9")) == "webrtc"
+    assert detect_camera_type(frame, camera_type_to_keep("webrtc_direct", "0.9.6.1")) == "webrtc"
+    assert camera_type_to_keep("webrtc_direct", "0.9.10") == "webrtc_direct"
+    assert camera_type_to_keep("webrtc_direct", "1.0.0") == "webrtc_direct"
+    assert camera_type_to_keep("webrtc_direct", None) == "webrtc_direct"
+    assert camera_type_to_keep("mjpeg", "0.9.9") == "mjpeg"
