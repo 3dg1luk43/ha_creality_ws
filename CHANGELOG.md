@@ -11,16 +11,12 @@ and versions are numbered major.minor.patch, with a fourth number for a hotfix r
 
 ### TL;DR
 
-- A K1C print is announced as finished when the printer ends it, not 15 seconds early, and Print Status no longer jumps back to Printing just before the end.
-- A K1C no longer reports a filament runout at the first print after power-on. Filament Status follows the same rule.
-- Nozzle, bed and chamber targets set from a script no longer snap back to the old value before the printer confirms them.
-- iPhone notifications show the current print's thumbnail.
-- Custom live-card text no longer shows "0/0" and "0s" while the printer warms up and self-tests.
-- Print Status stops adding a database row of attributes every second while printing.
-- Direct WebRTC works in ordinary browsers on the home network, not only ones that reveal their local address.
-- Print Status reads Processing, not Idle, for the moment a K1C job starts.
-- A printer camera that is down no longer makes Home Assistant's go2rtc eat memory until Home Assistant runs out.
-- The camera in WebRTC (go2rtc) mode can connect from outside the home network, as Home Assistant's own cameras do.
+- Home Assistant no longer runs out of memory while a printer's camera is down: go2rtc leaked on every failed snapshot.
+- K1C prints are announced as finished when the printer ends them, not 15 seconds early, and Print Status no longer flips to Printing at the end or to Idle at the start.
+- No more false "filament ran out" on a K1C: a runout is read from the printer's runout sensor, and shows until the filament is reloaded.
+- The go2rtc camera connects from outside the home network, direct WebRTC works in ordinary browsers at home, and an Auto camera no longer gets stuck on direct WebRTC after a moment without video.
+- Targets set from a script no longer snap back before the printer confirms them, iPhone notifications show the current print's thumbnail, and custom live-card text leaves out values the printer does not know yet.
+- Print Status no longer writes a set of attributes to the database every second while printing.
 
 ### Fixes
 
@@ -38,7 +34,8 @@ and versions are numbered major.minor.patch, with a fourth number for a hotfix r
 
 ### Internal
 
-- Two real K1C traces, a print starting and a print finishing, are test fixtures; the tests replay them through the real coordinator.
+- Three real K1C traces, a print starting, a print finishing and a filament runout, are test fixtures; the tests replay them through the real coordinator.
+- The simulator answers WebRTC offers the way the printer does, so go2rtc gets video from it on the test box.
 - The simulator's K1C 1.3.5.22 profile finishes a print the way the real one does: state 2 for 50 s, then 0.
 
 
