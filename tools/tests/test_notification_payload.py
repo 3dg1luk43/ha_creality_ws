@@ -229,8 +229,10 @@ def test_a_tap_opens_the_camera_with_no_configuration_at_all(registry):
     hass.set_state("camera.k1c_printer_camera", snapshot_supported=True)
     data = _emit(coord, hass)
     assert data["clickAction"] == "entityId:camera.k1c_printer_camera"
-    # entityId: is Android-only, so iOS gets nothing rather than a dead link.
-    assert "url" not in data
+    # entityId: is Android-only. With no url, a tap on an iPhone's live
+    # activity or banner only opened the app on its last page; this path opens
+    # the same more-info dialog in the frontend.
+    assert data["url"] == "/?more-info-entity-id=camera.k1c_printer_camera"
 
 
 def test_without_a_camera_a_tap_falls_back_to_the_preview(registry):
@@ -238,11 +240,13 @@ def test_without_a_camera_a_tap_falls_back_to_the_preview(registry):
     registry[PREVIEW_KEY] = "image.k1c_current_print_preview"
     data = _emit(coord, hass)
     assert data["clickAction"] == "entityId:image.k1c_current_print_preview"
+    assert data["url"] == "/?more-info-entity-id=image.k1c_current_print_preview"
 
 
 def test_with_nothing_resolved_no_tap_target_is_sent(registry):
     data = _emit(*_coordinator())
     assert "clickAction" not in data
+    assert "url" not in data
     assert "url" not in data
 
 
@@ -378,3 +382,25 @@ def test_the_title_falls_back_to_the_host_not_a_generic_string(registry):
         coord._notify_event("done", kind="completed")
     )
     assert _flush(hass)[0][2]["title"] == "1.2.3.4"
+
+
+def test_a_tap_on_the_live_card_opens_the_camera_too(registry):
+    """An iPhone's live activity opens its `url` when tapped, and with none
+    the app only came up on its last page (Integrations, reported 2026-10-26)."""
+    coord, hass = _coordinator()
+    registry[CAMERA_KEY] = "camera.k1c_printer_camera"
+    hass.set_state("camera.k1c_printer_camera", snapshot_supported=True)
+    coord._notify_live = True
+    coord._notify_primed = True
+    coord.data = {
+        "hostname": "K1C",
+        "printFileName": "/usr/data/printer_data/gcodes/benchy.gcode",
+        "printProgress": 12,
+        "printJobTime": 300,
+        "printLeftTime": 1800,
+        "state": 1,
+    }
+    asyncio.get_event_loop().run_until_complete(coord._check_notifications({}))
+    cards = [data for _d, _s, data in _flush(hass) if data.get("data", {}).get("tag", "").endswith("_live")]
+    assert cards, "a printing frame should put the card up"
+    assert cards[0]["data"]["url"] == "/?more-info-entity-id=camera.k1c_printer_camera"

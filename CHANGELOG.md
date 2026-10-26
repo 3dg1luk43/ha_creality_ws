@@ -17,6 +17,7 @@ and versions are numbered major.minor.patch, with a fourth number for a hotfix r
 - The go2rtc camera connects from outside the home network, direct WebRTC works in ordinary browsers at home, and an Auto camera no longer gets stuck on direct WebRTC after a moment without video.
 - Targets set from a script no longer snap back before the printer confirms them, iPhone notifications show the current print's thumbnail, and custom live-card text leaves out values the printer does not know yet.
 - Print Status no longer writes a set of attributes to the database every second while printing.
+- On an iPhone, tapping the live print card or a notification opens the printer camera, as on Android.
 
 ### Fixes
 
@@ -30,6 +31,7 @@ and versions are numbered major.minor.patch, with a fourth number for a hotfix r
 - **The WebRTC (go2rtc) camera stayed black outside the home network** ([#134](https://github.com/3dg1luk43/ha_creality_ws/issues/134)): the integration handed go2rtc the browser's offer alone, so go2rtc could only offer the addresses it has on the local network, and never heard the browser's. It now signals go2rtc the way Home Assistant's own go2rtc cameras do: with the browser's STUN servers, so go2rtc also offers its public address, and with candidates passed both ways.
 - **Direct WebRTC stayed black in most browsers**: a browser hides its local address behind a random `.local` name unless the page has camera or microphone permission, and a K1C on firmware 1.3.5.22 never contacts such an address, so no video arrives. Home Assistant now looks the name up on the local network and gives the printer the address. go2rtc mode was not affected.
 - **Print Status went Stopped, Idle, Printing at the start of every K1C print**: the printer reports a starting state for under a second, which read as Idle and set off automations waiting for the printer to be idle. It now reads Processing, and the live card still starts only once printing does.
+- **On an iPhone, tapping the live print card or a notification opened the app on its last page**: the integration sent iPhones no link, because the `entityId:` link Android uses does not exist on iOS, so a tap on the Dynamic Island, the lock-screen card or a banner just opened Home Assistant wherever it was. It now sends a link to the printer camera's dialog, which iOS opens the same way. A dashboard path set in the options still takes precedence.
 - **Print Status wrote a new set of attributes to the database every second while printing**: its job time, time left, used filament and flow attributes change every second and duplicate their own sensors. They are no longer recorded, and still update for templates.
 
 ### Internal

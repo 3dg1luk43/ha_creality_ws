@@ -43,6 +43,7 @@ from .notification_rules import (
     LiveCardState,
     LiveSnapshot,
     NotifyLinks,
+    more_info_path,
     NotifyVisuals,
     PushReason,
     ACTION_DISMISS,
@@ -1572,10 +1573,11 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _notify_links(self) -> NotifyLinks:
         """Tap targets, sent as both dialects at once.
 
-        A configured dashboard path wins on both platforms. Failing that Android
-        gets `entityId:` for the camera, which opens the more-info dialog and its
-        live feed with no configuration at all -- but iOS does not support that
-        form, so it gets nothing rather than a broken link.
+        A configured dashboard path wins on both platforms. Failing that the
+        camera's more-info dialog and its live feed, with no configuration at
+        all: Android as `entityId:`, iOS as a path the frontend opens the same
+        dialog from. iOS has no `entityId:` form, and with no `url` a tap on the
+        live activity or a banner only opened the app on its last page.
         """
         path = (self._notify_tap_path or "").strip()
         if path.startswith("/"):
@@ -1583,13 +1585,17 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         camera_id = self._resolve_entity_id("camera", "camera")
         if camera_id:
-            return NotifyLinks(click_action=f"entityId:{camera_id}")
+            return NotifyLinks(
+                click_action=f"entityId:{camera_id}", tap_path=more_info_path(camera_id)
+            )
 
         # No camera configured for this printer: the preview at least shows what
         # is being printed.
         preview_id = self._resolve_entity_id("image", "current_print_preview")
         if preview_id:
-            return NotifyLinks(click_action=f"entityId:{preview_id}")
+            return NotifyLinks(
+                click_action=f"entityId:{preview_id}", tap_path=more_info_path(preview_id)
+            )
 
         return NotifyLinks()
 

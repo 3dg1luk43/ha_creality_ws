@@ -955,12 +955,23 @@ class NotifyLinks:
     """Tap targets. Both ship together; each platform ignores the other's key.
 
     ``click_action`` is Android's and accepts ``entityId:<id>`` to open a
-    more-info dialog. iOS's ``url`` does not support that form, so it only gets a
-    value when the user configured a dashboard path.
+    more-info dialog. iOS's ``url`` has no such form; it gets a configured
+    dashboard path, or ``more_info_path``, which opens the same dialog.
     """
 
     click_action: str | None = None
     tap_path: str | None = None
+
+
+def more_info_path(entity_id: str) -> str:
+    """A frontend path that opens one entity's more-info dialog.
+
+    The frontend opens the dialog from the query on any page, the default
+    dashboard included (checked on 2026.10), so the root path works whatever
+    dashboard the user has. iOS uses it as the `url` of a banner or a live
+    activity, which otherwise only opened the app on its last page.
+    """
+    return f"/?more-info-entity-id={entity_id}"
 
 
 def compute_when(now_epoch: float, seconds_left: Any) -> int | None:

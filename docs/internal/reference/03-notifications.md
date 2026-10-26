@@ -292,7 +292,7 @@ Alert (`notification_rules.py:1161-1178`): `tag _alert`, icon `mdi:printer-3d-no
 
 Dismiss (`notification_rules.py:1181-1191`): `{"message": "clear_notification", "data": {"tag": ...}}`, no title.
 
-Tap target: dashboard path wins on both platforms, else `entityId:<camera>`, else `entityId:<preview>` for Android only (`coordinator.py:1292-1314`).
+Tap target: dashboard path wins on both platforms, else the camera, else the preview: Android as `entityId:<id>`, iOS as `url` `/?more-info-entity-id=<id>` (`notification_rules.more_info_path`; the frontend opens the dialog from that query on any page, the default dashboard included, checked on 2026.10). The iOS live activity's tap is `homeassistant://navigate?webhook_id=...&url=<url>` (iOS app `HALiveActivityConfiguration.swift`, `haLiveActivityTapURL`); with no `url` the app opened on its last page (R96).
 
 ### 8.2 What each platform does with it
 

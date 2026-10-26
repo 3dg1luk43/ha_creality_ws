@@ -263,9 +263,9 @@ A stop is reported whoever performed it: the printer's own screen, the Creality 
 | | Default | With a dashboard path set |
 |---|---|---|
 | **Android** | opens the printer camera's more‑info dialog, with the live feed | opens that dashboard view |
-| **iOS** | opens the app | opens that dashboard view |
+| **iOS** | opens the printer camera's more‑info dialog, with the live feed (the live card and the banners) | opens that dashboard view |
 
-Set **Dashboard path to open on tap** to something like `/lovelace/printer`. It is the only way to make an iOS tap go anywhere specific, because the `entityId:` deep link Android uses is Android‑only.
+Set **Dashboard path to open on tap** to something like `/lovelace/printer` to open a dashboard instead. On iOS a tap on the live card always opens the app, at that target; a long press expands the card in the Dynamic Island.
 
 ### Pictures
 

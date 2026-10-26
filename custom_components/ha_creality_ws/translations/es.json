@@ -182,7 +182,7 @@
               "notify_actions": "«Detener» pide autenticación en el dispositivo, así que una pulsación accidental en la pantalla de bloqueo no puede acabar con una impresión larga.",
               "notify_preview_image": "Se omite cuando la impresora no tiene ninguna vista previa que ofrecer, en lugar de enviar un recuadro gris vacío.",
               "notify_camera_snapshot": "El aspecto real de la cama. Se omite en impresoras cuya cámara no puede tomar una imagen fija.",
-              "notify_tap_path": "P. ej. /lovelace/printer. Si se deja vacía, en Android la pulsación abre la cámara de la impresora y en iOS abre la aplicación; es la única forma de que en iOS la pulsación lleve a una vista concreta."
+              "notify_tap_path": "P. ej. /lovelace/printer. Si se deja vacía, la pulsación abre la cámara de la impresora en Android y en iPhone; indica una ruta para abrir un panel en su lugar."
             }
           },
           "text": {
