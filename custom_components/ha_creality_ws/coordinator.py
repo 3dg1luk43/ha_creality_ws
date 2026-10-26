@@ -2355,6 +2355,12 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._load_options()
         if resync and self._notify_live and self._notify_targets:
             self._live_card.clear()
+            # The card is still on the phones: re-push it in place, as after a
+            # restart mid-print, without the clear a new job's card gets. Sent
+            # together, an iPhone could process the clear after the START and
+            # end the card it had just started; it stayed away until the next
+            # five-minute refresh (R97).
+            self._live_resync = True
         _LOGGER.info("Notification settings applied without a reload")
 
     def _notify_tag_base(self) -> str:

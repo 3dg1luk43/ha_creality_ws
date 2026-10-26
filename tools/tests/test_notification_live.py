@@ -1652,6 +1652,27 @@ def test_applying_new_text_resyncs_the_card_instead_of_waiting():
     assert pushed[0]["message"] == "41% of 3DBenchy.gcode"
 
 
+def test_a_settings_change_re_pushes_the_card_without_clearing_it_first():
+    """The clear-first is for a new job's card. Sent with the re-push after a
+    settings change, an iPhone could take the clear after the START and end
+    the card it had just started; it stayed away until the next five-minute
+    refresh (R97, seen 2026-10-26 on iOS 26.6)."""
+    coord, hass = _coordinator(targets=("notify.mobile_app_iphone_15_pro",))
+    _as_iphone(coord)
+    coord.config_entry.options = _options(notify_targets=["notify.mobile_app_iphone_15_pro"])
+    coord._load_options()
+    _frame(coord, hass, **_printing(40))
+
+    options = _options(notify_targets=["notify.mobile_app_iphone_15_pro"], notify_template_live="{progress}%")
+    coord.config_entry.options = options
+    coord.apply_notification_options(options)
+
+    hass.loop.advance(1)
+    payloads = _frame(coord, hass, **_printing(41))
+    assert len(_live(payloads)) == 1, "the very next frame re-pushes the card"
+    assert [p for p in payloads if p["message"] == CLEAR_NOTIFICATION_MARKER] == []
+
+
 def test_a_phone_removed_from_the_targets_has_its_card_taken_away():
     """It will never be pushed to again, so nothing else would ever update or
     dismiss the card it is holding."""

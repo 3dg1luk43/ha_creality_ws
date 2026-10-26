@@ -320,6 +320,7 @@ The integration's own `activity` key is read by none of the three (tests use it 
 - Buttons: Pause or Resume, Stop (`destructive`, `authenticationRequired`), Hide; `notify_actions` off keeps only Hide (`notification_rules.py:1229-1279`, `coordinator.py:1577-1595`). Live card only; banners and alerts carry none (`coordinator.py:1940-1958`, `notification_rules.py:1140`).
 - One `mobile_app_notification_action` listener per entry, registered unconditionally (`__init__.py:426-437`); exact id match (`coordinator.py:1597-1624`). Pause/Resume go through `request_pause`/`request_resume` (`coordinator.py:477-531`); Stop through `async_stop_print` (`coordinator.py:1626-1636`); Hide dismisses on every target and finishes the card.
 - An iOS Live Activity has no action buttons at all; they appear on iOS only when the card is an ordinary notification.
+- An options save re-pushes the card with `_live_resync` set, so without the R70 clear-first: sent together, the END could reach the iPhone after the START and end the new card (R97). A new job's START still clears first (R98).
 
 ---
 
