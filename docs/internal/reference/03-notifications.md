@@ -274,7 +274,8 @@ Live card (`notification_rules.py:983-1080`):
 | `channel` | translated `channel_live` | always (`986`) |
 | `alert_once` | `True` | always (`990`) |
 | `activity` | `"start"` | first push of a card (`1019-1021`) |
-| `silent`, `push.interruption-level` | `True`, `"passive"` | refresh pushes (`1010-1018`) |
+| `silent` | `True` | every push (R99): a real start alerts regardless, and a start after a restart or a settings save reaches a card the phone still has, which core sends as an update |
+| `push.interruption-level` | `"passive"` | refresh pushes |
 | `content_state` | copy of the typed keys the relay reads: `progress`, `progress_max`, `chronometer`, `critical_text`, and `when` as `countdown_end` | `live_update`. A dict survives `stringify_data` whole, so an unidentified iPhone still decodes. Before R1 it held `state, device, progress_pct, eta_timestamp, program`, which nothing read |
 | `subtitle` | job file name | `live_update` and a name (`1041-1043`) |
 | `progress`, `progress_max` | 0-100, 100 | progress known (`1046-1051`) |

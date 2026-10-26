@@ -1081,14 +1081,16 @@ def build_live_payload(
     # The Hide action is therefore the way out of the card, not a fallback for
     # one. If a future Android or companion release does offer a genuine pin,
     # `persistent` plus a `tag` is where to look first.
+    # iOS alerts on every push unless told otherwise, so a 5-minute refresh
+    # cadence buzzes the phone for the whole print. `alert_once` above is
+    # Android-only and does nothing here, so `silent` is its iOS counterpart
+    # rather than a duplicate. On the push that starts a card too: a real start
+    # alerts regardless (the "your print is now on the Lock Screen" cue), but a
+    # start after a restart or a settings save goes to a phone that still has
+    # the card, Home Assistant sends it as an update by the stored token, and
+    # without `silent` that update chimed (R99).
+    data["silent"] = True
     if refresh:
-        # iOS alerts on every push unless told otherwise, so a 5-minute refresh
-        # cadence buzzes the phone for the whole print. `alert_once` above is
-        # Android-only and does nothing here, so these are its iOS counterpart
-        # rather than a duplicate. Deliberately *not* set on the push that
-        # starts the card: that one is the "your print is now on the Lock
-        # Screen" cue and should be felt once.
-        data["silent"] = True
         data["push"] = {"interruption-level": "passive"}
     else:
         # Tells iOS to begin a Live Activity rather than update one.

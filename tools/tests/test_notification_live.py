@@ -811,14 +811,15 @@ def test_a_refreshing_card_always_carries_a_way_out():
         assert any(i.startswith("CREALITY_DISMISS_") for i in ids), actions
 
 
-def test_the_first_push_alerts_and_later_ones_do_not():
+def test_every_live_push_is_silent_and_only_refreshes_are_passive():
     """iOS alerts per push unless told otherwise, so a refresh cadence would
     buzz the phone for the whole print. `alert_once` is Android-only and does
-    nothing there. The push that *starts* the card stays audible: it is the
-    "your print is on the Lock Screen" cue."""
+    nothing there. The start is `silent` too: a real start alerts anyway, and
+    one after a restart or a settings save reaches a card the phone still has,
+    as an update that chimed without it (R99)."""
     coord, hass = _coordinator()
     start = _live(_frame(coord, hass, **_printing(5)))[0]["data"]
-    assert "silent" not in start
+    assert start["silent"] == "true"
     assert "push" not in start
     assert start["activity"] == "start"
 
@@ -1886,6 +1887,20 @@ def test_the_next_print_on_a_shared_tag_starts_its_card_at_once():
     hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
     calls = _frame_calls(coord, hass, **_printing(2, printJobTime=40))
     assert len(_live_pushes_to(calls, iphone)) == 1, "after the card was switched off and on"
+
+
+def test_the_resync_after_a_restart_reaches_an_iphone_silently():
+    """After a restart mid-print the card is pushed again as a START, but Home
+    Assistant still holds its token and sends it as an update, which chimed
+    without `silent` (R99, the 17:19 and 17:22 restarts on 2026-10-26)."""
+    iphone = "notify.mobile_app_iphone"
+    coord, hass = _coordinator(targets=(iphone,))
+    tag = coord._job_live_tag()
+    _iphone_tokens(coord, hass, {"wh-iphone": {tag: {"token": "t", "expires_at": time.time() + 3600}}})
+    coord._live_resync = True
+    pushes = _live_pushes_to(_frame_calls(coord, hass, **_printing(40)), iphone)
+    assert len(pushes) == 1
+    assert pushes[0]["data"]["silent"] is True
 
 
 def test_a_new_card_on_an_iphone_is_preceded_by_a_clear_of_its_tag():
