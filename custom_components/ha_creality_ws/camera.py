@@ -114,6 +114,16 @@ NO_VIDEO_STRIKES = 2
 # go of the printer soon after nobody is waiting for a frame.
 NO_VIDEO_CHECK_AFTER = 6.0
 
+# go2rtc 1.9.14's creality source leaks its peer connection (about six sockets
+# and 190 KB) on every failed dial, and a snapshot dials once per dashboard
+# refresh: 600 failed snapshots grew go2rtc from 84 to 174 MB and 2,309 to
+# 5,909 open files (#133). So a snapshot first checks that the printer's
+# WebRTC endpoint answers at all, and a failed one holds off the next.
+WEBRTC_PROBE_TTL = 5.0
+WEBRTC_PROBE_TIMEOUT = 3.0
+SNAPSHOT_BACKOFF_START = 30.0
+SNAPSHOT_BACKOFF_MAX = 600.0
+
 class _BaseCamera(KEntity, Camera):
     """Base camera class with common functionality and fallback image support.
     
@@ -443,7 +453,12 @@ class CrealityWebRTCCamera(_BaseCamera):
         self._last_snapshot_ts: float = 0.0
         self._snapshot_min_interval: float = 2.0  # seconds
         self._snapshot_lock = asyncio.Lock()
-        
+        # After a failed snapshot, none before this loop time (#133).
+        self._snapshot_retry_at: float = 0.0
+        self._snapshot_backoff: float = 0.0
+        # (loop time, answered) of the last probe of the printer's endpoint.
+        self._webrtc_probe: tuple[float, bool] | None = None
+
         # Initialize go2rtc client (will be set up in async_added_to_hass)
         self._go2rtc_client: Go2RtcRestClient | None = None
         self._go2rtc_server_url: str | None = None
@@ -808,6 +823,12 @@ class CrealityWebRTCCamera(_BaseCamera):
         if self._last_frame and (now - self._last_snapshot_ts) < self._snapshot_min_interval:
             return self._last_frame
 
+        # Every failed go2rtc dial leaks (#133): no snapshot while the printer's
+        # endpoint is down, and none for a while after one failed.
+        if now < self._snapshot_retry_at or not await self._printer_webrtc_answering():
+            return await self._fallback_image()
+
+        attempted = ok = False
         try:
             async with self._snapshot_lock:
                 # Throttle check again inside the lock
@@ -822,14 +843,16 @@ class CrealityWebRTCCamera(_BaseCamera):
                     self.hass.async_create_background_task(
                         self._check_video_soon(now), "ha_creality_ws go2rtc video check"
                     )
-                
+
+                attempted = True
                 image_data = await self._go2rtc_client.get_jpeg_snapshot(
                     name=self._stream_name,
                     width=width,
                     height=height
                 )
-                
+
                 if image_data and self._is_valid_jpeg(image_data):
+                    ok = True
                     self._last_frame = image_data
                     self._last_snapshot_ts = now
                     _LOGGER.debug("ha_creality_ws: successfully captured WebRTC snapshot")
@@ -841,8 +864,54 @@ class CrealityWebRTCCamera(_BaseCamera):
             _LOGGER.warning("ha_creality_ws: go2rtc client error getting snapshot: %s", err)
         except Exception as exc:
             _LOGGER.warning("ha_creality_ws: unexpected error getting snapshot: %s", exc)
+        finally:
+            # Also when Home Assistant cancels the request at 10 s: go2rtc's
+            # handler outlives it, so the next refresh would stack another.
+            if attempted:
+                self._note_snapshot(ok)
 
         return await self._fallback_image()
+
+    def _note_snapshot(self, ok: bool) -> None:
+        """Clear the snapshot back-off on success; start or double it on failure."""
+        if ok:
+            self._snapshot_backoff = 0.0
+            self._snapshot_retry_at = 0.0
+            return
+        self._snapshot_backoff = min(
+            SNAPSHOT_BACKOFF_MAX, self._snapshot_backoff * 2 or SNAPSHOT_BACKOFF_START
+        )
+        self._snapshot_retry_at = asyncio.get_running_loop().time() + self._snapshot_backoff
+        _LOGGER.debug(
+            "ha_creality_ws: snapshot failed; next go2rtc snapshot in %.0f s", self._snapshot_backoff
+        )
+
+    async def _printer_webrtc_answering(self) -> bool:
+        """Whether the printer's WebRTC endpoint takes connections (#133).
+
+        A plain GET costs one TCP connection and no peer connection, and tells
+        whether a go2rtc dial can work: while the printer boots, or with its
+        camera service down, the dial fails and go2rtc leaks it. Only for the
+        printer's own endpoint; a custom source is somebody else's server.
+        """
+        if self._go2rtc_source:
+            return True
+        now = asyncio.get_running_loop().time()
+        if self._webrtc_probe is not None and now - self._webrtc_probe[0] < WEBRTC_PROBE_TTL:
+            return self._webrtc_probe[1]
+        answered = False
+        try:
+            session = async_get_clientsession(self.hass)
+            async with session.get(
+                self._upstream_signaling_url,
+                timeout=ClientTimeout(total=WEBRTC_PROBE_TIMEOUT),
+            ) as resp:
+                # Any HTTP answer will do: the K1C says 200 "{}", others 405.
+                answered = resp.status < 500
+        except (ClientError, asyncio.TimeoutError, OSError) as exc:
+            _LOGGER.debug("ha_creality_ws: printer WebRTC endpoint not answering: %s", exc)
+        self._webrtc_probe = (now, answered)
+        return answered
 
     async def _check_video_soon(self, started: float) -> None:
         """Mid-request, look whether the snapshot is getting any video (#46).

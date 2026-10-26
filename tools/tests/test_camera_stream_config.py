@@ -708,3 +708,83 @@ def test_the_video_check_runs_while_the_snapshot_is_still_waiting(monkeypatch):
     fine = run(succeeded=True)
     fine._note_failed_snapshot.assert_not_awaited()
     assert fine._silent_snapshots == 0
+
+
+# --------------------------------------------------------------------------- #
+# go2rtc snapshots and its leaking creality dial (#133)
+# --------------------------------------------------------------------------- #
+
+_JPEG = b"\xff\xd8" + b"\x00" * 32 + b"\xff\xd9"
+
+
+def _snapshot_camera(answering=True):
+    import custom_components.ha_creality_ws.camera as camera_mod
+
+    from types import SimpleNamespace
+
+    cam = _camera()
+    cam.coordinator = SimpleNamespace(power_is_off=lambda: False, available=True)
+    cam._last_frame = None  # set by _BaseCamera.__init__, patched out by _camera()
+    cam._ensure_stream_configured = AsyncMock()
+    cam._stream_name = "creality_k2_1_2_3_4"
+    cam._go2rtc_client = MagicMock()
+    cam._go2rtc_client.get_jpeg_snapshot = AsyncMock(side_effect=camera_mod.Go2RtcClientError())
+    cam._printer_webrtc_answering = AsyncMock(return_value=answering)
+    return cam
+
+
+def test_a_failed_snapshot_holds_off_the_next_and_the_hold_off_doubles():
+    """go2rtc 1.9.14 leaks a peer connection per failed creality dial; one dial
+    per 10 s dashboard refresh grew it by tens of MB an hour (#133)."""
+    import asyncio
+
+    cam = _snapshot_camera()
+
+    async def run():
+        await cam.async_camera_image()
+        await cam.async_camera_image()  # inside the hold-off: no dial
+        first = cam._snapshot_backoff
+        cam._snapshot_retry_at = 0.0  # the hold-off has passed
+        await cam.async_camera_image()
+        return first, cam._snapshot_backoff
+
+    first, second = asyncio.run(run())
+    assert cam._go2rtc_client.get_jpeg_snapshot.await_count == 2
+    assert (first, second) == (30.0, 60.0)
+
+    cam._snapshot_retry_at = 0.0
+    cam._go2rtc_client.get_jpeg_snapshot = AsyncMock(return_value=_JPEG)
+    assert asyncio.run(cam.async_camera_image()) == _JPEG
+    assert cam._snapshot_backoff == 0.0 and cam._snapshot_retry_at == 0.0
+
+
+def test_a_snapshot_home_assistant_cancels_holds_off_the_next_too():
+    """Home Assistant cancels a still image at 10 s; go2rtc's handler goes on
+    waiting, so the next refresh would stack another on top."""
+    import asyncio
+    import contextlib
+
+    cam = _snapshot_camera()
+
+    async def hang(**_kw):
+        await asyncio.sleep(3600)
+
+    cam._go2rtc_client.get_jpeg_snapshot = AsyncMock(side_effect=hang)
+
+    async def run():
+        task = asyncio.create_task(cam.async_camera_image())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        return cam._snapshot_retry_at - asyncio.get_running_loop().time()
+
+    assert asyncio.run(run()) > 25
+
+
+def test_no_go2rtc_snapshot_while_the_printers_endpoint_is_down():
+    import asyncio
+
+    cam = _snapshot_camera(answering=False)
+    asyncio.run(cam.async_camera_image())
+    cam._go2rtc_client.get_jpeg_snapshot.assert_not_awaited()

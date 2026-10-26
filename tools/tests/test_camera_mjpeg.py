@@ -364,3 +364,42 @@ def test_the_printer_gets_the_resolved_address_in_the_offer_it_is_posted(monkeyp
     assert sent and sent[-1]["type"] == "answer"
     assert " 192.168.0.50 54321 typ host" in posted[0]
     assert ".local" not in posted[0]
+
+
+def test_the_printer_endpoint_probe_takes_any_http_answer_and_caches_it(monkeypatch):
+    """The check before a go2rtc snapshot (#133): one GET, no peer connection.
+    The K1C answers 200 "{}", the simulator 405; a printer whose WebRTC server
+    is down refuses the connection."""
+
+    async def main():
+        async def handle(request):
+            return web.Response(status=405)
+
+        app = web.Application()
+        app.router.add_get("/call/webrtc_local", handle)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        session = aiohttp.ClientSession()
+        monkeypatch.setattr(camera_mod, "async_get_clientsession", lambda hass: session)
+        cam = _webrtc_camera()
+        cam.hass = SimpleNamespace()
+        cam._go2rtc_source = None
+        cam._webrtc_probe = None
+        cam._upstream_signaling_url = f"http://127.0.0.1:{port}/call/webrtc_local"
+        try:
+            up = await cam._printer_webrtc_answering()
+            await runner.cleanup()
+            cached = await cam._printer_webrtc_answering()
+            cam._webrtc_probe = None
+            down = await cam._printer_webrtc_answering()
+            cam._go2rtc_source = "rtsp://nvr/stream"
+            cam._webrtc_probe = None
+            custom = await cam._printer_webrtc_answering()
+        finally:
+            await session.close()
+        return up, cached, down, custom
+
+    assert asyncio.run(main()) == (True, True, False, True)
