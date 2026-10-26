@@ -11,9 +11,13 @@ then the start-of-print self-test with no layer count and no estimate yet.
 """
 
 import json
+import re
 from pathlib import Path
 
 from test_notification_live import CLEAR_NOTIFICATION_MARKER, _coordinator, _frame_calls
+# Its autouse event-loop fixture, so these replays do not depend on what ran
+# before them: a module that clears the loop on teardown left none to use.
+from test_notification_live import _loop  # noqa: F401
 
 from custom_components.ha_creality_ws.utils import coerce_numbers, derive_print_state
 
@@ -125,3 +129,20 @@ def test_a_real_runout_alerts_once_and_holds_until_the_filament_is_back():
     assert alerts == [27.008]
     assert clears == [122.001]
     assert runout == [(0.0, False), (27.008, True), (122.001, False)]
+
+
+def test_the_start_trace_clears_the_last_jobs_card_and_starts_on_its_own_tag():
+    """The K1C dates its jobs (`printStartTime`); a card gets the job's tag
+    (R98). At the baseline the printer is idle on the previous job, so that
+    job's card and the shared pre-0.9.10 one are cleared; the new job's card
+    then starts on its own tag with nothing in front of it."""
+    statuses, pushes, _events, _lines = _replay("k1c_print_start.jsonl")
+    base = "ha_creality_ws_"
+    live = [(t, d.get("tag", ""), m) for t, m, d in pushes if d.get("tag", "").endswith("_live")]
+    cleared = {tag for _t, tag, m in live if m == CLEAR_NOTIFICATION_MARKER}
+    assert any(tag.endswith("_1792915251_live") for tag in cleared)
+    # The shared tag: the integration's base and `_live`, no job time between.
+    assert any(tag.startswith(base) and not re.search(r"_\d{9,}_live$", tag) for tag in cleared)
+    cards = [(t, tag) for t, tag, m in live if m != CLEAR_NOTIFICATION_MARKER]
+    assert cards and all(tag.endswith("_1792915744_live") for _t, tag in cards)
+    assert not any(tag.endswith("_1792915744_live") for tag in cleared)

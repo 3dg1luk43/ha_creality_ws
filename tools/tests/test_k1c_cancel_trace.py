@@ -13,6 +13,9 @@ import json
 from pathlib import Path
 
 from test_notification_live import CLEAR_NOTIFICATION_MARKER, _coordinator, _frame_calls
+# Its autouse event-loop fixture, so these replays do not depend on what ran
+# before them: a module that clears the loop on teardown left none to use.
+from test_notification_live import _loop  # noqa: F401
 
 from custom_components.ha_creality_ws.utils import coerce_numbers, derive_print_state
 

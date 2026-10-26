@@ -1762,6 +1762,77 @@ def test_a_new_card_on_an_iphone_is_preceded_by_a_clear_of_its_tag():
     assert CLEAR_NOTIFICATION_MARKER not in _live_tag_messages(_frame_calls(coord, hass, **_printing(30)))
 
 
+def _live_tag_calls(calls):
+    """(tag, message) of every push on a live-card tag, in order."""
+    out = []
+    for call in calls:
+        tag = (call[2].get("data") or {}).get("tag", "")
+        if tag.endswith("_live"):
+            out.append((tag, call[2]["message"]))
+    return out
+
+
+T1, T2 = 1792915251, 1792915744
+
+
+def test_a_print_the_printer_dates_gets_a_card_tag_of_its_own_and_no_clear():
+    """The clear before a new card's START could reach an iPhone after the
+    START and end the card it had just started (R98). A tag of the job's own
+    has no stale token to clear."""
+    coord, hass = _coordinator(targets=("notify.mobile_app_iphone",))
+    _as_iphone(coord)
+    calls = _live_tag_calls(_frame_calls(coord, hass, **_printing(10, printStartTime=T2)))
+    assert [tag for tag, _m in calls] == [f"{coord._notify_tag_base()}_{T2}_live"]
+    assert calls[0][1] != CLEAR_NOTIFICATION_MARKER
+
+
+def test_a_reprint_gets_a_new_card_tag_and_the_finished_job_keeps_its_own():
+    coord, hass = _coordinator(targets=("notify.mobile_app_iphone",))
+    _as_iphone(coord)
+    base = coord._notify_tag_base()
+    first = _live_tag_calls(_frame_calls(coord, hass, **_printing(10, printStartTime=T1)))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    first += _live_tag_calls(_frame_calls(
+        coord, hass, **_printing(100, printStartTime=T1, state=2, printLeftTime=0, printJobTime=1900)
+    ))
+    assert {tag for tag, _m in first} == {f"{base}_{T1}_live"}
+    assert any(m == _COMPLETED for _t, m in first), "the banner replaces the card on its tag"
+
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    second = _live_tag_calls(_frame_calls(coord, hass, **_printing(1, printStartTime=T2, printJobTime=5)))
+    assert second and {tag for tag, _m in second} == {f"{base}_{T2}_live"}
+    assert CLEAR_NOTIFICATION_MARKER not in [m for _t, m in second]
+
+
+def test_a_card_is_cleared_on_its_own_tag_after_the_next_job_moved_on():
+    """By the time a new job is seen, `printStartTime` already names it; the
+    card still on the phone carries the old job's tag."""
+    coord, hass = _coordinator(targets=("notify.mobile_app_iphone",))
+    _as_iphone(coord)
+    base = coord._notify_tag_base()
+    _frame_calls(coord, hass, **_printing(40, printStartTime=T1))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    calls = _live_tag_calls(_frame_calls(coord, hass, **_printing(
+        1, printStartTime=T2, printJobTime=5, printFileName="/usr/data/printer_data/gcodes/next.gcode",
+    )))
+    assert (f"{base}_{T1}_live", CLEAR_NOTIFICATION_MARKER) in calls
+    assert (f"{base}_{T2}_live", CLEAR_NOTIFICATION_MARKER) not in calls
+    assert [m for t, m in calls if t == f"{base}_{T2}_live"], "the new job gets its card"
+
+
+def test_a_restart_mid_print_picks_the_card_up_on_the_same_tag():
+    """The same job's tag after a restart, so Home Assistant finds the card's
+    token and updates it instead of starting a second one."""
+    coord, hass = _coordinator(targets=("notify.mobile_app_iphone",))
+    _as_iphone(coord)
+    coord._notify_primed = False
+    _frame_calls(coord, hass, **_printing(40, printStartTime=T1))  # the baseline
+    hass.loop.advance(1)
+    calls = _live_tag_calls(_frame_calls(coord, hass, **_printing(41, printStartTime=T1)))
+    assert calls and {tag for tag, _m in calls} == {f"{coord._notify_tag_base()}_{T1}_live"}
+    assert CLEAR_NOTIFICATION_MARKER not in [m for _t, m in calls]
+
+
 def test_an_android_card_starts_without_a_clear():
     coord, hass = _coordinator(targets=("notify.mobile_app_pixel",))
     messages = _live_tag_messages(_frame_calls(coord, hass, **_printing(10)))

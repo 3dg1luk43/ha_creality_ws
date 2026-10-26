@@ -255,6 +255,8 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # The printer was mid-job when the baseline was taken (a restart), so
         # the next START re-syncs a card that may still be on the phone.
         self._live_resync = False
+        # The tag of the live card last put on the phones; see `_live_tag` (R98).
+        self._live_tag_current: str | None = None
         # Whether a finishing-soon reminder actually went out this job. The
         # near-end latch is set with the option off too (detection is not
         # gated, only sends are), so dismissing on the latch sent a clear for
@@ -1070,11 +1072,14 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # push below replaces the card in place, and dismissing it first would
         # flicker and spend an iOS push-to-start slot for nothing.
         if self._notify_live and primed_state not in BUSY_PRINT_STATES:
-            self._notify_dispatch(
-                build_clear_payload(f"{self._notify_tag_base()}_live"),
-                kind="live:clear:adopt",
-                live_only=True,
-            )
+            # The last job's tag, and the shared one a card from before 0.9.10
+            # may still sit on (R98).
+            for tag in dict.fromkeys((self._job_live_tag(), f"{self._notify_tag_base()}_live")):
+                self._notify_dispatch(
+                    build_clear_payload(tag),
+                    kind="live:clear:adopt",
+                    live_only=True,
+                )
 
         _LOGGER.debug(
             "Notification baseline captured: file=%s progress=%s completed=%s "
@@ -1751,9 +1756,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             else PHASE_PRINTING
         )
         tag_base = self._notify_tag_base()
+        new_card = reason is PushReason.START and not self._live_card.card_active
+        if new_card:
+            self._live_tag_current = self._job_live_tag()
+        live_tag = self._live_tag()
 
         payload = build_live_payload(
-            tag=f"{tag_base}_live",
+            tag=live_tag,
             title=self._notify_title(),
             message=self._live_message(snap),
             phase=phase,
@@ -1778,15 +1787,18 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # tag, and while one has not expired it sends every push to it as an
         # UPDATE -- this START included. A card swiped away on the phone leaves
         # such a token behind, and the next print's card then never appeared
-        # (#125, finding 2). Clearing the tag first ends that activity and drops
-        # the token, so the START is a real one. Not after a restart mid-print:
-        # there the token is most likely the card still on screen.
+        # (#125, finding 2). A tag of the job's own (`_job_live_tag`) has no
+        # token yet, so its START is a real one with nothing to clear. Only the
+        # shared tag of a printer that does not date its jobs is cleared first,
+        # and that clear can reach an iPhone after the START and end the new
+        # card (R98). Not after a restart mid-print either: there the token is
+        # most likely the card still on screen.
         clear_first = None
-        if reason is PushReason.START and not self._live_card.card_active:
+        if new_card:
             if self._live_resync:
                 self._live_resync = False
-            else:
-                clear_first = build_clear_payload(f"{tag_base}_live")
+            elif live_tag == f"{tag_base}_live":
+                clear_first = build_clear_payload(live_tag)
         self._notify_dispatch(
             payload, kind=f"live:{reason.value}", live_only=True, clear_first=clear_first
         )
@@ -1834,7 +1846,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if send:
             self._notify_dispatch(
-                build_clear_payload(f"{self._notify_tag_base()}_live"),
+                build_clear_payload(self._live_tag()),
                 kind="live:clear",
                 live_only=True,
             )
@@ -2267,7 +2279,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "Dismissing the live print card on %d target(s) it was removed from",
             len(dropped),
         )
-        payload = build_clear_payload(f"{self._notify_tag_base()}_live")
+        payload = build_clear_payload(self._live_tag())
         for target in dropped:
             if is_mobile_target(target) and is_live_capable(self._target_os(target)):
                 self.hass.async_create_task(
@@ -2363,6 +2375,30 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._live_resync = True
         _LOGGER.info("Notification settings applied without a reload")
 
+    def _job_live_tag(self) -> str:
+        """The live card's tag for the job the printer reports now (R98).
+
+        One per print where the printer dates its jobs: the K1C and the K2 Plus
+        report `printStartTime` (Unix seconds), new for every job, a reprint of
+        the same file included, and kept through the job and after it. A tag of
+        its own needs no clear before a new card's START, which an iPhone could
+        process after the START and so end the card it had just started; and it
+        is the same after a restart mid-print, so the card is picked up again
+        rather than doubled. Without the field, one shared tag as before.
+        """
+        base = self._notify_tag_base()
+        start = self._int_or_none((self.data or {}).get("printStartTime"))
+        return f"{base}_{start}_live" if start and start > 0 else f"{base}_live"
+
+    def _live_tag(self) -> str:
+        """The tag of the card on the phones, or failing one, of the current job.
+
+        Remembered from the card's START rather than recomputed: by the time
+        the card is cleared or replaced, a new job may already have moved
+        `printStartTime` on, and the old card would be left behind.
+        """
+        return self._live_tag_current or self._job_live_tag()
+
     def _notify_tag_base(self) -> str:
         """Stable tag prefix for this printer.
 
@@ -2428,7 +2464,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # no countdown, no action buttons. `build_event_payload` is what
             # leaves the bar out, for every flavour and on purpose.
             payload = build_event_payload(
-                tag=f"{tag_base}_live",
+                tag=self._live_tag(),
                 title=title,
                 message=message,
                 kind=kind,
@@ -2532,7 +2568,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         in its receive loop, so blocking on an HTTPS round trip would let
         `last_rx_monotonic()` go stale and flip every entity unavailable.
         """
-        clear = build_clear_payload(f"{self._notify_tag_base()}_live")
+        clear = build_clear_payload(self._live_tag())
         # The same live-capability gate the card itself was pushed under. A
         # macOS companion is skipped by `live_only`, so it never received the
         # card -- sending it the dismiss sentinel clears a tag it does not have,
