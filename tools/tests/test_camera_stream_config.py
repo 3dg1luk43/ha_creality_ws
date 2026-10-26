@@ -788,3 +788,111 @@ def test_no_go2rtc_snapshot_while_the_printers_endpoint_is_down():
     cam = _snapshot_camera(answering=False)
     asyncio.run(cam.async_camera_image())
     cam._go2rtc_client.get_jpeg_snapshot.assert_not_awaited()
+
+
+# --------------------------------------------------------------------------- #
+# go2rtc signalling over its WebSocket, with ICE servers and trickle (#134)
+# --------------------------------------------------------------------------- #
+
+
+class _FakeWs:
+    instances: list = []
+
+    def __init__(self, session, server_url, *, source=None):
+        self.session, self.server_url, self.source = session, server_url, source
+        self.sent, self.subscribers, self.closed = [], [], False
+        _FakeWs.instances.append(self)
+
+    def subscribe(self, callback):
+        self.subscribers.append(callback)
+
+    async def send(self, message):
+        self.sent.append(message)
+
+    async def close(self):
+        self.closed = True
+
+
+class _Offer:
+    def __init__(self, offer, ice_servers):
+        self.offer, self.ice_servers = offer, ice_servers
+
+
+class _Answer:
+    def __init__(self, sdp):
+        self.sdp = sdp
+
+
+class _Candidate:
+    def __init__(self, candidate):
+        self.candidate = candidate
+
+
+class _WsErr:
+    def __init__(self, error):
+        self.error = error
+
+
+def _ws_camera(monkeypatch):
+    from types import SimpleNamespace
+    import custom_components.ha_creality_ws.camera as camera_mod
+
+    for name, value in (
+        ("GO2RTC_WS_AVAILABLE", True), ("Go2RtcWsClient", _FakeWs), ("Go2RtcWsOffer", _Offer),
+        ("Go2RtcWsAnswer", _Answer), ("Go2RtcWsCandidate", _Candidate), ("Go2RtcWsError", _WsErr),
+    ):
+        monkeypatch.setattr(camera_mod, name, value, raising=False)
+    _FakeWs.instances = []
+    cam = _camera()
+    cam._ensure_stream_configured = AsyncMock()
+    cam._go2rtc_client = MagicMock()
+    cam._go2rtc_session = object()
+    cam._go2rtc_server_url = "http://localhost:11984/"
+    cam._stream_name = "creality_k2_1_2_3_4"
+    cam._log_negotiated_video_codec = lambda sdp, sid: None
+    cam.async_get_webrtc_client_configuration = lambda: SimpleNamespace(
+        configuration=SimpleNamespace(ice_servers=["stun:stun.home-assistant.io:3478"])
+    )
+    tasks = []
+    cam.hass = SimpleNamespace(async_create_task=lambda coro: tasks.append(coro))
+    return cam, tasks
+
+
+def test_a_go2rtc_offer_carries_the_frontends_ice_servers_and_trickles(monkeypatch):
+    """Over WHEP go2rtc got the SDP alone and answered with LAN addresses
+    only, so a phone outside the LAN never connected (#134)."""
+    import asyncio
+
+    cam, _tasks = _ws_camera(monkeypatch)
+    sent = []
+    asyncio.run(cam.async_handle_async_webrtc_offer("v=0 offer", "s1", lambda m: sent.append(m.as_dict())))
+
+    ws = _FakeWs.instances[0]
+    assert ws.source == "creality_k2_1_2_3_4"
+    offer = ws.sent[0]
+    assert (offer.offer, offer.ice_servers) == ("v=0 offer", ["stun:stun.home-assistant.io:3478"])
+    cam._go2rtc_client.webrtc.forward_whep_sdp_offer.assert_not_called()
+
+    for message in (_Answer("v=0 answer"), _Candidate("candidate:1 1 udp 1 203.0.113.9 4000 typ srflx")):
+        ws.subscribers[0](message)
+    assert sent == [
+        {"type": "answer", "answer": "v=0 answer"},
+        {"type": "candidate", "candidate": {"candidate": "candidate:1 1 udp 1 203.0.113.9 4000 typ srflx", "sdpMLineIndex": 0}},
+    ]
+
+
+def test_the_frontends_candidates_reach_go2rtc_and_closing_closes_its_socket(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    cam, tasks = _ws_camera(monkeypatch)
+    asyncio.run(cam.async_handle_async_webrtc_offer("v=0 offer", "s1", lambda m: None))
+    ws = _FakeWs.instances[0]
+    asyncio.run(cam.async_on_webrtc_candidate("s1", SimpleNamespace(candidate="candidate:2 1 udp 1 192.0.2.5 5000 typ host")))
+    assert [m.candidate for m in ws.sent[1:]] == ["candidate:2 1 udp 1 192.0.2.5 5000 typ host"]
+
+    cam.close_webrtc_session("s1")
+    assert "s1" not in cam._go2rtc_ws_sessions
+    for coro in tasks:
+        asyncio.run(coro)
+    assert ws.closed

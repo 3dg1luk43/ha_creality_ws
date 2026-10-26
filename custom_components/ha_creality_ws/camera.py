@@ -16,6 +16,7 @@ import json
 import logging
 import re
 from collections.abc import Callable
+from typing import Any
 
 from urllib.parse import urlparse
 
@@ -36,6 +37,23 @@ try:
 except ImportError:
     GO2RTC_CLIENT_AVAILABLE = False
     _LOGGER.warning("go2rtc-client library not available, WebRTC cameras will not work")
+
+# go2rtc's WebSocket signalling, as Home Assistant's own go2rtc provider uses it:
+# the offer carries the frontend's ICE servers and candidates trickle both ways.
+# The REST (WHEP) offer carries neither, so go2rtc answered with LAN addresses
+# only and a phone outside the LAN never connected (#134). Optional, so an old
+# go2rtc-client still gets the WHEP path.
+try:
+    from go2rtc_client.ws import (
+        Go2RtcWsClient,
+        WebRTCAnswer as Go2RtcWsAnswer,
+        WebRTCCandidate as Go2RtcWsCandidate,
+        WebRTCOffer as Go2RtcWsOffer,
+        WsError as Go2RtcWsError,
+    )
+    GO2RTC_WS_AVAILABLE = True
+except ImportError:
+    GO2RTC_WS_AVAILABLE = False
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
 
@@ -461,6 +479,11 @@ class CrealityWebRTCCamera(_BaseCamera):
 
         # Initialize go2rtc client (will be set up in async_added_to_hass)
         self._go2rtc_client: Go2RtcRestClient | None = None
+        # The session the REST client uses; WebSocket signalling reuses it
+        # (for Home Assistant's own go2rtc it carries the unix-socket connector).
+        self._go2rtc_session = None
+        # Live go2rtc WebSocket signalling sessions, by frontend session id (#134).
+        self._go2rtc_ws_sessions: dict[str, Any] = {}
         self._go2rtc_server_url: str | None = None
         self._go2rtc_version: str | None = None
         # Whether initialization ended up on HA's own go2rtc. A custom instance
@@ -710,6 +733,7 @@ class CrealityWebRTCCamera(_BaseCamera):
                     url += "/"
                     
                 self._go2rtc_client = Go2RtcRestClient(session, url)
+                self._go2rtc_session = session
                 self._go2rtc_server_url = url
                 self._go2rtc_is_ha_managed = False
                 self._go2rtc_fell_back_from_custom = False
@@ -754,6 +778,7 @@ class CrealityWebRTCCamera(_BaseCamera):
                 go2rtc_data.session,
                 go2rtc_data.url
             )
+            self._go2rtc_session = go2rtc_data.session
             self._go2rtc_server_url = go2rtc_data.url
             self._go2rtc_is_ha_managed = True
 
@@ -1183,6 +1208,10 @@ class CrealityWebRTCCamera(_BaseCamera):
             offer_sdp[:200] + "..." if len(offer_sdp) > 200 else offer_sdp,
         )
 
+        if GO2RTC_WS_AVAILABLE and self._go2rtc_session is not None:
+            await self._handle_go2rtc_ws_offer(offer_sdp, session_id, send_message)
+            return
+
         try:
             # Create offer object for go2rtc client
             offer = WebRTCSdpOffer(sdp=offer_sdp)
@@ -1260,6 +1289,58 @@ class CrealityWebRTCCamera(_BaseCamera):
             )
 
 
+
+    async def _handle_go2rtc_ws_offer(
+        self, offer_sdp: str, session_id: str, send_message
+    ) -> None:
+        """Signal go2rtc over its WebSocket, the way Home Assistant's provider does (#134).
+
+        The offer goes with the frontend's ICE servers, so go2rtc gathers
+        server-reflexive candidates too, and both sides' candidates trickle:
+        go2rtc's to the frontend as they come, the frontend's to go2rtc from
+        `async_on_webrtc_candidate`. Over WHEP neither happened, which left only
+        go2rtc's LAN addresses in the answer.
+        """
+        ws_client = Go2RtcWsClient(
+            self._go2rtc_session, self._go2rtc_server_url, source=self._stream_name
+        )
+        self._go2rtc_ws_sessions[session_id] = ws_client
+
+        @callback
+        def on_message(message) -> None:
+            if isinstance(message, Go2RtcWsAnswer):
+                self._log_negotiated_video_codec(message.sdp, session_id)
+                payload = {"type": "answer", "answer": message.sdp}
+                _LOGGER.info("ha_creality_ws: WebRTC offer handled successfully")
+            elif isinstance(message, Go2RtcWsCandidate):
+                payload = {
+                    "type": "candidate",
+                    "candidate": {"candidate": message.candidate, "sdpMLineIndex": 0},
+                }
+            elif isinstance(message, Go2RtcWsError):
+                _LOGGER.warning(
+                    "ha_creality_ws: go2rtc refused the WebRTC offer for stream '%s': %s",
+                    self._stream_name, message.error,
+                )
+                payload = {"type": "error", "message": f"go2rtc error: {message.error}"}
+            else:
+                return
+            send_message(self._wrap_send_message(payload))
+
+        ws_client.subscribe(on_message)
+        try:
+            config = self.async_get_webrtc_client_configuration()
+            await ws_client.send(Go2RtcWsOffer(offer_sdp, config.configuration.ice_servers))
+        except Exception as exc:  # pylint: disable=broad-except
+            _LOGGER.error(
+                "ha_creality_ws: go2rtc WebSocket offer failed for stream '%s': %s",
+                self._stream_name, exc, exc_info=True,
+            )
+            self._go2rtc_ws_sessions.pop(session_id, None)
+            self.hass.async_create_task(ws_client.close())
+            send_message(
+                self._wrap_send_message({"type": "error", "message": f"go2rtc error: {exc}"})
+            )
 
     async def _handle_direct_webrtc_offer(
         self, offer_sdp: str, session_id: str, send_message
@@ -1625,7 +1706,13 @@ class CrealityWebRTCCamera(_BaseCamera):
             _LOGGER.debug("ha_creality_ws: queued direct WebRTC candidate for session %s", session_id)
             return
 
-        # For go2rtc integration, candidates are handled internally
+        ws_client = self._go2rtc_ws_sessions.get(session_id)
+        if ws_client is not None:
+            # Trickled to go2rtc, which needs them to reach a phone behind NAT (#134).
+            await ws_client.send(Go2RtcWsCandidate(candidate.candidate))
+            return
+
+        # WHEP: go2rtc has the offer only, and learns the rest from ICE checks.
         _LOGGER.debug("ha_creality_ws: WebRTC candidate received for session %s", session_id)
 
     @callback
@@ -1640,6 +1727,8 @@ class CrealityWebRTCCamera(_BaseCamera):
         """
         _LOGGER.debug("ha_creality_ws: WebRTC session %s closed", session_id)
         self._direct_sessions.pop(session_id, None)
+        if (ws_client := self._go2rtc_ws_sessions.pop(session_id, None)) is not None:
+            self.hass.async_create_task(ws_client.close())
 
     @property
     def extra_state_attributes(self) -> dict:
