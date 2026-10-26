@@ -396,3 +396,50 @@ def test_a_colour_written_as_a_number_does_not_break_boxs_info():
     cfs.modify_material({"boxId": box_id, "id": 0, "color": 5})
     same = cfs.info()["boxsInfo"]["same_material"]
     assert same and same[0][1] == ""
+
+
+# aiortc's answer as the simulator produced it on the test box (R78): it sends 99.
+_AIORTC_ANSWER = "\r\n".join([
+    "v=0", "o=- 1 1 IN IP4 0.0.0.0", "s=-", "t=0 0", "a=group:BUNDLE 0",
+    "m=video 40105 UDP/TLS/RTP/SAVPF 99 101 100 102 97 98",
+    "c=IN IP4 0.0.0.0", "a=mid:0", "a=sendonly",
+    "a=rtpmap:99 H264/90000",
+    "a=fmtp:99 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f",
+    "a=rtpmap:101 H264/90000",
+    "a=fmtp:101 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
+    "a=rtpmap:100 rtx/90000", "a=fmtp:100 apt=99",
+    "a=rtpmap:102 rtx/90000", "a=fmtp:102 apt=101",
+    "a=rtpmap:97 VP8/90000", "a=rtpmap:98 rtx/90000", "a=fmtp:98 apt=97", "",
+])
+
+
+def _go2rtc_creality_fix(sdp):
+    """What go2rtc 1.9.14 does to a creality answer (`fixCrealitySDP` in
+    internal/webrtc/client_creality.go): drop the first video format and its
+    rtpmap/fmtp, and any x-google fmtp. Third-party behaviour, as the oracle."""
+    lines = sdp.split("\r\n")
+    m = next(i for i, line in enumerate(lines) if line.startswith("m=video "))
+    fields = lines[m].split(" ")
+    skip = fields[3]
+    lines[m] = " ".join(fields[:3] + fields[4:])
+    return [
+        line for line in lines
+        if not (line.startswith(("a=fmtp:", "a=rtpmap:")) and (line.split(":", 1)[1].startswith(skip) or "x-google" in line))
+    ]
+
+
+def test_go2rtc_keeps_the_codec_the_simulator_sends():
+    """go2rtc drops the first codec of a creality answer, because a real K1C
+    lists 96 first and streams 101. aiortc lists the codec it sends first, so
+    go2rtc dropped that one and counted no packets (R78)."""
+    from simulator.sdp import creality_answer
+
+    before = _go2rtc_creality_fix(_AIORTC_ANSWER)
+    assert "a=rtpmap:99 H264/90000" not in before  # the bug: the codec in use is gone
+
+    shaped = creality_answer(_AIORTC_ANSWER)
+    assert "m=video 40105 UDP/TLS/RTP/SAVPF 96 99 101 100 102 97 98" in shaped
+    after = _go2rtc_creality_fix(shaped)
+    assert "a=rtpmap:99 H264/90000" in after and "a=rtpmap:96 H264/90000" not in after
+    assert next(line for line in after if line.startswith("m=video ")).endswith(" 99 101 100 102 97 98")
+    assert "\n" not in shaped.replace("\r\n", "")

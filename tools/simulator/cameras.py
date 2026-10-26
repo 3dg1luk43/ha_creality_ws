@@ -33,6 +33,8 @@ from aiortc.contrib.media import MediaBlackhole
 from . import media
 from .h264_timing import assign_clip_timestamps
 
+from .sdp import creality_answer
+
 LOGGER = logging.getLogger("simulator.cameras")
 
 CALL_PATH = "/call/webrtc_local"
@@ -496,6 +498,9 @@ class WebRtcSignalling:
         # Normalize to CRLF for maximum SDP parser compatibility
         if "\r\n" not in answer_sdp:
             answer_sdp = answer_sdp.replace("\n", "\r\n")
+        # The printer lists a payload type it never sends first, and go2rtc's
+        # creality source drops the first codec on that assumption (R78).
+        answer_sdp = creality_answer(answer_sdp)
         # Basic validation: SDP must start with v=0
         if not answer_sdp.startswith("v=0"):
             LOGGER.error("Generated invalid SDP (head=%r)", answer_sdp[:16])

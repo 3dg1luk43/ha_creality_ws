@@ -19,7 +19,6 @@ Still open:
 
 - G-code listings over 1 MiB, and multi-material listing entries.
 - The K1C 2025 RTP payload-type quirk.
-- WebRTC through go2rtc on the test box (R78).
 - `reqProbedMatrix` values are synthetic.
 - No captured K2, Hi or CFS frames exist, so those profiles follow the issue reports. Paths: SIM = the simulator, INT = `custom_components/ha_creality_ws/`, TB = `tools/testbox/`, CAP = `tools/test_files/` (gitignored real-printer captures; never copied into tracked files).
 
