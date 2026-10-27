@@ -2658,6 +2658,16 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if last is not None and last[0] == tag:
             del self._ios_starts[target]
 
+    def _forget_unsent_ios_start(self, target: str, payload: dict[str, Any]) -> None:
+        """A live push that failed started no card, so the next one may.
+
+        While a start waits, every other push on its tag is held, so the record
+        under that tag is this push's own.
+        """
+        data = payload.get("data") or {}
+        if data.get("live_update"):
+            self._forget_ios_start(target, data.get("tag"))
+
     def _replace_card_with(self, payload: dict[str, Any], *, kind: str) -> None:
         """Dismiss the live card and post `payload` in its place, in that order.
 
@@ -2869,9 +2879,11 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except HomeAssistantError as err:
             # Rejected by the notify platform: one line, not a traceback.
             _LOGGER.warning("Notification to %s was refused: %s", target, err)
+            self._forget_unsent_ios_start(target, payload)
         except Exception:  # pylint: disable=broad-except
             # One unreachable phone must not starve the others.
             _LOGGER.exception("Failed to send notification to %s", target)
+            self._forget_unsent_ios_start(target, payload)
 
     async def _poll_moonraker_extras(self):
         """Poll Moonraker for missing telemetry fields (e.g. chamber target)."""

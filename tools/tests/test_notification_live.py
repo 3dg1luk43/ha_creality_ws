@@ -1815,6 +1815,27 @@ def test_a_start_without_a_token_is_repeated_after_a_wait_that_doubles():
     assert sent == [0.0, first_retry, first_retry + 2 * NOTIFY_LIVE_IOS_RESTART_SECS]
 
 
+def test_a_start_the_notify_call_refused_does_not_hold_the_next_refresh():
+    """A start that failed left no card, so holding the refreshes behind it
+    kept the iPhone without one for NOTIFY_LIVE_IOS_RESTART_SECS (R99)."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    iphone = "notify.mobile_app_iphone"
+    for error in (HomeAssistantError("refused"), RuntimeError("unreachable")):
+        coord, hass = _coordinator(targets=(iphone,))
+        _iphone_tokens(coord, hass)
+
+        async def _fail(domain, service, data, **_kw):
+            raise error
+
+        ok = hass.services.async_call
+        hass.services.async_call = _fail
+        _frame_calls(coord, hass, **_printing(5))
+        hass.services.async_call = ok
+        hass.loop.advance(NOTIFY_LIVE_INTERVAL_SECS + 1)
+        assert len(_live_pushes_to(_frame_calls(coord, hass, **_printing(10)), iphone)) == 1
+
+
 def test_an_iphone_on_local_push_or_an_older_core_gets_every_refresh():
     """On local push the app starts and updates the card itself, and a core
     without Live Activity tokens cannot tell: neither is held."""

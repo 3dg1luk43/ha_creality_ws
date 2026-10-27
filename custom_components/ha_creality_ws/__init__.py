@@ -494,8 +494,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
             new_data = dict(entry.data)
             new_data["_device_info_cached"] = True
-            new_data["_cached_version"] = current_version
-            
+            # A direct-WebRTC verdict due its retry (#134) keeps the old
+            # version, so the first start the printer answers at re-detects it.
+            cached_camera = new_data.get("_cached_camera_type")
+            if camera_type_to_keep(cached_camera, cached_version) == cached_camera:
+                new_data["_cached_version"] = current_version
+
             # Only set defaults if this is first-time setup (no cached model exists)
             if not new_data.get("_cached_model"):
                 new_data["_cached_model"] = PLACEHOLDER_MODEL
