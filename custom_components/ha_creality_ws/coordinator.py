@@ -1567,21 +1567,25 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         return NotifyVisuals(preview_url=preview_url, snapshot_url=snapshot_url)
 
-    @staticmethod
-    def _picture_version(state: Any) -> str:
-        """`?v=` and when the preview last changed, or nothing when unknown.
+    def _picture_version(self, state: Any) -> str:
+        """`?v=`, the job and when the preview last changed, or nothing when unknown.
 
         The image entity's state is the time its picture last changed. iOS
         caches an attachment by its URL, and this one used to be the same for
         every print, so a finished print showed an earlier print's thumbnail
         (#131). Keyed to the picture rather than the clock: the card's refreshes
         during one job keep one URL, and the phone fetches the picture once.
+        The job's `printStartTime` (R98) goes in too: entities update after
+        notifications, and while printing only at the polling rate, so a
+        reprint's first card could be built before the entity saw the job.
         """
+        start = self._int_or_none((self.data or {}).get("printStartTime"))
+        job = f"{start}-" if start and start > 0 else ""
         try:
             changed = datetime.fromisoformat(str(getattr(state, "state", "")))
         except ValueError:
-            return ""
-        return f"?v={int(changed.timestamp())}"
+            return f"?v={start}" if job else ""
+        return f"?v={job}{int(changed.timestamp())}"
 
     def _notify_links(self) -> NotifyLinks:
         """Tap targets, sent as both dialects at once.

@@ -284,7 +284,7 @@ Live card (`notification_rules.py:983-1080`):
 | `progress_bar_direction`, `progress_bar_color`, `notification_icon_color` | `increasing`, phase colour | `live_update` (`1055-1057`) |
 | `chronometer`, `when` | `True`, epoch seconds | `live_update`, not paused, ETA known (`1058-1061`) |
 | `chronometer`, `critical_text` | `False`, status word | `live_update` otherwise (`1062-1071`) |
-| `icon_url` | `/api/image_proxy/<image entity>?v=<picture epoch>` (#131) | preview usable (`1076-1077`, `coordinator.py:1275-1280`) |
+| `icon_url` | `/api/image_proxy/<image entity>?v=<printStartTime>-<picture epoch>` (#131; without `printStartTime`, the epoch alone) | preview usable (`1076-1077`, `coordinator.py:1275-1280`) |
 | `group`, `clickAction`, `url`, `actions` | see 6, 9 | `_apply_common` (`931-948`) |
 
 Terminal and finishing-soon banner (`notification_rules.py:1119-1141`): `tag, notification_icon, notification_icon_color, color, channel, importance: high, push.interruption-level: time-sensitive, activity: end` (terminal only), `icon_url, image` (snapshot `/api/camera_proxy/<camera>` when `snapshot_supported`, `coordinator.py:1282-1288`), `group, clickAction, url`. No progress keys, no `alert_once`, no actions (`notification_rules.py:1096-1117`).

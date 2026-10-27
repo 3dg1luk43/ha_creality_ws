@@ -115,6 +115,20 @@ def test_a_notification_versions_the_preview_by_when_the_picture_changed():
     ]
 
 
+def test_a_reprints_first_card_is_versioned_by_its_job():
+    """Entities update after notifications, and while printing only at the
+    polling rate, so a reprint's first card could go out while the image
+    entity still held the last job's version."""
+    coord = _coordinator({**PRINTING, "printStartTime": 1792915251})
+    coord._notify_preview_image = True
+    state = SimpleNamespace(state="2026-10-25T08:11:01.603232+00:00", attributes={"preview_reason": "ok"})
+    coord._live_entity_state = lambda platform, suffix: ("image.k1c_preview", state)
+    first = coord._notify_media(include_snapshot=False).preview_url
+    assert first == "/api/image_proxy/image.k1c_preview?v=1792915251-1792915861"
+    coord.data["printStartTime"] = 1792915744
+    assert coord._notify_media(include_snapshot=False).preview_url != first
+
+
 class _Response:
     def __init__(self, body):
         self.status = 200
