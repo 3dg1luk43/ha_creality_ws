@@ -150,6 +150,10 @@ WEBRTC_PROBE_TTL = 5.0
 WEBRTC_PROBE_TIMEOUT = 3.0
 SNAPSHOT_BACKOFF_START = 30.0
 SNAPSHOT_BACKOFF_MAX = 600.0
+# Silent strikes further apart than this are separate moments, not one lasting
+# silence: a printer booting twice an evening apart (#134). With a dashboard
+# open, the back-off above still checks at least this often.
+NO_VIDEO_STRIKE_GAP = 2 * SNAPSHOT_BACKOFF_MAX
 
 class _BaseCamera(KEntity, Camera):
     """Base camera class with common functionality and fallback image support.
@@ -474,6 +478,7 @@ class CrealityWebRTCCamera(_BaseCamera):
         self._on_no_video: Callable[[], None] | None = None
         self._silent_snapshots = 0
         self._silent_since = 0.0
+        self._silent_last = 0.0
         self._fell_back = False
         self._video_check_pending = False
 
@@ -1007,8 +1012,11 @@ class CrealityWebRTCCamera(_BaseCamera):
             self._silent_snapshots = 0
             return
         now = _monotonic()
+        if self._silent_snapshots and now - self._silent_last > NO_VIDEO_STRIKE_GAP:
+            self._silent_snapshots = 0
         if self._silent_snapshots == 0:
             self._silent_since = now
+        self._silent_last = now
         self._silent_snapshots += 1
         if (
             self._silent_snapshots < NO_VIDEO_STRIKES

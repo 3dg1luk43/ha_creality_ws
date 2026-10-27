@@ -653,6 +653,14 @@ def test_a_short_silence_does_not_move_the_camera_for_good():
     assert _strikes([False] * 6, step=120) == 1
 
 
+def test_two_silent_moments_an_hour_apart_are_not_lasting_silence():
+    """With the printer off in between, no snapshot runs and nothing clears the
+    first strike, so a silent boot an hour later was taken for ten minutes of
+    silence (#134)."""
+    assert _strikes([False, False], step=3600) == 0
+    assert _strikes([False, False, False], step=3600) == 0
+
+
 def test_one_silent_moment_or_a_dark_printer_moves_nothing():
     assert _strikes([False]) == 0
     # Video arrived in between: the count starts again.

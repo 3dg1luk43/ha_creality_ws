@@ -81,6 +81,24 @@ def test_a_new_job_drops_the_old_picture_and_tells_the_frontend():
     assert writes, "the state was not written"
 
 
+def test_a_reprint_of_the_same_file_is_a_new_job_too():
+    """The K1C trace in fixtures/k1c_print_start.jsonl reprints its file: only
+    `printStartTime` moves. The preview kept the last job's version, so the
+    notification could carry a picture iOS had cached for it (#131)."""
+    coord = _coordinator({**PRINTING, "printStartTime": 1792915251})
+    image = CurrentPrintPreviewImage(coord)
+    image.async_write_ha_state = lambda: None
+    image._handle_coordinator_update()
+    image._last_image = b"last job's preview"
+    before = image._attr_image_last_updated
+
+    coord.data["printStartTime"] = 1792915744
+    image._handle_coordinator_update()
+
+    assert image._last_image is None
+    assert image._attr_image_last_updated != before
+
+
 def test_a_notification_versions_the_preview_by_when_the_picture_changed():
     """iOS caches an attachment by URL, and the URL was the same for every
     print, so a finished print showed an earlier print's thumbnail (#131)."""

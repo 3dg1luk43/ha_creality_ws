@@ -57,7 +57,7 @@ class CurrentPrintPreviewImage(KEntity, ImageEntity):
         self._last_source_url: str | None = None
         self._last_fetch_ts: float = 0.0
         self._min_fetch_interval: float = 5.0  # seconds
-        self._last_job_name: str | None = None
+        self._last_job: tuple[str, Any] | None = None
 
     def _status_allows_preview(self) -> bool:
         """Whether there is a print whose preview is worth fetching.
@@ -95,18 +95,23 @@ class CurrentPrintPreviewImage(KEntity, ImageEntity):
         The timestamp only moved when bytes were fetched, so a dashboard kept
         the previous job's picture until the access token rotated, and the
         idle-time `preview_reason` of "not_printing" outlived the job start
-        (R27). A new file drops both, and the new timestamp makes the frontend
-        fetch this job's preview straight away.
+        (R27). A new job drops both, and the new timestamp makes the frontend
+        fetch this job's preview straight away. A reprint of the same file is a
+        new job too, sliced again maybe, and printers that date their jobs give
+        it a new `printStartTime` (R98); without one, it kept the last version,
+        so a notification could carry a picture iOS had cached for it (#131).
         """
-        name = ((self.coordinator.data or {}).get("printFileName") or "").strip()
-        if name and name != self._last_job_name:
-            if self._last_job_name is not None:
+        d = self.coordinator.data or {}
+        name = (d.get("printFileName") or "").strip()
+        job = (name, d.get("printStartTime"))
+        if name and job != self._last_job:
+            if self._last_job is not None:
                 self._last_image = None
                 self._last_reason = None
                 self._last_source_url = None
                 self._last_fetch_ts = 0.0
                 self._attr_image_last_updated = dt_util.utcnow()
-            self._last_job_name = name
+            self._last_job = job
         super()._handle_coordinator_update()
 
     @property
