@@ -870,6 +870,9 @@ class CrealityWebRTCCamera(_BaseCamera):
                 now = asyncio.get_running_loop().time()
                 if self._last_frame and (now - self._last_snapshot_ts) < self._snapshot_min_interval:
                     return self._last_frame
+                # And the hold-off: the call ahead of this one may have just failed.
+                if now < self._snapshot_retry_at:
+                    return await self._fallback_image()
 
                 # Use go2rtc client to get snapshot
                 _LOGGER.debug("ha_creality_ws: requesting snapshot from go2rtc for stream: %s", self._stream_name)
@@ -1339,6 +1342,10 @@ class CrealityWebRTCCamera(_BaseCamera):
                     "ha_creality_ws: go2rtc refused the WebRTC offer for stream '%s': %s",
                     self._stream_name, message.error,
                 )
+                # go2rtc lost the stream (it restarted): the next offer adds it
+                # again, as the WHEP path's recovery does.
+                if "stream not found" in str(message.error).lower():
+                    self._force_recreate_stream = True
                 payload = {"type": "error", "message": f"go2rtc error: {message.error}"}
             else:
                 return

@@ -799,6 +799,27 @@ def test_a_snapshot_home_assistant_cancels_holds_off_the_next_too():
     assert asyncio.run(run()) > 25
 
 
+def test_a_snapshot_queued_behind_a_failing_one_does_not_dial_too():
+    """Both passed the hold-off check before the first failed; the second
+    dialled go2rtc as soon as it got the lock (#133)."""
+    import asyncio
+    import custom_components.ha_creality_ws.camera as camera_mod
+
+    cam = _snapshot_camera()
+
+    async def fail(**_kw):
+        await asyncio.sleep(0)
+        raise camera_mod.Go2RtcClientError()
+
+    cam._go2rtc_client.get_jpeg_snapshot = AsyncMock(side_effect=fail)
+
+    async def run():
+        await asyncio.gather(cam.async_camera_image(), cam.async_camera_image())
+
+    asyncio.run(run())
+    assert cam._go2rtc_client.get_jpeg_snapshot.await_count == 1
+
+
 def test_no_go2rtc_snapshot_while_the_printers_endpoint_is_down():
     import asyncio
 
@@ -913,3 +934,18 @@ def test_the_frontends_candidates_reach_go2rtc_and_closing_closes_its_socket(mon
     for coro in tasks:
         asyncio.run(coro)
     assert ws.closed
+
+
+def test_a_stream_go2rtc_lost_is_added_again_at_the_next_offer(monkeypatch):
+    """go2rtc forgets the streams added over its API when it restarts. WHEP
+    recovered at the next offer; the WebSocket path kept the stale name, so
+    every offer failed until Home Assistant restarted."""
+    import asyncio
+
+    cam, _tasks = _ws_camera(monkeypatch)
+    cam._force_recreate_stream = False
+    asyncio.run(cam.async_handle_async_webrtc_offer("v=0 offer", "s1", lambda m: None))
+    _FakeWs.instances[0].subscribers[0](_WsErr("webrtc: unsupported codec"))
+    assert cam._force_recreate_stream is False
+    _FakeWs.instances[0].subscribers[0](_WsErr("stream not found"))
+    assert cam._force_recreate_stream is True
