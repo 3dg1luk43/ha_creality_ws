@@ -1966,8 +1966,20 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return not self._material_flag_stale and self._job_state() == "paused"
 
     def filament_runout(self) -> bool:
-        """The Filament Status sensor's "runout", by the notification's rule."""
-        return self._runout_reported(self.data or {})
+        """The Filament Status sensor's "runout": the flag, unless shown false.
+
+        Only the alert needs a paused job on a printer without the runout
+        sensor, so as not to alert on a flag nothing confirms. The sensor
+        reports the flag, idle after a cancelled runout included, except where
+        it is shown false: the sensor says 0, or the flag is a latch (R82).
+        """
+        d = self.data or {}
+        if not self._material_flag(d):
+            return False
+        sensor = safe_float(d.get("materialDetector1"))
+        if sensor is not None:
+            return sensor == 1
+        return not self._material_flag_stale
 
     def _notify_action_ids(self) -> dict[str, str]:
         """Action ids for this printer, namespaced by config entry."""

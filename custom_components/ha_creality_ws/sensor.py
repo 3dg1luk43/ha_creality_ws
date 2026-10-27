@@ -364,7 +364,7 @@ class KMappedSensor(KEntity, SensorEntity):
 
 
 class FilamentStatusSensor(KMappedSensor):
-    """`materialStatus`, with "runout" decided by the runout notification's rule.
+    """`materialStatus`, with "runout" dropped where the flag is shown false.
 
     A K1C keeps the flag up through whole prints with filament loaded, so the
     raw mapping read "runout" from the first print after boot until power-off

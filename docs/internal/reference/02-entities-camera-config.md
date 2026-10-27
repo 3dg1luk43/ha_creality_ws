@@ -93,7 +93,7 @@ Unique id is always `<host>-<key>`. "Default" availability is the `KEntity` rule
 
 | key | translation_key | Source | Values | Category | Notes |
 |---|---|---|---|---|---|
-| `filament_status` | `filament_status` | `materialStatus` | `0 -> normal`, `1 -> runout` only when `coordinator.filament_runout()` agrees (`materialDetector1` 1 where reported, else a paused job with the flag not a latch; R82), else `normal`; anything else or missing -> `None` | DIAGNOSTIC | `FilamentStatusSensor`; icon `mdi:printer-3d-nozzle-alert`; ENUM with options from the mapping (R36) |
+| `filament_status` | `filament_status` | `materialStatus` | `0 -> normal`, `1 -> runout` only when `coordinator.filament_runout()` agrees (`materialDetector1` 1 where reported, else the flag unless it is a latch; R82; the alert's paused-job requirement is not applied to the sensor), else `normal`; anything else or missing -> `None` | DIAGNOSTIC | `FilamentStatusSensor`; icon `mdi:printer-3d-nozzle-alert`; ENUM with options from the mapping (R36) |
 
 ### 4.3 Job and status sensors (always created, `sensor.py:1119-1126`)
 
