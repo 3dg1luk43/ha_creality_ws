@@ -1236,8 +1236,11 @@ class CrealityWebRTCCamera(_BaseCamera):
             offer_sdp[:200] + "..." if len(offer_sdp) > 200 else offer_sdp,
         )
 
-        if GO2RTC_WS_AVAILABLE and self._go2rtc_session is not None:
-            await self._handle_go2rtc_ws_offer(offer_sdp, session_id, send_message)
+        if (
+            GO2RTC_WS_AVAILABLE
+            and self._go2rtc_session is not None
+            and await self._handle_go2rtc_ws_offer(offer_sdp, session_id, send_message)
+        ):
             return
 
         try:
@@ -1320,7 +1323,7 @@ class CrealityWebRTCCamera(_BaseCamera):
 
     async def _handle_go2rtc_ws_offer(
         self, offer_sdp: str, session_id: str, send_message
-    ) -> None:
+    ) -> bool:
         """Signal go2rtc over its WebSocket, the way Home Assistant's provider does (#134).
 
         The offer goes with the frontend's ICE servers, so go2rtc gathers
@@ -1328,6 +1331,10 @@ class CrealityWebRTCCamera(_BaseCamera):
         go2rtc's to the frontend as they come, the frontend's to go2rtc from
         `async_on_webrtc_candidate`. Over WHEP neither happened, which left only
         go2rtc's LAN addresses in the answer.
+
+        False when the offer never reached go2rtc, for the caller to try WHEP:
+        a go2rtc behind a proxy that does not pass WebSocket upgrades answered
+        over WHEP before this path existed.
         """
         ws_client = Go2RtcWsClient(
             self._go2rtc_session, self._go2rtc_server_url, source=self._stream_name
@@ -1364,15 +1371,14 @@ class CrealityWebRTCCamera(_BaseCamera):
             config = self.async_get_webrtc_client_configuration()
             await ws_client.send(Go2RtcWsOffer(offer_sdp, config.configuration.ice_servers))
         except Exception as exc:  # pylint: disable=broad-except
-            _LOGGER.error(
-                "ha_creality_ws: go2rtc WebSocket offer failed for stream '%s': %s",
-                self._stream_name, exc, exc_info=True,
+            _LOGGER.warning(
+                "ha_creality_ws: go2rtc WebSocket offer failed for stream '%s', trying WHEP: %s",
+                self._stream_name, exc,
             )
             self._go2rtc_ws_sessions.pop(session_id, None)
             self.hass.async_create_task(ws_client.close())
-            send_message(
-                self._wrap_send_message({"type": "error", "message": f"go2rtc error: {exc}"})
-            )
+            return False
+        return True
 
     async def _handle_direct_webrtc_offer(
         self, offer_sdp: str, session_id: str, send_message

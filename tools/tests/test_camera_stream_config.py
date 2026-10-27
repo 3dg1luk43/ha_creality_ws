@@ -957,3 +957,28 @@ def test_a_stream_go2rtc_lost_is_added_again_at_the_next_offer(monkeypatch):
     assert cam._force_recreate_stream is False
     _FakeWs.instances[0].subscribers[0](_WsErr("stream not found"))
     assert cam._force_recreate_stream is True
+
+
+def test_an_offer_the_websocket_cannot_carry_goes_over_whep(monkeypatch):
+    """A go2rtc behind a proxy that does not pass WebSocket upgrades answered
+    over WHEP before the WebSocket path; the failed connect ended the offer
+    with an error instead."""
+    import asyncio
+    from types import SimpleNamespace
+
+    cam, tasks = _ws_camera(monkeypatch)
+
+    async def refuse(self, message):
+        raise OSError("WebSocket upgrade refused")
+
+    monkeypatch.setattr(_FakeWs, "send", refuse)
+    cam._go2rtc_client.webrtc.forward_whep_sdp_offer = AsyncMock(
+        return_value=SimpleNamespace(sdp="v=0 whep answer")
+    )
+    sent = []
+    asyncio.run(cam.async_handle_async_webrtc_offer("v=0 offer", "s1", lambda m: sent.append(m.as_dict())))
+    assert sent == [{"type": "answer", "answer": "v=0 whep answer"}]
+    assert "s1" not in cam._go2rtc_ws_sessions
+    for coro in tasks:
+        asyncio.run(coro)
+    assert _FakeWs.instances[0].closed
