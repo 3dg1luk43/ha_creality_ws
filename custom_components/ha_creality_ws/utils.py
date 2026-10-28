@@ -311,8 +311,9 @@ class ModelDetection:
     # Klipper output_pin name per model for LED brightness (SET_PIN dimming).
     # Keys are ModelDetection boolean-attribute names (evaluated in order); the
     # value is the Klipper output_pin name. Extend this to enable dimming for
-    # more models, e.g. add "is_k2_base": "LED" once its PWM support is confirmed.
+    # more models.
     LED_PIN_BY_MODEL: ClassVar[dict[str, str]] = {
+        "is_k2_base": "LED",
         "is_k2_pro": "LED",
         "is_k2_plus": "LED",
     }

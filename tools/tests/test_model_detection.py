@@ -63,3 +63,11 @@ def test_model_detection_cases():
             else:
                 # Expect boolean flags to match exactly
                 assert getattr(md, key) == val, f"Expected {key}=={val} for {inp}, got {getattr(md, key)}"
+
+
+def test_every_k2_dims_its_light_on_the_led_pin():
+    """#136: the base K2 dims its light the way the K2 Pro and K2 Plus do."""
+    for code in ("F021", "F012", "F008"):
+        md = ModelDetection({"model": code})
+        assert (md.has_brightness_control, md.led_pin) == (True, "LED"), code
+    assert ModelDetection({"model": "K1C"}).led_pin is None

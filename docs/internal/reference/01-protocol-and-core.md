@@ -132,7 +132,7 @@ All are compact JSON (`separators=(",", ":")`, `ws_client.py:530`) sent through 
 | `{"method":"set","params":{"boxTempControl":N}}` | `number.py:286` | chamber target |
 | `{"method":"set","params":{"setFeedratePct":N}}` + `{"setFlowratePct":N}` | `number.py:153-154` | one slider drives both |
 | `{"method":"set","params":{"lightSw":0|1}}` | `light.py:94`, `:108`, `:116` | |
-| `{"method":"set","params":{"gcodeCmd":"SET_PIN PIN=LED VALUE=0.xxxx"}}` | `light.py:110` | K2 Pro / K2 Plus dimming (`utils.py:202-205`) |
+| `{"method":"set","params":{"gcodeCmd":"SET_PIN PIN=LED VALUE=0.xxxx"}}` | `light.py:110` | K2 / K2 Pro / K2 Plus dimming (`utils.py:202-205`) |
 | `{"method":"set","params":{"gcodeCmd":"M106 P<ch> S<0-255>"}}` | `fan.py:63` | fans |
 | `{"method":"set","params":{"modifyMaterial":{boxId,id,type,...}}}` | `__init__.py:646` | `set_cfs_material` service; payload from `utils.py:594-674` |
 
@@ -337,7 +337,7 @@ Built from a telemetry dict (`model`, `modelVersion`, `webrtcSupport`).
 - K1 variants by substring of the lower-cased `model`: `k1 se`, `cr-k1 max`, `k1c`, base `cr-k1` or exactly `k1` (`:220-233`); family is any of those or `"k1" in model` (`:274-280`).
 - K2 by board code in `model` or upper-cased `modelVersion`: `F021` base, `F012` Pro, `F008` Plus (`:236-238`); family also matches `"k2" in model` (`:283-288`).
 - Ender-3 V3 KE `F005`, Plus `F002`, plain `F001` (`:241-264`); Creality Hi `F018` or `"hi" in model` (`:267-270`, a broad substring).
-- Capabilities: chamber control = K2 family (`:300`); chamber sensor = K1 base/C/Max or K2, not Ender, not K1 SE (`:306-308`); light = not K1 SE, not Ender (`:313`); LED dimming pin `LED` for K2 Pro/Plus (`:202-205`, `:315-319`). `box_*` names are back-compat aliases.
+- Capabilities: chamber control = K2 family (`:300`); chamber sensor = K1 base/C/Max or K2, not Ender, not K1 SE (`:306-308`); light = not K1 SE, not Ender (`:313`); LED dimming pin `LED` for K2/Pro/Plus (`:202-205`, `:315-319`). `box_*` names are back-compat aliases.
 - `resolved_model()` prefers the friendly `model`, then a canonical name from codes, then `"K by Creality"` (`:346-357`).
 
 ### 6.2 Cache in `entry.data` (`__init__.py:239-410`)

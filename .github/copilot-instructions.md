@@ -63,7 +63,7 @@ Use `ModelDetection` which reads both `model` and `modelVersion` codes.
 - Capabilities by model:
   - Box temperature sensor: K1 (except K1 SE), K2; not present on Creality Hi
   - Box temperature control: K2 family (K2, K2 Pro, K2 Plus); not present on Creality Hi
-  - Light: All except K1 SE and Ender 3 V3 family; dimmable on K2 Pro and K2 Plus
+  - Light: All except K1 SE and Ender 3 V3 family; dimmable on the K2 family (K2, K2 Pro, K2 Plus)
   - Camera types (`detect_camera_type`): WebRTC for the K2 family and any printer reporting `webrtcSupport: 1` (K1C/K1 Max firmware 1.3.5.22); MJPEG optional (K1 SE, Ender 3 V3); MJPEG otherwise
 - `resolved_model()` is the cached model (what the Model sensor shows); `display_model()` is the device page's name and model id ("K2 Pro", "F012").
 

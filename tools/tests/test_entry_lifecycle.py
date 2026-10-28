@@ -176,6 +176,22 @@ def test_an_upgrade_with_the_printer_off_keeps_the_direct_webrtc_retry(monkeypat
     assert data["_cached_version"] == "0.9.10"
 
 
+def test_a_k2_cached_without_a_dimmer_gets_one_with_the_printer_off(monkeypatch):
+    """#136: a base K2 cached before its light was known to dim has its pin
+    cached as None. A start with the printer switched off stamps the new
+    version, so only the cached model can give it the dimmer."""
+    data = _setup_switched_off(
+        monkeypatch, {"_cached_version": "0.9.9", "_cached_model": "F021",
+                      "_cached_camera_type": "webrtc"}
+    )
+    assert data["_cached_has_brightness_control"] is True
+    assert data["_cached_led_pin"] == "LED"
+
+    data = _setup_switched_off(monkeypatch, {"_cached_version": "0.9.9"})
+    assert data["_cached_has_brightness_control"] is False
+    assert data["_cached_led_pin"] is None
+
+
 def _unload(platforms_ok):
     order: list[str] = []
     coord = FakeCoordinator(None)
