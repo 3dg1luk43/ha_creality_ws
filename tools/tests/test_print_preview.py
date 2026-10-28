@@ -79,3 +79,89 @@ def test_a_new_job_drops_the_old_picture_and_tells_the_frontend():
     assert image._last_reason is None
     assert image._attr_image_last_updated != before
     assert writes, "the state was not written"
+
+
+def test_a_reprint_of_the_same_file_is_a_new_job_too():
+    """The K1C trace in fixtures/k1c_print_start.jsonl reprints its file: only
+    `printStartTime` moves. The preview kept the last job's version, so the
+    notification could carry a picture iOS had cached for it (#131)."""
+    coord = _coordinator({**PRINTING, "printStartTime": 1792915251})
+    image = CurrentPrintPreviewImage(coord)
+    image.async_write_ha_state = lambda: None
+    image._handle_coordinator_update()
+    image._last_image = b"last job's preview"
+    before = image._attr_image_last_updated
+
+    coord.data["printStartTime"] = 1792915744
+    image._handle_coordinator_update()
+
+    assert image._last_image is None
+    assert image._attr_image_last_updated != before
+
+
+def test_a_notification_versions_the_preview_by_when_the_picture_changed():
+    """iOS caches an attachment by URL, and the URL was the same for every
+    print, so a finished print showed an earlier print's thumbnail (#131)."""
+    coord = _coordinator(PRINTING)
+    coord._notify_preview_image = True
+    urls = []
+    for changed in ("2026-10-25T08:11:01.603232+00:00", "2026-10-25T08:47:07.071244+00:00"):
+        state = SimpleNamespace(state=changed, attributes={"preview_reason": "ok"})
+        coord._live_entity_state = lambda platform, suffix, state=state: ("image.k1c_preview", state)
+        urls.append(coord._notify_media(include_snapshot=False).preview_url)
+    assert urls == [
+        "/api/image_proxy/image.k1c_preview?v=1792915861",
+        "/api/image_proxy/image.k1c_preview?v=1792918027",
+    ]
+
+
+def test_a_reprints_first_card_is_versioned_by_its_job():
+    """Entities update after notifications, and while printing only at the
+    polling rate, so a reprint's first card could go out while the image
+    entity still held the last job's version."""
+    coord = _coordinator({**PRINTING, "printStartTime": 1792915251})
+    coord._notify_preview_image = True
+    state = SimpleNamespace(state="2026-10-25T08:11:01.603232+00:00", attributes={"preview_reason": "ok"})
+    coord._live_entity_state = lambda platform, suffix: ("image.k1c_preview", state)
+    first = coord._notify_media(include_snapshot=False).preview_url
+    assert first == "/api/image_proxy/image.k1c_preview?v=1792915251-1792915861"
+    coord.data["printStartTime"] = 1792915744
+    assert coord._notify_media(include_snapshot=False).preview_url != first
+
+
+class _Response:
+    def __init__(self, body):
+        self.status = 200
+        self._body = body
+
+    async def read(self):
+        return self._body
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+def test_fetching_the_same_picture_again_keeps_its_version(monkeypatch):
+    """The state moved on every fetch, so each phone that downloaded the
+    preview re-keyed the URL the next notification carried (#131)."""
+    import asyncio
+
+    from custom_components.ha_creality_ws import image as image_mod
+
+    bodies = [b"benchy", b"benchy", b"benchy, later"]
+    session = SimpleNamespace(get=lambda url, **_kw: _Response(bodies[0]))
+    monkeypatch.setattr(image_mod, "async_get_clientsession", lambda _hass: session)
+    coord = _coordinator(PRINTING)
+    image = CurrentPrintPreviewImage(coord)
+    image._min_fetch_interval = 0
+    stamps = []
+    while bodies:
+        asyncio.run(image.async_image())
+        stamps.append(image._attr_image_last_updated)
+        bodies.pop(0)
+    assert stamps[0] is not None
+    assert stamps[1] == stamps[0]
+    assert stamps[2] != stamps[1]

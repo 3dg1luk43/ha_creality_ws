@@ -42,7 +42,17 @@ How the bot actually behaves, and the exact commands.
   is not configuration. So any `Ruff (x.y.z)` tool note attached to a finding comes
   from CodeRabbit's own run, not from a repo rule, and "needed to pass the
   configured lint checks" is false on its face here. Verify before accepting.
-- **Rate limit:** roughly 4 full reviews per hour.
+- **Rate limit:** 2 included reviews per hour on the current plan (each review's
+  "Review info" says how many remain). A push-triggered review that is refused
+  says so in the **summary comment**, not in a new comment, so the ack scan
+  misses it; read the summary for `rate limited` / `available in N minutes`.
+- **Auto review pauses itself** after a run of reviewed commits ("Reviews
+  paused", `auto_pause_after_reviewed_commits`). From then on a push triggers
+  nothing and posts no notice: drive every round with `@coderabbitai full review`.
+- **A clean full review submits no review.** The ack is edited from "Full review
+  triggered" to "Full review finished" and the summary says "No actionable
+  comments were generated in the recent review", so condition 2 below never goes
+  true. Treat the edited ack (bot comment after the anchor) as completion too.
 - **Latency:** 10-20 min on a large diff.
 
 ## Resolve coordinates

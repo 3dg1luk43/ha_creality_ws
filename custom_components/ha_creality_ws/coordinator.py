@@ -6,6 +6,7 @@ import json
 import math
 import time
 from collections.abc import Iterable, Mapping
+from datetime import datetime
 from typing import Any
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator  # type: ignore[import]
 from homeassistant.helpers.aiohttp_client import async_get_clientsession  # type: ignore[import]
@@ -24,6 +25,8 @@ from .utils import (
     derive_activity_state,
     detect_camera_type,
     parse_model_version,
+    print_finishing,
+    print_seconds_left,
     safe_float,
 )
 from .notification_rules import (
@@ -40,6 +43,7 @@ from .notification_rules import (
     LiveCardState,
     LiveSnapshot,
     NotifyLinks,
+    more_info_path,
     NotifyVisuals,
     PushReason,
     ACTION_DISMISS,
@@ -71,6 +75,7 @@ from .notification_rules import (
 )
 from .const import (
     DOMAIN,
+    RUNOUT_FLAG_STALE_SECS,
     STALE_AFTER_SECS,
     POWER_SWITCH_MISSING_GRACE_SECS,
     CLEAR_NOTIFICATION_MARKER,
@@ -99,6 +104,8 @@ from .const import (
     NOTIFY_CHANNEL_KEY_DONE,
     NOTIFY_CHANNEL_KEY_LIVE,
     NOTIFY_CHANNEL_KEY_SOON,
+    NOTIFY_LIVE_IOS_RESTART_MAX_SECS,
+    NOTIFY_LIVE_IOS_RESTART_SECS,
     NOTIFY_LIVE_STALE_CLEAR_SECS,
     NOTIFY_PRIME_GRACE_SECS,
     PREVIEW_REASONS_UNUSABLE,
@@ -250,6 +257,8 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # The printer was mid-job when the baseline was taken (a restart), so
         # the next START re-syncs a card that may still be on the phone.
         self._live_resync = False
+        # The tag of the live card last put on the phones; see `_live_tag` (R98).
+        self._live_tag_current: str | None = None
         # Whether a finishing-soon reminder actually went out this job. The
         # near-end latch is set with the option off too (detection is not
         # gated, only sends are), so dismissing on the latch sent a clear for
@@ -269,6 +278,11 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # lazily; a target the user has just added would not be in a cache
         # built at setup.
         self._target_os_cache: dict[str, tuple[str | None, str | None]] = {}
+        # notify target -> its mobile_app webhook id, filled by the same lookup.
+        self._target_webhook_cache: dict[str, str | None] = {}
+        # iPhone target -> (tag, loop time, wait) of the last card start sent
+        # while Home Assistant held no token for the tag (R99).
+        self._ios_starts: dict[str, tuple[str, float, float]] = {}
         self._notify_completed = False
         self._notify_error = False
         self._notify_minutes_to_end = False
@@ -296,6 +310,11 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         
         # Extended status tracking
         self._notified_filament_runout = False
+        # The material flag latched on by firmware rather than by a runout (R82):
+        # since when it has been up while the printer went on printing, and
+        # whether that has lasted long enough to prove it says nothing.
+        self._material_flag_since: float | None = None
+        self._material_flag_stale = False
         self._notified_started = False
         self._notified_stopped = False
         
@@ -357,6 +376,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # change is the one moment we know we are being re-read.
         self._entity_id_cache.clear()
         self._target_os_cache.clear()
+        self._target_webhook_cache.clear()
         self._notify_strings = None
         self._notify_completed = options.get(CONF_NOTIFY_COMPLETED, False)
         self._notify_error = options.get(CONF_NOTIFY_ERROR, False)
@@ -768,6 +788,28 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as exc:
                 _LOGGER.warning("Queued resume failed; will retry. Error: %s", exc)
 
+    def assume_commanded(
+        self, values: dict[str, Any], *, reported_before: Mapping[str, Any]
+    ) -> None:
+        """Show values just sent to the printer until it reports them itself.
+
+        Written into the client's cumulative state as well as here: frames are
+        built from that state, so a value set here alone was reverted by the
+        next frame of any kind until the printer echoed it (#132). A key the
+        printer reported while the command was in flight keeps the printer's
+        value, since it may have clamped or refused it.
+        """
+        fresh = {
+            key: value
+            for key, value in values.items()
+            if self.client.reported(key) == reported_before.get(key)
+        }
+        if not fresh:
+            return
+        self.client.assume(fresh)
+        self.merge_telemetry(fresh)
+        self.async_update_listeners()
+
     def merge_telemetry(self, payload: dict[str, Any]) -> None:
         """Merge telemetry into self.data, firing the discovery signal once.
 
@@ -965,17 +1007,8 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @staticmethod
     def _print_seconds_left(d: dict[str, Any]) -> float | None:
-        """Seconds remaining in the current print, or None.
-
-        The printer streams this as `printLeftTime`; `printTimeLeft` is only kept
-        as a fallback because the notification code used to look for that name
-        exclusively, which meant the minutes-to-end notification never fired.
-        """
-        for key in ("printLeftTime", "printTimeLeft"):
-            value = safe_float(d.get(key))
-            if value is not None:
-                return value
-        return None
+        """Seconds remaining in the current print, or None (`print_seconds_left`)."""
+        return print_seconds_left(d)
 
     def _prime_notification_state(self, d: dict[str, Any]) -> None:
         """Record the printer's state at startup without notifying about it.
@@ -1000,17 +1033,16 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             prog_val = int(progress) if progress is not None else 0
         except (ValueError, TypeError):
             prog_val = 0
-        self._notified_completed = prog_val >= 100
+        # A start inside the last seconds of a job, while the printer still
+        # reports it printing at 100%, is not a finish to swallow (R81).
+        self._notified_completed = prog_val >= 100 and not print_finishing(d)
 
         try:
             self._last_error_code = int((d.get("err") or {}).get("errcode", 0))
         except (AttributeError, ValueError, TypeError):
             self._last_error_code = 0
 
-        try:
-            self._notified_filament_runout = int(d.get("materialStatus") or 0) == 1
-        except (ValueError, TypeError):
-            self._notified_filament_runout = False
+        self._notified_filament_runout = self._runout_reported(d)
 
         left_s = self._print_seconds_left(d)
         self._notified_minutes_to_end = bool(
@@ -1048,11 +1080,14 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # push below replaces the card in place, and dismissing it first would
         # flicker and spend an iOS push-to-start slot for nothing.
         if self._notify_live and primed_state not in BUSY_PRINT_STATES:
-            self._notify_dispatch(
-                build_clear_payload(f"{self._notify_tag_base()}_live"),
-                kind="live:clear:adopt",
-                live_only=True,
-            )
+            # The last job's tag, and the shared one a card from before 0.9.10
+            # may still sit on (R98).
+            for tag in dict.fromkeys((self._job_live_tag(), f"{self._notify_tag_base()}_live")):
+                self._notify_dispatch(
+                    build_clear_payload(tag),
+                    kind="live:clear:adopt",
+                    live_only=True,
+                )
 
         _LOGGER.debug(
             "Notification baseline captured: file=%s progress=%s completed=%s "
@@ -1076,6 +1111,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         progress = d.get("printProgress")
         if progress is None:
             progress = d.get("dProgress")
+
+        # Every frame, priming or not: the latch is proven by time spent printing.
+        self._track_material_flag(d)
 
         # Baseline the current state before anything can be notified. Telemetry
         # arrives incrementally, so wait for a frame that carries both the file
@@ -1182,7 +1220,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # carries the *previous* job's 100 -- arming here unconditionally
             # fired "completed" the instant a new job started, and then swallowed
             # the real completion.
-            self._notified_completed = prog_val >= 100
+            self._notified_completed = prog_val >= 100 and not print_finishing(d)
             self._reset_for_new_job(prog_val)
 
         if not fname:
@@ -1245,7 +1283,12 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         #   * The bus events are documented to fire regardless of notification
         #     settings; they exist precisely for the user who writes their own
         #     text instead of using ours.
-        if prog_val >= 100 and not self._notified_completed:
+        #
+        # 100% is not the end while the printer still says it is printing with
+        # time left: a K1C rounds up 15 s early, goes back to 99, and only then
+        # reports the job finished (R81). Same predicate as derive_print_state,
+        # so the notification and the status sensor change on the same frame.
+        if prog_val >= 100 and not print_finishing(d) and not self._notified_completed:
             if self._notify_completed and deliver:
                 await self._notify_event(
                     self._completion_message(d, job), kind=EVENT_COMPLETED
@@ -1285,8 +1328,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._fire_print_event(BUS_EVENT_PRINT_ERROR, d, job)
         self._last_error_code = code
 
-        # 3) Filament runout (materialStatus == 1). Shares the error toggle,
-        # being an error-like state the user wants to hear about together.
+        # 3) Filament runout (`_runout_reported`, R82). Shares
+        # the error toggle, being an error-like state the user wants to hear
+        # about together.
         is_runout = self._runout_reported(d)
 
         if is_runout and not self._notified_filament_runout:
@@ -1511,7 +1555,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 and self._job_state() in PREVIEW_PRINT_STATES
             )
             if state is not None and (reason not in PREVIEW_REASONS_UNUSABLE or stale):
-                preview_url = f"/api/image_proxy/{entity_id}"
+                preview_url = f"/api/image_proxy/{entity_id}{self._picture_version(state)}"
 
         snapshot_url = None
         if include_snapshot and self._notify_camera_snapshot:
@@ -1523,13 +1567,34 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         return NotifyVisuals(preview_url=preview_url, snapshot_url=snapshot_url)
 
+    def _picture_version(self, state: Any) -> str:
+        """`?v=`, the job and when the preview last changed, or nothing when unknown.
+
+        The image entity's state is the time its picture last changed. iOS
+        caches an attachment by its URL, and this one used to be the same for
+        every print, so a finished print showed an earlier print's thumbnail
+        (#131). Keyed to the picture rather than the clock: the card's refreshes
+        during one job keep one URL, and the phone fetches the picture once.
+        The job's `printStartTime` (R98) goes in too: entities update after
+        notifications, and while printing only at the polling rate, so a
+        reprint's first card could be built before the entity saw the job.
+        """
+        start = self._int_or_none((self.data or {}).get("printStartTime"))
+        job = f"{start}-" if start and start > 0 else ""
+        try:
+            changed = datetime.fromisoformat(str(getattr(state, "state", "")))
+        except ValueError:
+            return f"?v={start}" if job else ""
+        return f"?v={job}{int(changed.timestamp())}"
+
     def _notify_links(self) -> NotifyLinks:
         """Tap targets, sent as both dialects at once.
 
-        A configured dashboard path wins on both platforms. Failing that Android
-        gets `entityId:` for the camera, which opens the more-info dialog and its
-        live feed with no configuration at all -- but iOS does not support that
-        form, so it gets nothing rather than a broken link.
+        A configured dashboard path wins on both platforms. Failing that the
+        camera's more-info dialog and its live feed, with no configuration at
+        all: Android as `entityId:`, iOS as a path the frontend opens the same
+        dialog from. iOS has no `entityId:` form, and with no `url` a tap on the
+        live activity or a banner only opened the app on its last page.
         """
         path = (self._notify_tap_path or "").strip()
         if path.startswith("/"):
@@ -1537,13 +1602,17 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         camera_id = self._resolve_entity_id("camera", "camera")
         if camera_id:
-            return NotifyLinks(click_action=f"entityId:{camera_id}")
+            return NotifyLinks(
+                click_action=f"entityId:{camera_id}", tap_path=more_info_path(camera_id)
+            )
 
         # No camera configured for this printer: the preview at least shows what
         # is being printed.
         preview_id = self._resolve_entity_id("image", "current_print_preview")
         if preview_id:
-            return NotifyLinks(click_action=f"entityId:{preview_id}")
+            return NotifyLinks(
+                click_action=f"entityId:{preview_id}", tap_path=more_info_path(preview_id)
+            )
 
         return NotifyLinks()
 
@@ -1699,9 +1768,13 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             else PHASE_PRINTING
         )
         tag_base = self._notify_tag_base()
+        new_card = reason is PushReason.START and not self._live_card.card_active
+        if new_card:
+            self._live_tag_current = self._job_live_tag()
+        live_tag = self._live_tag()
 
         payload = build_live_payload(
-            tag=f"{tag_base}_live",
+            tag=live_tag,
             title=self._notify_title(),
             message=self._live_message(snap),
             phase=phase,
@@ -1726,15 +1799,24 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # tag, and while one has not expired it sends every push to it as an
         # UPDATE -- this START included. A card swiped away on the phone leaves
         # such a token behind, and the next print's card then never appeared
-        # (#125, finding 2). Clearing the tag first ends that activity and drops
-        # the token, so the START is a real one. Not after a restart mid-print:
-        # there the token is most likely the card still on screen.
+        # (#125, finding 2). A tag of the job's own (`_job_live_tag`) has no
+        # token yet, so its START is a real one with nothing to clear. Only the
+        # shared tag of a printer that does not date its jobs is cleared first,
+        # and that clear can reach an iPhone after the START and end the new
+        # card (R98). Not after a restart mid-print either: there the token is
+        # most likely the card still on screen.
         clear_first = None
-        if reason is PushReason.START and not self._live_card.card_active:
+        if new_card:
+            if live_tag != f"{tag_base}_live":
+                # A card from before 0.9.10 sits on the shared tag, the case on
+                # an upgrade mid-print. Another tag, so order does not matter.
+                self._notify_dispatch(
+                    build_clear_payload(f"{tag_base}_live"), kind="live:clear:shared", live_only=True
+                )
             if self._live_resync:
                 self._live_resync = False
-            else:
-                clear_first = build_clear_payload(f"{tag_base}_live")
+            elif live_tag == f"{tag_base}_live":
+                clear_first = build_clear_payload(live_tag)
         self._notify_dispatch(
             payload, kind=f"live:{reason.value}", live_only=True, clear_first=clear_first
         )
@@ -1782,7 +1864,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if send:
             self._notify_dispatch(
-                build_clear_payload(f"{self._notify_tag_base()}_live"),
+                build_clear_payload(self._live_tag()),
                 kind="live:clear",
                 live_only=True,
             )
@@ -1834,12 +1916,70 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return 0
 
     @staticmethod
-    def _runout_reported(d: dict[str, Any]) -> bool:
+    def _material_flag(d: dict[str, Any]) -> bool:
+        """`materialStatus` 1, Creality's "consumable not detected"."""
         try:
             mat_status = d.get("materialStatus")
             return mat_status is not None and int(mat_status) == 1
         except (ValueError, TypeError):
             return False
+
+    def _track_material_flag(self, d: dict[str, Any]) -> None:
+        """Notice a material flag that firmware latched rather than a runout raised.
+
+        A K1C on 1.3.5.22 raises the flag at the first print after boot, with
+        filament loaded, and keeps it up while printing normally until it is
+        powered off (R82). A real runout pauses the print within seconds, so a
+        flag that stays up while the printer keeps printing for
+        `RUNOUT_FLAG_STALE_SECS` is that latch. It stays discounted, across jobs,
+        until the printer clears it.
+        """
+        if not self._material_flag(d):
+            self._material_flag_since = None
+            self._material_flag_stale = False
+            return
+        if d.get("state") != 1 or self._paused_flag:
+            self._material_flag_since = None
+            return
+        now = self.hass.loop.time()
+        if self._material_flag_since is None:
+            self._material_flag_since = now
+        elif now - self._material_flag_since >= RUNOUT_FLAG_STALE_SECS:
+            self._material_flag_stale = True
+
+    def _runout_reported(self, d: dict[str, Any]) -> bool:
+        """Whether the printer is reporting a filament runout right now.
+
+        The flag alone is not one: a K1C keeps it up through whole prints
+        (R82). Where the printer also reports its runout sensor,
+        `materialDetector1`, the sensor decides: on a real K1C runout it went to
+        1 with the flag and back to 0 when the filament was reloaded, and it
+        stayed 0 through the latched flag. Without it, only a paused job with
+        the flag up counts (the printer's web UI pairs the flag with a Resume
+        button), and not while the flag is a proven latch.
+        """
+        if not self._material_flag(d):
+            return False
+        sensor = safe_float(d.get("materialDetector1"))
+        if sensor is not None:
+            return sensor == 1
+        return not self._material_flag_stale and self._job_state() == "paused"
+
+    def filament_runout(self) -> bool:
+        """The Filament Status sensor's "runout": the flag, unless shown false.
+
+        Only the alert needs a paused job on a printer without the runout
+        sensor, so as not to alert on a flag nothing confirms. The sensor
+        reports the flag, idle after a cancelled runout included, except where
+        it is shown false: the sensor says 0, or the flag is a latch (R82).
+        """
+        d = self.data or {}
+        if not self._material_flag(d):
+            return False
+        sensor = safe_float(d.get("materialDetector1"))
+        if sensor is not None:
+            return sensor == 1
+        return not self._material_flag_stale
 
     def _notify_action_ids(self) -> dict[str, str]:
         """Action ids for this printer, namespaced by config entry."""
@@ -2032,6 +2172,16 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         progress = self._notify_progress()
         layer = self._int_or_none(d.get("layer"))
         total_layers = self._int_or_none(d.get("TotalLayer"))
+        # Before the self-test ends a K1C reports 0 layers of 0 and 0 s left.
+        # Those are "not known yet", the same rule the built-in card body
+        # follows (R25), not a count and an estimate (R83).
+        if total_layers is not None and total_layers <= 0:
+            total_layers = None
+            if layer is not None and layer <= 0:
+                layer = None
+        seconds_left = self._print_seconds_left(d)
+        if seconds_left is not None and seconds_left <= 0:
+            seconds_left = None
         code = self._error_code(d)
         values: dict[str, str] = {
             "device": self._notify_title(),
@@ -2039,7 +2189,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "progress": "" if progress is None else str(progress),
             "layer": "" if layer is None else str(layer),
             "total_layers": "" if total_layers is None else str(total_layers),
-            "eta": format_duration(self._print_seconds_left(d), strings),
+            "eta": format_duration(seconds_left, strings),
             "elapsed": format_duration(d.get("printJobTime"), strings),
             "filament": format_filament_length(
                 d.get("usedMaterialLength"), strings.get("filament_length")
@@ -2159,8 +2309,9 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "Dismissing the live print card on %d target(s) it was removed from",
             len(dropped),
         )
-        payload = build_clear_payload(f"{self._notify_tag_base()}_live")
+        payload = build_clear_payload(self._live_tag())
         for target in dropped:
+            self._forget_ios_start(target, self._live_tag())
             if is_mobile_target(target) and is_live_capable(self._target_os(target)):
                 self.hass.async_create_task(
                     self._async_deliver_one(target, payload)
@@ -2247,7 +2398,37 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._load_options()
         if resync and self._notify_live and self._notify_targets:
             self._live_card.clear()
+            # The card is still on the phones: re-push it in place, as after a
+            # restart mid-print, without the clear a new job's card gets. Sent
+            # together, an iPhone could process the clear after the START and
+            # end the card it had just started; it stayed away until the next
+            # five-minute refresh (R97).
+            self._live_resync = True
         _LOGGER.info("Notification settings applied without a reload")
+
+    def _job_live_tag(self) -> str:
+        """The live card's tag for the job the printer reports now (R98).
+
+        One per print where the printer dates its jobs: the K1C and the K2 Plus
+        report `printStartTime` (Unix seconds), new for every job, a reprint of
+        the same file included, and kept through the job and after it. A tag of
+        its own needs no clear before a new card's START, which an iPhone could
+        process after the START and so end the card it had just started; and it
+        is the same after a restart mid-print, so the card is picked up again
+        rather than doubled. Without the field, one shared tag as before.
+        """
+        base = self._notify_tag_base()
+        start = self._int_or_none((self.data or {}).get("printStartTime"))
+        return f"{base}_{start}_live" if start and start > 0 else f"{base}_live"
+
+    def _live_tag(self) -> str:
+        """The tag of the card on the phones, or failing one, of the current job.
+
+        Remembered from the card's START rather than recomputed: by the time
+        the card is cleared or replaced, a new job may already have moved
+        `printStartTime` on, and the old card would be left behind.
+        """
+        return self._live_tag_current or self._job_live_tag()
 
     def _notify_tag_base(self) -> str:
         """Stable tag prefix for this printer.
@@ -2314,7 +2495,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # no countdown, no action buttons. `build_event_payload` is what
             # leaves the bar out, for every flavour and on purpose.
             payload = build_event_payload(
-                tag=f"{tag_base}_live",
+                tag=self._live_tag(),
                 title=title,
                 message=message,
                 kind=kind,
@@ -2396,15 +2577,112 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         slug = notify_service_slug(target)
         found: tuple[str | None, str | None] = (None, None)
+        webhook_id = None
         if slug:
             entries = getattr(self.hass.config_entries, "async_entries", None)
             for entry in (entries("mobile_app") if entries else ()):
                 data = getattr(entry, "data", None) or {}
                 if slugify(str(data.get("device_name", ""))) == slug:
                     found = (data.get("os_name"), data.get("manufacturer"))
+                    webhook_id = data.get("webhook_id")
                     break
         self._target_os_cache[target] = found
+        self._target_webhook_cache[target] = webhook_id
         return found
+
+    def _target_webhook_id(self, target: str) -> str | None:
+        """The mobile_app webhook id behind a target, or None if unknown."""
+        if target not in self._target_webhook_cache:
+            self._target_platform(target)
+        return self._target_webhook_cache.get(target)
+
+    def _ios_has_token(self, target: str, tag: str) -> bool | None:
+        """Whether Home Assistant holds a live card token for `tag` on a phone.
+
+        None when that cannot be told: a core without Live Activity tokens, an
+        unidentified target, or a phone on local push, whose app starts and
+        updates the card itself. Read from mobile_app's own store, the one its
+        notify platform routes by (`live_activity/__init__.py`): with an
+        unexpired token a push updates the card, without one it starts another.
+        """
+        mobile = (getattr(self.hass, "data", None) or {}).get("mobile_app")
+        webhook_id = self._target_webhook_id(target)
+        if not isinstance(mobile, Mapping) or not webhook_id:
+            return None
+        channels = mobile.get("push_channel")
+        if isinstance(channels, Mapping) and webhook_id in channels:
+            return None
+        tokens = mobile.get("live_activity_tokens")
+        if not isinstance(tokens, Mapping):
+            return None
+        stored = (tokens.get(webhook_id) or {}).get(tag)
+        if not isinstance(stored, Mapping):
+            return False
+        expires = stored.get("expires_at")
+        return isinstance(expires, (int, float)) and expires > time.time()
+
+    def _hold_ios_start(
+        self, target: str, payload: dict[str, Any], clear_first: dict[str, Any] | None
+    ) -> bool:
+        """Whether a live push to an iPhone waits, rather than start another card.
+
+        A push for a tag Home Assistant holds no token for is a push-to-start,
+        and a start always alerts. The phone reports the new card's token only
+        while the app runs, so every refresh until then started yet another
+        card, with a chime each time (R99). After one start the card's pushes
+        wait for the token. The start is repeated after
+        NOTIFY_LIVE_IOS_RESTART_SECS, doubling, in case iOS dropped it.
+        """
+        data = payload.get("data") or {}
+        tag = data.get("tag")
+        if not tag or not data.get("live_update") or not self._target_is_apple(target):
+            return False
+        has_token = self._ios_has_token(target, tag)
+        if has_token is None:
+            return False
+        if clear_first is not None and (clear_first.get("data") or {}).get("tag") == tag:
+            # Delivered first, and it takes the token with it.
+            has_token = False
+        if has_token:
+            self._ios_starts.pop(target, None)
+            return False
+        now = self.hass.loop.time()
+        last = self._ios_starts.get(target)
+        if last is not None and last[0] == tag:
+            if now - last[1] < last[2]:
+                _LOGGER.debug(
+                    "Holding a live push to %s: no token for %s yet, so it "
+                    "would start another card",
+                    target,
+                    tag,
+                )
+                return True
+            wait = min(last[2] * 2, NOTIFY_LIVE_IOS_RESTART_MAX_SECS)
+        else:
+            wait = NOTIFY_LIVE_IOS_RESTART_SECS
+        self._ios_starts[target] = (tag, now, wait)
+        return False
+
+    def _forget_ios_start(self, target: str, tag: str | None) -> None:
+        """A card's clear is on its way, so its next push is a start of its own.
+
+        Called where the clear is dispatched, not where it is delivered: a
+        clear sent just ahead of a start, in the same task, would otherwise
+        forget the start it precedes.
+        """
+        last = self._ios_starts.get(target)
+        if last is not None and last[0] == tag:
+            del self._ios_starts[target]
+
+    def _forget_unsent_ios_start(self, target: str, payload: dict[str, Any]) -> None:
+        """A live push that failed started no card, so the next one may.
+
+        While a start waits, every other push on its tag is held, so the record
+        under that tag is this push's own.
+        """
+        data = payload.get("data") or {}
+        if data.get("live_update"):
+            self._forget_ios_start(target, data.get("tag"))
 
     def _replace_card_with(self, payload: dict[str, Any], *, kind: str) -> None:
         """Dismiss the live card and post `payload` in its place, in that order.
@@ -2418,7 +2696,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         in its receive loop, so blocking on an HTTPS round trip would let
         `last_rx_monotonic()` go stale and flip every entity unavailable.
         """
-        clear = build_clear_payload(f"{self._notify_tag_base()}_live")
+        clear = build_clear_payload(self._live_tag())
         # The same live-capability gate the card itself was pushed under. A
         # macOS companion is skipped by `live_only`, so it never received the
         # card -- sending it the dismiss sentinel clears a tag it does not have,
@@ -2428,6 +2706,7 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if is_mobile_target(t) and is_live_capable(self._target_os(t))
         ]
         for target in targets:
+            self._forget_ios_start(target, self._live_tag())
             self.hass.async_create_task(
                 self._async_replace_one(target, clear, payload)
             )
@@ -2476,6 +2755,8 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         sent_to = 0
         for target in targets:
+            if payload.get("message") == CLEAR_NOTIFICATION_MARKER:
+                self._forget_ios_start(target, (payload.get("data") or {}).get("tag"))
             if (mobile_only or live_only) and not is_mobile_target(target):
                 # Live-card keys are meaningless to anything but the companion
                 # app, so a progress push has nothing to say to these.
@@ -2491,6 +2772,8 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     target,
                     self._target_os(target),
                 )
+                continue
+            if live_only and self._hold_ios_start(target, payload, clear_first):
                 continue
             sent_to += 1
             if clear_first is not None and self._target_is_apple(target):
@@ -2612,9 +2895,11 @@ class KCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except HomeAssistantError as err:
             # Rejected by the notify platform: one line, not a traceback.
             _LOGGER.warning("Notification to %s was refused: %s", target, err)
+            self._forget_unsent_ios_start(target, payload)
         except Exception:  # pylint: disable=broad-except
             # One unreachable phone must not starve the others.
             _LOGGER.exception("Failed to send notification to %s", target)
+            self._forget_unsent_ios_start(target, payload)
 
     async def _poll_moonraker_extras(self):
         """Poll Moonraker for missing telemetry fields (e.g. chamber target)."""

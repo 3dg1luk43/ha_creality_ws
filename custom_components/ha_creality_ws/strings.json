@@ -182,7 +182,7 @@
               "notify_actions": "Stop asks for device authentication, so a mis-tap on a lock screen cannot end a long print.",
               "notify_preview_image": "Skipped when the printer has no preview to serve, rather than sending an empty grey box.",
               "notify_camera_snapshot": "What the bed actually looks like. Skipped on printers whose camera cannot take a still.",
-              "notify_tap_path": "For example /lovelace/printer. Left empty, an Android tap opens the printer camera and an iOS tap opens the app; this is the only way to make an iOS tap go anywhere specific."
+              "notify_tap_path": "For example /lovelace/printer. Left empty, a tap opens the printer camera on Android and iPhone; set a path to open a dashboard instead."
             }
           },
           "text": {

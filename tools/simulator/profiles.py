@@ -113,6 +113,10 @@ class Profile:
     # "state0": state 0, file kept, progress reset to 0.
     # "clear": the file name is cleared.
     stop_style: str = "state4"
+    # "state0": a finished job reports state 0 at once.
+    # "state2": state 2 at the end, then 0 about 50 s later (K1C 1.3.5.22, seen
+    # live 2026-10-25, R88).
+    finish_style: str = "state0"
     # "v2": retGcodeFileInfo2 (1.3.5.22). "legacy": retGcodeFileInfo with a
     # packed string (1.3.3.x). "none": the request goes unanswered.
     gcode_listing: str = "legacy"
@@ -162,6 +166,7 @@ PROFILES: dict[str, Profile] = {
         webrtc_support=True,
         string_numbers=True,
         gcode_listing="v2",
+        finish_style="state2",
         notes="#46: MJPEG on :8080 is gone, webrtcSupport: 1, WebRTC on :8000.",
     ),
     "k1": Profile(

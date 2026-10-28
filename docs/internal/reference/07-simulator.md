@@ -19,7 +19,6 @@ Still open:
 
 - G-code listings over 1 MiB, and multi-material listing entries.
 - The K1C 2025 RTP payload-type quirk.
-- WebRTC through go2rtc on the test box (R78).
 - `reqProbedMatrix` values are synthetic.
 - No captured K2, Hi or CFS frames exist, so those profiles follow the issue reports. Paths: SIM = the simulator, INT = `custom_components/ha_creality_ws/`, TB = `tools/testbox/`, CAP = `tools/test_files/` (gitignored real-printer captures; never copied into tracked files).
 
@@ -160,7 +159,7 @@ Each model only sets `box_sensor`, `box_control`, `light` and `camera`. Several 
    - `state=0` with the file kept and progress reset;
    - the file cleared.
 3. **Finish:**
-   - progress rounds up to 100 with minutes still left, reports 99 once more, then finishes;
+   - progress rounds up to 100 with minutes still left, reports 99 once more, then finishes (the `k1c-1.3.5` profile, `finish_style="state2"`, reports state 2 for 50 s and then 0, as the real K1C did on 2026-10-25; the others go straight to 0, R88);
    - the file stays selected at 100%;
    - later, progress resets to 0 while the file is still selected (R10).
 4. **Pause** freezes progress and the time left.

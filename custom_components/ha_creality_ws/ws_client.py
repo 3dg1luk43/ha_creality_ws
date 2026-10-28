@@ -287,17 +287,7 @@ class KClient:
 
                         if isinstance(payload, dict):
                             self._mark_ready(url)
-                            merged = coerce_numbers(payload)
-                            self._state.update(merged)
-                            self.msg_count += 1
-                            frame = dict(self._state)
-                            # One-shot, not telemetry: the reply lists
-                            # every G-code file on the printer (~150 KiB
-                            # on a K1C). Left in the cumulative state it
-                            # would ride on every later frame, and the
-                            # coordinator would rescan the whole listing
-                            # once per frame on the receive path.
-                            self._state.pop(GCODE_FILE_RESPONSE, None)
+                            frame = self._absorb(payload)
                             try:
                                 await self._on_message(frame)
                             except Exception:
@@ -514,6 +504,38 @@ class KClient:
                 await asyncio.sleep(0.2)
         except asyncio.CancelledError:
             return
+
+    def _absorb(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Merge one frame into the cumulative state; return what is handed on.
+
+        The whole state, not the frame: the printer sends deltas, and the
+        coordinator expects every field it has ever seen.
+        """
+        self._state.update(coerce_numbers(payload))
+        self.msg_count += 1
+        frame = dict(self._state)
+        # One-shot, not telemetry: the reply lists every G-code file on the
+        # printer (~150 KiB on a K1C). Left in the cumulative state it would
+        # ride on every later frame, and the coordinator would rescan the whole
+        # listing once per frame on the receive path.
+        self._state.pop(GCODE_FILE_RESPONSE, None)
+        return frame
+
+    # ---------- commanded values ----------
+    def reported(self, key: str) -> Any:
+        """The value the printer last reported for one telemetry key."""
+        return self._state.get(key)
+
+    def assume(self, values: dict[str, Any]) -> None:
+        """Fold values just commanded into the state every frame is built from.
+
+        Each frame hands the coordinator the whole cumulative state, so a value
+        set on the coordinator alone lasted only until the next frame of any
+        kind, which still carried the old one: a printer slow to echo a new
+        target showed it set and then back at 0 (#132). The printer's next
+        report of the key replaces it, as any report does.
+        """
+        self._state.update(values)
 
     # ---------- public send ----------
     async def request_boxs_info(self) -> None:

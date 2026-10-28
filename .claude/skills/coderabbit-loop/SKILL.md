@@ -189,8 +189,8 @@ armed job and the session goes idle, the loop is over, and nothing resumes it.
 If a round produced no push and nothing to wait for, still arm the Phase 1 poller
 after posting `@coderabbitai full review`.
 
-**Pace to the rate limit.** CodeRabbit throttles at roughly 4 full reviews per hour.
-Aim for one round per 15-20 min. If a retrigger is refused or ignored, wait 20 min
+**Pace to the rate limit.** CodeRabbit allows 2 included reviews per hour on this plan.
+Aim for one round per ~30 min. If a retrigger is refused or ignored, wait 20 min
 and retry rather than treating it as convergence.
 
 **Do not stop for:**
@@ -229,7 +229,7 @@ going without waiting for approval.
   printer-command semantics. Per `refusals.md` this is DEFER territory, and if the
   loop cannot progress without it, stop.
 - The validation gate fails and the cause is not the fix under review.
-- Rate limit. CodeRabbit throttles after roughly 4 full reviews per hour.
+- Rate limit. CodeRabbit allows 2 included reviews per hour on this plan.
 - Six rounds elapsed. Sanity cap, report and confirm before continuing.
   **Does not apply in unattended mode.**
 

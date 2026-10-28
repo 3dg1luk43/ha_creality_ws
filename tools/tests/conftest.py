@@ -586,6 +586,12 @@ class KClient:  # type: ignore
     async def request_gcode_file_info(self):
         return None
 
+    def reported(self, key):
+        return self.__dict__.get("_assumed", {}).get(key)
+
+    def assume(self, values):
+        self.__dict__.setdefault("_assumed", {}).update(values)
+
     def last_rx_monotonic(self) -> float:
         return self._last
 

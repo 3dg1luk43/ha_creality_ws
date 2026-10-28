@@ -119,6 +119,63 @@ def test_home_assistant_stopping_closes_the_connection(monkeypatch):
     assert coord.events == ["start", "stop"]
 
 
+class _HassUntilPlatforms(SimpleNamespace):
+    """Ends setup where it hands the coordinator to the platforms."""
+
+    @property
+    def data(self):
+        raise Stop
+
+
+def _setup_switched_off(monkeypatch, data):
+    """Run async_setup_entry, as an upgrade to 0.9.10, with the power switch off."""
+    FakeCoordinator.instances.clear()
+    monkeypatch.setattr(integration, "KCoordinator", FakeCoordinator)
+    monkeypatch.setattr(FakeCoordinator, "data", {}, raising=False)
+    monkeypatch.setattr(FakeCoordinator, "power_is_off", lambda self: True, raising=False)
+    monkeypatch.setattr(integration, "_core_version", lambda: (2099, 1))
+    monkeypatch.setattr(integration, "_migrate_go2rtc_settings", lambda hass, entry: None)
+    monkeypatch.setattr(integration, "_async_follow_host", lambda hass, entry, host: None)
+
+    async def _version(hass):
+        return "0.9.10"
+
+    monkeypatch.setattr(integration, "_get_integration_version", _version)
+    entry = _entry()
+    entry.data = {**entry.data, "_last_ip": "10.0.0.5", "_cached_max_bed_temp": 100,
+                  "_cached_max_nozzle_temp": 300, "_cached_has_brightness_control": False,
+                  "_cached_led_pin": None, "_cached_model": "K1 Max", **data}
+
+    def _update(entry, data):
+        entry.data = data
+
+    hass = _HassUntilPlatforms(
+        bus=SimpleNamespace(async_listen=lambda event, handler: lambda: None),
+        config_entries=SimpleNamespace(async_update_entry=_update),
+    )
+    with pytest.raises(Stop):
+        asyncio.get_event_loop().run_until_complete(
+            integration.async_setup_entry(hass, entry)
+        )
+    return entry.data
+
+
+def test_an_upgrade_with_the_printer_off_keeps_the_direct_webrtc_retry(monkeypatch):
+    """A direct-WebRTC verdict from before 0.9.10 is re-detected at the upgrade
+    re-cache (#134). A start with the printer switched off learns nothing, and
+    stamping the new version there skipped that re-detection for good."""
+    data = _setup_switched_off(
+        monkeypatch, {"_cached_version": "0.9.9", "_cached_camera_type": "webrtc_direct"}
+    )
+    assert data["_cached_version"] == "0.9.9"
+    assert data["_cached_camera_type"] == "webrtc_direct"
+
+    data = _setup_switched_off(
+        monkeypatch, {"_cached_version": "0.9.9", "_cached_camera_type": "webrtc"}
+    )
+    assert data["_cached_version"] == "0.9.10"
+
+
 def _unload(platforms_ok):
     order: list[str] = []
     coord = FakeCoordinator(None)

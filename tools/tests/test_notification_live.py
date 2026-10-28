@@ -19,9 +19,11 @@ from custom_components.ha_creality_ws.const import (
     CLEAR_NOTIFICATION_MARKER,
     NOTIFY_END_CONFIRM_SECS,
     NOTIFY_LIVE_INTERVAL_SECS,
+    NOTIFY_LIVE_IOS_RESTART_SECS,
     NOTIFY_LIVE_MILESTONE_STEP,
     NOTIFY_LIVE_MIN_INTERVAL_SECS,
     NOTIFY_LIVE_STALE_CLEAR_SECS,
+    RUNOUT_FLAG_STALE_SECS,
     STALE_AFTER_SECS,
 )
 from custom_components.ha_creality_ws.coordinator import KCoordinator
@@ -403,20 +405,25 @@ def test_the_tick_does_nothing_without_a_card():
 
 def test_end_of_print_jitter_produces_one_card_push_and_one_completion():
     """The recorded 99/100/99/99/100 sequence behind b2ac2ea, now with a live
-    card layered on top of the same predicate."""
+    card layered on top of the same predicate. The last 100 is the end as a
+    K1C reports it (state 2, no time left, R81); the earlier one is the printer
+    rounding up while it is still printing."""
     coord, hass = _coordinator()
     live_pushes = 0
     completions = 0
     for tick, progress in enumerate((99, 100, 99, 99, 100)):
         coord.hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+        end = {"state": 2, "printLeftTime": 0} if tick == 4 else {"printLeftTime": 90 - tick}
         payloads = _frame(
-            coord, hass, **_printing(progress, printJobTime=1600 + tick)
+            coord, hass, **_printing(progress, printJobTime=1600 + tick, **end)
         )
         live_pushes += len(_live(payloads))
         completions += len(
             [p for p in _events(payloads) if p["message"] == _COMPLETED]
         )
-    assert (live_pushes, completions) == (1, 1)
+    # The start, and the card reaching 100% while the printer finishes; the dip
+    # back to 99 pushes nothing.
+    assert (live_pushes, completions) == (2, 1)
 
 
 def test_a_reprint_starts_a_fresh_card():
@@ -804,14 +811,15 @@ def test_a_refreshing_card_always_carries_a_way_out():
         assert any(i.startswith("CREALITY_DISMISS_") for i in ids), actions
 
 
-def test_the_first_push_alerts_and_later_ones_do_not():
+def test_every_live_push_is_silent_and_only_refreshes_are_passive():
     """iOS alerts per push unless told otherwise, so a refresh cadence would
     buzz the phone for the whole print. `alert_once` is Android-only and does
-    nothing there. The push that *starts* the card stays audible: it is the
-    "your print is on the Lock Screen" cue."""
+    nothing there. The start is `silent` too: a real start alerts anyway, and
+    one after a restart or a settings save reaches a card the phone still has,
+    as an update that chimed without it (R99)."""
     coord, hass = _coordinator()
     start = _live(_frame(coord, hass, **_printing(5)))[0]["data"]
-    assert "silent" not in start
+    assert start["silent"] == "true"
     assert "push" not in start
     assert start["activity"] == "start"
 
@@ -1138,7 +1146,8 @@ def test_a_recovered_printer_has_its_alert_taken_away():
     coord, hass = _coordinator()
     _frame(coord, hass, **_printing(39))
     coord.hass.loop.advance(1)
-    _frame(coord, hass, **_printing(40, materialStatus=1))
+    # A runout pauses the job; the flag alone is not one (R82).
+    _frame(coord, hass, **_printing(40, materialStatus=1, state=5))
     assert coord._alert_showing is True
 
     coord.hass.loop.advance(1)
@@ -1154,7 +1163,7 @@ def test_one_condition_resolving_does_not_dismiss_the_others_alert():
     coord, hass = _coordinator()
     _frame(coord, hass, **_printing(39))
     coord.hass.loop.advance(1)
-    _frame(coord, hass, **_printing(40, materialStatus=1, err={"errcode": 521, "key": 1}))
+    _frame(coord, hass, **_printing(40, materialStatus=1, state=5, err={"errcode": 521, "key": 1}))
     coord.hass.loop.advance(1)
 
     # Runout resolved, error still live.
@@ -1541,11 +1550,61 @@ def test_a_runout_flag_left_set_does_not_alert_at_the_next_print():
     coord, hass = _coordinator()
     _frame(coord, hass, **_printing(19))
     hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
-    first = _frame(coord, hass, **_printing(20, materialStatus=1))
+    first = _frame(coord, hass, **_printing(20, materialStatus=1, state=5))
     assert len(_alerts(first)) == 1
     hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
-    second = _frame(coord, hass, **_printing(1, printFileName="/usr/data/printer_data/gcodes/next.gcode", printJobTime=5, materialStatus=1))
+    second = _frame(coord, hass, **_printing(1, printFileName="/usr/data/printer_data/gcodes/next.gcode", printJobTime=5, materialStatus=1, state=5))
     assert _alerts(second) == []
+
+
+def test_the_material_flag_rising_at_print_start_is_not_a_runout():
+    """A K1C raises materialStatus as a print starts, with filament loaded, and
+    keeps it up while it prints on (R82). That alerted at every first print."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(0, materialStatus=0))
+    alerts = []
+    for progress in range(0, 5):
+        hass.loop.advance(10)
+        alerts += _alerts(_frame(coord, hass, **_printing(progress, materialStatus=1)))
+    assert alerts == []
+
+
+def test_a_latched_flag_does_not_turn_a_manual_pause_into_a_runout():
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(10, materialStatus=0))
+    for progress in range(11, 15):
+        hass.loop.advance(RUNOUT_FLAG_STALE_SECS / 3)
+        _frame(coord, hass, **_printing(progress, materialStatus=1))
+    hass.loop.advance(1)
+    assert _alerts(_frame(coord, hass, **_printing(15, materialStatus=1, state=5))) == []
+
+
+def test_where_the_printer_reports_its_runout_sensor_the_sensor_decides():
+    """A K1C sends `materialDetector1`: 0 through a latched flag, 1 on a real
+    runout until the filament is back (R82). A pause with the sensor at 0 is
+    the user's; the sensor firing while the flag is already latched is not."""
+    coord, hass = _coordinator()
+    _frame(coord, hass, **_printing(10, materialStatus=1, materialDetector1=0))
+    hass.loop.advance(1)
+    assert _alerts(_frame(coord, hass, **_printing(11, materialStatus=1, materialDetector1=0, state=5))) == []
+    for progress in range(12, 16):
+        hass.loop.advance(RUNOUT_FLAG_STALE_SECS / 3)
+        _frame(coord, hass, **_printing(progress, materialStatus=1, materialDetector1=0))
+    hass.loop.advance(1)
+    assert len(_alerts(_frame(coord, hass, **_printing(16, materialStatus=1, materialDetector1=1)))) == 1
+
+
+def test_a_runout_that_pauses_the_print_alerts_even_after_a_latch_clears():
+    coord, hass = _coordinator()
+    for progress in range(10, 15):
+        hass.loop.advance(RUNOUT_FLAG_STALE_SECS / 3)
+        _frame(coord, hass, **_printing(progress, materialStatus=1))
+    hass.loop.advance(1)
+    _frame(coord, hass, **_printing(16, materialStatus=0))
+    hass.loop.advance(1)
+    _frame(coord, hass, **_printing(17, materialStatus=1))
+    hass.loop.advance(2)
+    assert len(_alerts(_frame(coord, hass, **_printing(17, materialStatus=1, state=5)))) == 1
 
 
 # --------------------------------------------------------------------------- #
@@ -1593,6 +1652,27 @@ def test_applying_new_text_resyncs_the_card_instead_of_waiting():
     pushed = _live(_frame(coord, hass, **_printing(41)))
     assert len(pushed) == 1, "the very next frame re-pushes the card"
     assert pushed[0]["message"] == "41% of 3DBenchy.gcode"
+
+
+def test_a_settings_change_re_pushes_the_card_without_clearing_it_first():
+    """The clear-first is for a new job's card. Sent with the re-push after a
+    settings change, an iPhone could take the clear after the START and end
+    the card it had just started; it stayed away until the next five-minute
+    refresh (R97, seen 2026-10-26 on iOS 26.6)."""
+    coord, hass = _coordinator(targets=("notify.mobile_app_iphone_15_pro",))
+    _as_iphone(coord)
+    coord.config_entry.options = _options(notify_targets=["notify.mobile_app_iphone_15_pro"])
+    coord._load_options()
+    _frame(coord, hass, **_printing(40))
+
+    options = _options(notify_targets=["notify.mobile_app_iphone_15_pro"], notify_template_live="{progress}%")
+    coord.config_entry.options = options
+    coord.apply_notification_options(options)
+
+    hass.loop.advance(1)
+    payloads = _frame(coord, hass, **_printing(41))
+    assert len(_live(payloads)) == 1, "the very next frame re-pushes the card"
+    assert [p for p in payloads if p["message"] == CLEAR_NOTIFICATION_MARKER] == []
 
 
 def test_a_phone_removed_from_the_targets_has_its_card_taken_away():
@@ -1668,6 +1748,182 @@ def _live_tag_messages(calls):
     return [c[2]["message"] for c in calls if (c[2].get("data") or {}).get("tag", "").endswith("_live")]
 
 
+def _iphone_tokens(coord, hass, tokens=None, *, local_push=False):
+    """mobile_app's token store as core keeps it, for an iPhone on webhook "wh-iphone"."""
+    _as_iphone(coord)
+    coord._target_webhook_id = lambda target: "wh-iphone" if "iphone" in target else "wh-other"
+    store = {} if tokens is None else tokens
+    hass.data = {
+        "mobile_app": {
+            "live_activity_tokens": store,
+            "push_channel": {"wh-iphone": object()} if local_push else {},
+        }
+    }
+    return store
+
+
+def _live_pushes_to(calls, target):
+    return [
+        c[2] for c in calls
+        if c[1] == target.split(".", 1)[1]
+        and (c[2].get("data") or {}).get("live_update")
+    ]
+
+
+def test_an_iphone_without_the_cards_token_gets_one_start_not_one_per_refresh():
+    """Home Assistant sends a live push for a tag it holds no token for as a
+    push-to-start, which always alerts. The phone reports the new card's token
+    only while the app runs, so every five-minute refresh started another card
+    and chimed (R99, seen 16:29-16:51 on 2026-10-26). One start, then the card's
+    pushes wait for the token; Android is not held."""
+    iphone, pixel = "notify.mobile_app_iphone", "notify.mobile_app_pixel"
+    coord, hass = _coordinator(targets=(iphone, pixel))
+    tokens = _iphone_tokens(coord, hass)
+    calls = _frame_calls(coord, hass, **_printing(5))
+    assert len(_live_pushes_to(calls, iphone)) == 1
+    tag = _live_pushes_to(calls, iphone)[0]["data"]["tag"]
+
+    for progress in (10, 15):
+        hass.loop.advance(NOTIFY_LIVE_INTERVAL_SECS + 1)
+        calls = _frame_calls(coord, hass, **_printing(progress))
+        assert len(_live_pushes_to(calls, pixel)) == 1
+        assert _live_pushes_to(calls, iphone) == []
+
+    # The app ran and reported the card: from here on a push updates it.
+    tokens["wh-iphone"] = {tag: {"token": "abc", "expires_at": time.time() + 3600}}
+    hass.loop.advance(NOTIFY_LIVE_INTERVAL_SECS + 1)
+    calls = _frame_calls(coord, hass, **_printing(20))
+    assert [p["message"] for p in _live_pushes_to(calls, iphone)] == [
+        p["message"] for p in _live_pushes_to(calls, pixel)
+    ]
+
+
+def test_a_start_without_a_token_is_repeated_after_a_wait_that_doubles():
+    """In case iOS dropped the start: again after NOTIFY_LIVE_IOS_RESTART_SECS,
+    then twice that, rather than at every refresh."""
+    iphone = "notify.mobile_app_iphone"
+    coord, hass = _coordinator(targets=(iphone,))
+    _iphone_tokens(coord, hass)
+    sent = []
+    t = 0.0
+    for progress in range(5, 30):
+        if _live_pushes_to(_frame_calls(coord, hass, **_printing(progress)), iphone):
+            sent.append(t)
+        hass.loop.advance(NOTIFY_LIVE_INTERVAL_SECS)
+        t += NOTIFY_LIVE_INTERVAL_SECS
+    first_retry = next(x for x in sent if x >= NOTIFY_LIVE_IOS_RESTART_SECS)
+    assert sent == [0.0, first_retry, first_retry + 2 * NOTIFY_LIVE_IOS_RESTART_SECS]
+
+
+def test_a_start_the_notify_call_refused_does_not_hold_the_next_refresh():
+    """A start that failed left no card, so holding the refreshes behind it
+    kept the iPhone without one for NOTIFY_LIVE_IOS_RESTART_SECS (R99)."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    iphone = "notify.mobile_app_iphone"
+    for error in (HomeAssistantError("refused"), RuntimeError("unreachable")):
+        coord, hass = _coordinator(targets=(iphone,))
+        _iphone_tokens(coord, hass)
+
+        async def _fail(domain, service, data, **_kw):
+            raise error
+
+        ok = hass.services.async_call
+        hass.services.async_call = _fail
+        _frame_calls(coord, hass, **_printing(5))
+        hass.services.async_call = ok
+        hass.loop.advance(NOTIFY_LIVE_INTERVAL_SECS + 1)
+        assert len(_live_pushes_to(_frame_calls(coord, hass, **_printing(10)), iphone)) == 1
+
+
+def test_an_iphone_on_local_push_or_an_older_core_gets_every_refresh():
+    """On local push the app starts and updates the card itself, and a core
+    without Live Activity tokens cannot tell: neither is held."""
+    iphone = "notify.mobile_app_iphone"
+    for setup in ("local_push", "no_store"):
+        coord, hass = _coordinator(targets=(iphone,))
+        _iphone_tokens(coord, hass, local_push=setup == "local_push")
+        if setup == "no_store":
+            hass.data = {}
+        pushes = 0
+        for progress in (5, 10, 15):
+            pushes += len(_live_pushes_to(_frame_calls(coord, hass, **_printing(progress)), iphone))
+            hass.loop.advance(NOTIFY_LIVE_INTERVAL_SECS + 1)
+        assert pushes == 3, setup
+
+
+def test_a_cleared_card_gets_its_start_at_once_even_while_one_waits():
+    """Taking the iPhone off the targets clears its card; put back, its card
+    starts again at once, not after the wait the last start set."""
+    iphone, pixel = "notify.mobile_app_iphone", "notify.mobile_app_pixel"
+    coord, hass = _coordinator(targets=(iphone, pixel))
+    _iphone_tokens(coord, hass)
+    _frame_calls(coord, hass, **_printing(5))
+    options = {"notify_live": True, "notify_targets": [pixel]}
+    coord.notify_options_changed(options)
+    asyncio.get_event_loop().run_until_complete(asyncio.gather(*hass.tasks))
+    hass.tasks, hass.calls = [], []
+    coord._live_card.clear()
+    coord._live_resync = True
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    calls = _frame_calls(coord, hass, **_printing(6))
+    assert len(_live_pushes_to(calls, iphone)) == 1
+
+
+def test_a_start_behind_a_clear_of_its_own_tag_counts_as_a_start():
+    """A printer without `printStartTime` clears the shared tag before a new
+    card, which takes an old card's token with it: the START is a push-to-start
+    even though a token was stored when it was sent."""
+    iphone = "notify.mobile_app_iphone"
+    coord, hass = _coordinator(targets=(iphone,))
+    tag = coord._job_live_tag()
+    tokens = _iphone_tokens(
+        coord, hass, {"wh-iphone": {tag: {"token": "old", "expires_at": time.time() + 3600}}}
+    )
+    _frame_calls(coord, hass, **_printing(5))
+    del tokens["wh-iphone"]  # what core does when it delivers the clear
+    hass.loop.advance(NOTIFY_LIVE_INTERVAL_SECS + 1)
+    assert _live_pushes_to(_frame_calls(coord, hass, **_printing(10)), iphone) == []
+
+
+def test_the_next_print_on_a_shared_tag_starts_its_card_at_once():
+    """A printer without `printStartTime` puts every card on one tag. A print
+    finished within the wait, or the card switched off and on, must not hold
+    the next card's start behind the last one's."""
+    iphone = "notify.mobile_app_iphone"
+    coord, hass = _coordinator(targets=(iphone,))
+    _iphone_tokens(coord, hass)
+    _frame_calls(coord, hass, **_printing(50))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    _frame_calls(coord, hass, **_printing(100, printLeftTime=0))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    _frame_calls(coord, hass, **_stopped_as_reported())
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    calls = _frame_calls(coord, hass, **_printing(1, printJobTime=5))
+    assert len(_live_pushes_to(calls, iphone)) == 1, "after a finished print"
+
+    # Switched off: the clear goes out and the card state is dropped; the
+    # stub's coordinator still has the card on, as if switched back at once.
+    coord.notify_options_changed({"notify_live": False, "notify_targets": [iphone]})
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    calls = _frame_calls(coord, hass, **_printing(2, printJobTime=40))
+    assert len(_live_pushes_to(calls, iphone)) == 1, "after the card was switched off and on"
+
+
+def test_the_resync_after_a_restart_reaches_an_iphone_silently():
+    """After a restart mid-print the card is pushed again as a START, but Home
+    Assistant still holds its token and sends it as an update, which chimed
+    without `silent` (R99, the 17:19 and 17:22 restarts on 2026-10-26)."""
+    iphone = "notify.mobile_app_iphone"
+    coord, hass = _coordinator(targets=(iphone,))
+    tag = coord._job_live_tag()
+    _iphone_tokens(coord, hass, {"wh-iphone": {tag: {"token": "t", "expires_at": time.time() + 3600}}})
+    coord._live_resync = True
+    pushes = _live_pushes_to(_frame_calls(coord, hass, **_printing(40)), iphone)
+    assert len(pushes) == 1
+    assert pushes[0]["data"]["silent"] is True
+
+
 def test_a_new_card_on_an_iphone_is_preceded_by_a_clear_of_its_tag():
     """Home Assistant sends every push to an unexpired stored token as an
     UPDATE, the START included; a card swiped away left one behind and the
@@ -1682,6 +1938,81 @@ def test_a_new_card_on_an_iphone_is_preceded_by_a_clear_of_its_tag():
     # Later pushes update the card; no further clears.
     hass.loop.advance(400)
     assert CLEAR_NOTIFICATION_MARKER not in _live_tag_messages(_frame_calls(coord, hass, **_printing(30)))
+
+
+def _live_tag_calls(calls):
+    """(tag, message) of every push on a live-card tag, in order."""
+    out = []
+    for call in calls:
+        tag = (call[2].get("data") or {}).get("tag", "")
+        if tag.endswith("_live"):
+            out.append((tag, call[2]["message"]))
+    return out
+
+
+T1, T2 = 1792915251, 1792915744
+
+
+def test_a_print_the_printer_dates_gets_a_card_tag_of_its_own_and_no_clear():
+    """The clear before a new card's START could reach an iPhone after the
+    START and end the card it had just started (R98). A tag of the job's own
+    has no stale token to clear."""
+    coord, hass = _coordinator(targets=("notify.mobile_app_iphone",))
+    _as_iphone(coord)
+    calls = _live_tag_calls(_frame_calls(coord, hass, **_printing(10, printStartTime=T2)))
+    job_tag = f"{coord._notify_tag_base()}_{T2}_live"
+    assert [m != CLEAR_NOTIFICATION_MARKER for tag, m in calls if tag == job_tag] == [True]
+
+
+def test_a_reprint_gets_a_new_card_tag_and_the_finished_job_keeps_its_own():
+    coord, hass = _coordinator(targets=("notify.mobile_app_iphone",))
+    _as_iphone(coord)
+    base = coord._notify_tag_base()
+    first = _live_tag_calls(_frame_calls(coord, hass, **_printing(10, printStartTime=T1)))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    first += _live_tag_calls(_frame_calls(
+        coord, hass, **_printing(100, printStartTime=T1, state=2, printLeftTime=0, printJobTime=1900)
+    ))
+    assert {tag for tag, m in first if m != CLEAR_NOTIFICATION_MARKER} == {f"{base}_{T1}_live"}
+    assert any(m == _COMPLETED for _t, m in first), "the banner replaces the card on its tag"
+
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    second = _live_tag_calls(_frame_calls(coord, hass, **_printing(1, printStartTime=T2, printJobTime=5)))
+    assert {tag for tag, m in second if m != CLEAR_NOTIFICATION_MARKER} == {f"{base}_{T2}_live"}
+    assert (f"{base}_{T2}_live", CLEAR_NOTIFICATION_MARKER) not in second
+
+
+def test_a_card_is_cleared_on_its_own_tag_after_the_next_job_moved_on():
+    """By the time a new job is seen, `printStartTime` already names it; the
+    card still on the phone carries the old job's tag."""
+    coord, hass = _coordinator(targets=("notify.mobile_app_iphone",))
+    _as_iphone(coord)
+    base = coord._notify_tag_base()
+    _frame_calls(coord, hass, **_printing(40, printStartTime=T1))
+    hass.loop.advance(NOTIFY_LIVE_MIN_INTERVAL_SECS + 1)
+    calls = _live_tag_calls(_frame_calls(coord, hass, **_printing(
+        1, printStartTime=T2, printJobTime=5, printFileName="/usr/data/printer_data/gcodes/next.gcode",
+    )))
+    assert (f"{base}_{T1}_live", CLEAR_NOTIFICATION_MARKER) in calls
+    assert (f"{base}_{T2}_live", CLEAR_NOTIFICATION_MARKER) not in calls
+    assert [m for t, m in calls if t == f"{base}_{T2}_live"], "the new job gets its card"
+
+
+def test_a_restart_mid_print_picks_the_card_up_on_the_same_tag():
+    """The same job's tag after a restart, so Home Assistant finds the card's
+    token and updates it instead of starting a second one."""
+    coord, hass = _coordinator(targets=("notify.mobile_app_iphone",))
+    _as_iphone(coord)
+    coord._notify_primed = False
+    _frame_calls(coord, hass, **_printing(40, printStartTime=T1))  # the baseline
+    hass.loop.advance(1)
+    calls = _live_tag_calls(_frame_calls(coord, hass, **_printing(41, printStartTime=T1)))
+    base = coord._notify_tag_base()
+    assert {tag for tag, m in calls if m != CLEAR_NOTIFICATION_MARKER} == {f"{base}_{T1}_live"}
+    assert (f"{base}_{T1}_live", CLEAR_NOTIFICATION_MARKER) not in calls
+    # A card an older version left on the shared tag (an upgrade mid-print)
+    # is taken away; a different tag, so its order does not matter.
+    assert (f"{base}_live", CLEAR_NOTIFICATION_MARKER) in calls
 
 
 def test_an_android_card_starts_without_a_clear():

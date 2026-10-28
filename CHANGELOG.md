@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and versions are numbered major.minor.patch, with a fourth number for a hotfix release (0.9.6.1).
 
 
+## 0.9.10 - Unreleased
+> [List of issues (0.9.10)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.10)
+
+### TL;DR
+
+- Home Assistant no longer runs out of memory while a printer's camera is down: go2rtc leaked on every failed snapshot.
+- K1C prints are announced as finished when the printer ends them, not 15 seconds early, and Print Status no longer flips to Printing at the end or to Idle at the start.
+- No more false "filament ran out" on a K1C: a runout is read from the printer's runout sensor, and shows until the filament is reloaded.
+- The go2rtc camera connects from outside the home network, direct WebRTC works in ordinary browsers at home, and an Auto camera no longer gets stuck on direct WebRTC after a moment without video.
+- Targets set from a script no longer snap back before the printer confirms them, iPhone notifications show the current print's thumbnail, and custom live-card text leaves out values the printer does not know yet.
+- Print Status no longer writes a set of attributes to the database every second while printing.
+- On an iPhone, tapping the live print card or a notification opens the printer camera, as on Android.
+- An iPhone no longer chimes at live-card refreshes, or when Home Assistant restarts or the notification settings are saved mid-print.
+
+### Fixes
+
+- **A K1C print was announced as finished 15 seconds early, and Print Status went back to Printing**: the printer rounds progress up to 100% while still printing (86 s left in a captured print), drops back to 99, and only then reports the job finished. Completion followed the first 100. It now waits until the printer stops printing or has no time left.
+- **A K1C reported "filament ran out" at the first print after power-on, with filament loaded**: this firmware can raise its "consumable not detected" flag as that print starts and keep it until power-off while printing normally. A runout now needs the printer's runout sensor to agree, which a K1C reports separately: it showed a real runout, captured by pulling the filament mid-print, and stayed clear through the false one. Filament Status reads runout until the filament is reloaded. On printers that do not report the sensor, the alert needs the flag on a paused print, and a flag that stays up while printing is ignored until it clears.
+- **Targets set from a script snapped back to their old value** ([#132](https://github.com/3dg1luk43/ha_creality_ws/issues/132)): every frame from the printer carries everything it has reported so far, so a target shown before the printer confirmed it was overwritten by the next frame of any kind. The value set now stays until the printer reports that target itself. A K1C confirms within 0.2 s and did not show it; thanks to @chammp for the report.
+- **iPhone notifications showed an earlier print's thumbnail** ([#131](https://github.com/3dg1luk43/ha_creality_ws/issues/131)): the preview's address was the same for every print, so iOS reused its cached picture. The address now changes with every print and whenever the picture does. Thanks to @sammyke007 for the diagnosis and the tested fix.
+- **Custom live-card text read "0% - 0/0 - 0s" during warm-up and self-test**: `{eta}`, `{layer}` and `{total_layers}` passed on the printer's zeros, which mean "not known yet". They are now empty, so an optional `[...]` segment around them drops out, as the built-in text already did.
+- **Home Assistant could run out of memory while a printer's camera was down** ([#133](https://github.com/3dg1luk43/ha_creality_ws/issues/133)): go2rtc 1.9.14, which Home Assistant ships, leaks about 190 KB and six sockets each time it fails to connect to a Creality camera, and the integration asked it for a snapshot at every dashboard refresh, for example while the printer rebooted or its camera service hung: about 70 MB and 2,000 sockets an hour. The integration now checks that the printer's camera answers before asking go2rtc, and after a failed snapshot waits 30 s, doubling up to 10 minutes, before the next.
+- **An Auto camera could move to direct WebRTC for good after a moment without video** ([#134](https://github.com/3dg1luk43/ha_creality_ws/issues/134)): two silent go2rtc snapshots 20 s apart were enough, which a printer still booting also produces, and direct WebRTC never works outside the home network or gives still images. It now takes ten minutes of go2rtc connected without video. A camera moved by an older version gets one more go2rtc try after the upgrade.
+- **The WebRTC (go2rtc) camera stayed black outside the home network** ([#134](https://github.com/3dg1luk43/ha_creality_ws/issues/134)): the integration handed go2rtc the browser's offer alone, so go2rtc could only offer the addresses it has on the local network, and never heard the browser's. It now signals go2rtc the way Home Assistant's own go2rtc cameras do: with the browser's STUN servers, so go2rtc also offers its public address, and with candidates passed both ways.
+- **Direct WebRTC stayed black in most browsers**: a browser hides its local address behind a random `.local` name unless the page has camera or microphone permission, and a K1C on firmware 1.3.5.22 never contacts such an address, so no video arrives. Home Assistant now looks the name up on the local network and gives the printer the address. go2rtc mode was not affected.
+- **Print Status went Stopped, Idle, Printing at the start of every K1C print**: the printer reports a starting state for under a second, which read as Idle and set off automations waiting for the printer to be idle. It now reads Processing, and the live card still starts only once printing does.
+- **On an iPhone, tapping the live print card or a notification opened the app on its last page**: the integration sent iPhones no link, because the `entityId:` link Android uses does not exist on iOS, so a tap on the Dynamic Island, the lock-screen card or a banner just opened Home Assistant wherever it was. It now sends a link to the printer camera's dialog, which iOS opens the same way. A dashboard path set in the options still takes precedence.
+- **An iPhone's live card could fail to appear when a print started**: each print's card was posted on the same tag as every other print's, so the integration first sent a dismissal on that tag, to end a card left over from an earlier print, and then started the new one. An iPhone can process the two in either order, and when the dismissal came second it ended the new card. Each print's card now has a tag of its own, taken from the print's start time the printer reports, so nothing needs dismissing first. A printer that does not report it keeps the shared tag. Related to [#125](https://github.com/3dg1luk43/ha_creality_ws/issues/125).
+- **The iPhone live card could vanish after a change in the notification settings**: saving them re-sends the card, and the integration sent a dismissal on the same tag just before it, as it does for a new print. An iPhone can process the two in either order, and when the dismissal came second it ended the card it had just started; the card stayed away until the next refresh, up to five minutes later. A settings change now re-sends the card in place, without the dismissal.
+- **An iPhone chimed at every live-card refresh, for example after its notification settings were saved**: Home Assistant updates an iPhone's live card only once the phone has reported the card's token, which it does only while the app runs, and sends every push before that as a new card, which always alerts. So each refresh started another card, with a sound, until the app was opened. After one new card, the integration now holds an iPhone's refreshes until Home Assistant has the token, and sends the card again after half an hour, then less often, in case iOS dropped it. The card re-sent after a restart or a settings save also chimed, as an update the integration did not mark silent; it now is.
+- **Print Status wrote a new set of attributes to the database every second while printing**: its job time, time left, used filament and flow attributes change every second and duplicate their own sensors. They are no longer recorded, and still update for templates.
+
+### Internal
+
+- Three real K1C traces, a print starting, a print finishing and a filament runout, are test fixtures; the tests replay them through the real coordinator.
+- The simulator answers WebRTC offers the way the printer does, so go2rtc gets video from it on the test box.
+- The simulator's K1C 1.3.5.22 profile finishes a print the way the real one does: state 2 for 50 s, then 0.
+
+
 ## 0.9.9 - 2026-10-08
 > [List of issues (0.9.9)](https://github.com/3dg1luk43/ha_creality_ws/issues?q=is%3Aissue+milestone%3Av0.9.9)
 

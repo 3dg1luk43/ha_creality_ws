@@ -649,5 +649,60 @@ def test_no_cfs_is_not_asked_for():
     assert BOXS_INFO not in _gets_on_connect(cfs_connect=0)
 
 
+def test_a_commanded_target_survives_frames_that_do_not_carry_it():
+    """Every frame hands on the whole cumulative state, so a target set on the
+    coordinator alone was reverted by the next temperature frame until the
+    printer echoed it: set to 95, then back at 0 (#132). The printer's own
+    report of the key still wins."""
+    messages = [
+        json.dumps({"targetBedTemp0": 0, "bedTemp0": "22.000000"}),
+        json.dumps({"bedTemp0": "22.500000"}),
+        json.dumps({"targetBedTemp0": 90}),
+    ]
+
+    @asynccontextmanager
+    async def _connect(url, **kwargs):
+        class _WS:
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if not messages:
+                    raise StopAsyncIteration
+                return messages.pop(0)
+
+            async def send(self, *_a):
+                """Heartbeats and polls go nowhere."""
+
+            async def close(self, *a, **k):
+                """No-op close."""
+
+        yield _WS()
+
+    async def run():
+        received: list[dict] = []
+        client = KClient("192.0.2.7", None)
+
+        async def _on_msg(payload):
+            received.append(payload)
+            if len(received) == 1:
+                # The setter, between two frames.
+                client.assume({"targetBedTemp0": 95})
+
+        client._on_message = _on_msg
+        with patch.object(ws_client_module.websockets, "connect", _connect):
+            await client.start()
+            for _ in range(40):
+                if len(received) >= 3:
+                    break
+                await asyncio.sleep(0.01)
+            await client.stop()
+        return received, client.reported("targetBedTemp0")
+
+    received, reported = asyncio.run(run())
+    assert [frame["targetBedTemp0"] for frame in received[:3]] == [0, 95, 90]
+    assert reported == 90
+
+
 def teardown_module(_module):
     restore_stubs(__name__)

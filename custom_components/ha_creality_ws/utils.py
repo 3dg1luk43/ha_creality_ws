@@ -258,6 +258,30 @@ def detect_camera_type(data: Mapping[str, Any] | None, previous: str | None = No
     return previous
 
 
+# The first version whose Auto camera needs a lasting silence before it moves to
+# direct WebRTC (#134); a verdict cached by an older one is retried once.
+DIRECT_FALLBACK_RULE_VERSION = (0, 9, 10)
+
+
+def camera_type_to_keep(previous: str | None, cached_version: Any) -> str | None:
+    """The cached camera type to carry into re-detection after an upgrade.
+
+    A `webrtc_direct` verdict reached before 0.9.10 took two silent go2rtc
+    snapshots 20 s apart, which a booting printer also produces, and it is
+    cached for good: a K1 Max go2rtc streams fine sat on direct WebRTC, blank
+    outside the LAN (#134). Such a verdict is dropped once, so go2rtc is tried
+    again under the rule that needs ten minutes of silence. Anything else, or a
+    version that cannot be read as older, is kept.
+    """
+    if previous != "webrtc_direct":
+        return previous
+    try:
+        parts = tuple(int(part) for part in str(cached_version).split(".")[:3])
+    except ValueError:
+        return previous
+    return None if parts < DIRECT_FALLBACK_RULE_VERSION else previous
+
+
 def normalize_printer_hostname(value: Any) -> str | None:
     """A printer hostname comparable between mDNS and telemetry, or None.
 
@@ -625,6 +649,37 @@ BUSY_PRINT_STATES = frozenset({"printing", "paused", "processing", "self-testing
 PREVIEW_PRINT_STATES = frozenset(BUSY_PRINT_STATES | {"completed"})
 
 
+def print_seconds_left(data: Mapping[str, Any]) -> float | None:
+    """Seconds remaining in the current print, or None.
+
+    The printer streams this as `printLeftTime`; `printTimeLeft` is only kept
+    as a fallback because the notification code used to look for that name
+    exclusively, which meant the minutes-to-end notification never fired.
+    """
+    for key in ("printLeftTime", "printTimeLeft"):
+        value = safe_float(data.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def print_finishing(data: Mapping[str, Any]) -> bool:
+    """A job the printer has rounded up to 100% but is still running.
+
+    A K1C reports 100 with time still on the clock (86 s in the 2026-10-25
+    capture), drops back to 99, and only then ends the job, with state 2 and no
+    time left. Reading 100% as the end announced the completion early and
+    flapped the status back to printing for the 99 (R81). Only an explicit
+    "printing or paused, with time left" holds the end back: a printer that
+    reports no estimate, or one that leaves state 1 at the end, still finishes
+    on its 100.
+    """
+    if data.get("state") not in (1, 5):
+        return False
+    left = print_seconds_left(data)
+    return left is not None and math.isfinite(left) and left > 0
+
+
 def derive_print_state(
     data: dict[str, Any],
     *,
@@ -672,7 +727,7 @@ def derive_print_state(
         progress = int(progress)
 
     if filename:
-        if progress >= 100:
+        if progress >= 100 and not print_finishing(data):
             return "completed"
         if state == 5 or paused_flag:
             return "paused"
@@ -684,9 +739,11 @@ def derive_print_state(
         # 30 s, raised Z, then reported 4, and read "idle" meanwhile (R29).
         # Busy, not an end: from one capture 7 cannot be ruled out elsewhere in
         # a print, and calling it "stopped" would announce a stop that did not
-        # happen. (9, for half a second as a job starts, stays idle: mapping it
-        # only added a live push 90 ms before the "printing" one.)
-        if state in (0, 7):
+        # happen. 9 is the K1C starting a job, for under a second before 1;
+        # read as "idle" it made every start stopped -> idle -> printing, which
+        # fires automations waiting for idle (R89). The live card does not
+        # start on "processing", so it costs no extra push.
+        if state in (0, 7, 9):
             return "processing"
 
     return "idle"

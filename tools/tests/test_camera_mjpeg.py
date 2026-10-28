@@ -8,6 +8,8 @@ plays mjpg-streamer.
 """
 
 import asyncio
+import base64
+import json
 import sys
 from types import SimpleNamespace
 
@@ -269,3 +271,135 @@ def test_candidates_in_json_form_are_read_too():
         OFFER,
     )
     assert lines == ["a=candidate:5002 1 udp 1 10.0.0.2 5002 typ host"]
+
+
+# --------------------------------------------------------------------------- #
+# Direct WebRTC: a browser's hidden address (R87)
+# --------------------------------------------------------------------------- #
+
+MDNS_OFFER = "\r\n".join([
+    "v=0",
+    "o=- 1 1 IN IP4 0.0.0.0",
+    "s=-",
+    "t=0 0",
+    "a=group:BUNDLE 0",
+    "m=video 9 UDP/TLS/RTP/SAVPF 96",
+    "a=mid:0",
+    "a=candidate:1 1 udp 2113937151 0f1e2d3c-aaaa.local 54321 typ host generation 0",
+    "a=candidate:2 1 udp 1677729535 198.51.100.7 4044 typ srflx raddr 0.0.0.0 rport 0",
+    "a=candidate:3 1 udp 2113937151 gone-away.local 54322 typ host",
+    "",
+])
+
+
+def test_a_browsers_hidden_address_is_resolved_before_the_printer_sees_it(monkeypatch):
+    """Browsers offer `<uuid>.local` instead of their address; a K1C never
+    checks it, starts no ICE of its own, and the stream stays at 0 bytes."""
+    asked = []
+
+    async def resolve(hass, names):
+        asked.append(names)
+        return {"0f1e2d3c-aaaa.local": "192.168.0.50"}
+
+    monkeypatch.setattr(camera_mod, "_async_resolve_mdns_hosts", resolve)
+    cam = _webrtc_camera()
+    cam.hass = SimpleNamespace()
+    out = asyncio.run(cam._printer_reachable_candidates(MDNS_OFFER))
+    assert asked == [["0f1e2d3c-aaaa.local", "gone-away.local"]]
+    assert "a=candidate:1 1 udp 2113937151 192.168.0.50 54321 typ host generation 0\r\n" in out
+    # A name that did not answer, and every other line, is left as it was.
+    assert "a=candidate:3 1 udp 2113937151 gone-away.local 54322 typ host\r\n" in out
+    assert out.replace("192.168.0.50", "0f1e2d3c-aaaa.local") == MDNS_OFFER
+
+
+def test_an_offer_without_hidden_addresses_does_no_lookup(monkeypatch):
+    async def resolve(hass, names):  # pragma: no cover - must not run
+        raise AssertionError("looked up")
+
+    monkeypatch.setattr(camera_mod, "_async_resolve_mdns_hosts", resolve)
+    plain = MDNS_OFFER.replace("0f1e2d3c-aaaa.local", "192.168.0.50").replace("gone-away.local", "192.168.0.51")
+    assert asyncio.run(_webrtc_camera()._printer_reachable_candidates(plain)) == plain
+
+
+def test_the_printer_gets_the_resolved_address_in_the_offer_it_is_posted(monkeypatch):
+    """Wired into the signalling the way Home Assistant drives it."""
+    answer = "\r\n".join([
+        "v=0", "o=- 2 2 IN IP4 0.0.0.0", "s=-", "t=0 0", "a=group:BUNDLE 0",
+        "m=video 9 UDP/TLS/RTP/SAVPF 96", "a=mid:0", "a=sendonly", "",
+    ])
+    posted = []
+
+    async def handle(request):
+        posted.append(json.loads(base64.b64decode(await request.text()))["sdp"])
+        body = base64.b64encode(json.dumps({"type": "answer", "sdp": answer}).encode()).decode()
+        return web.Response(text=body)
+
+    async def resolve(hass, names):
+        return {name: "192.168.0.50" for name in names}
+
+    async def main():
+        app = web.Application()
+        app.router.add_post("/call/webrtc_local", handle)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        session = aiohttp.ClientSession()
+        monkeypatch.setattr(camera_mod, "async_get_clientsession", lambda hass: session)
+        monkeypatch.setattr(camera_mod, "_async_resolve_mdns_hosts", resolve)
+        cam = _webrtc_camera()
+        cam.hass = SimpleNamespace()
+        cam._direct_sessions = {}
+        cam._upstream_signaling_url = f"http://127.0.0.1:{port}/call/webrtc_local"
+        sent = []
+        try:
+            await cam._handle_direct_webrtc_offer(MDNS_OFFER, "s1", lambda msg: sent.append(msg.as_dict()))
+        finally:
+            await session.close()
+            await runner.cleanup()
+        return sent
+
+    sent = asyncio.run(main())
+    assert sent and sent[-1]["type"] == "answer"
+    assert " 192.168.0.50 54321 typ host" in posted[0]
+    assert ".local" not in posted[0]
+
+
+def test_the_printer_endpoint_probe_takes_any_http_answer_and_caches_it(monkeypatch):
+    """The check before a go2rtc snapshot (#133): one GET, no peer connection.
+    The K1C answers 200 "{}", the simulator 405; a printer whose WebRTC server
+    is down refuses the connection."""
+
+    async def main():
+        async def handle(request):
+            return web.Response(status=405)
+
+        app = web.Application()
+        app.router.add_get("/call/webrtc_local", handle)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        session = aiohttp.ClientSession()
+        monkeypatch.setattr(camera_mod, "async_get_clientsession", lambda hass: session)
+        cam = _webrtc_camera()
+        cam.hass = SimpleNamespace()
+        cam._go2rtc_source = None
+        cam._webrtc_probe = None
+        cam._upstream_signaling_url = f"http://127.0.0.1:{port}/call/webrtc_local"
+        try:
+            up = await cam._printer_webrtc_answering()
+            await runner.cleanup()
+            cached = await cam._printer_webrtc_answering()
+            cam._webrtc_probe = None
+            down = await cam._printer_webrtc_answering()
+            cam._go2rtc_source = "rtsp://nvr/stream"
+            cam._webrtc_probe = None
+            custom = await cam._printer_webrtc_answering()
+        finally:
+            await session.close()
+        return up, cached, down, custom
+
+    assert asyncio.run(main()) == (True, True, False, True)

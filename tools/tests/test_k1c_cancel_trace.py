@@ -13,6 +13,9 @@ import json
 from pathlib import Path
 
 from test_notification_live import CLEAR_NOTIFICATION_MARKER, _coordinator, _frame_calls
+# Its autouse event-loop fixture, so these replays do not depend on what ran
+# before them: a module that clears the loop on teardown left none to use.
+from test_notification_live import _loop  # noqa: F401
 
 from custom_components.ha_creality_ws.utils import coerce_numbers, derive_print_state
 
@@ -42,9 +45,10 @@ def _replay():
 
 
 def test_the_status_follows_the_job_through_the_cancel():
-    """State 7, while the cancel finishes the move under way, read "idle"."""
+    """State 7, while the cancel finishes the move under way, read "idle".
+    State 9, as the job starts, reads "processing" too (R89)."""
     statuses, _pushes, _raw, _events = _replay()
-    assert statuses == ["idle", "printing", "self-testing", "processing", "stopped"]
+    assert statuses == ["idle", "processing", "printing", "self-testing", "processing", "stopped"]
 
 
 def test_the_cancel_is_announced_once_when_the_printer_reports_the_stop():

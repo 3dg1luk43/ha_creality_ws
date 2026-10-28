@@ -199,15 +199,33 @@ def test_a_runout_names_the_print_state_in_words(monkeypatch):
     frame = {"printFileName": "job.gcode", "printProgress": 40, "state": 1, "materialStatus": 0}
     coord.data = dict(frame)
     _run(coord._check_notifications({}))
-    coord.data = {**frame, "materialStatus": 1}
+    # A runout pauses the job; the flag alone is not one (R82).
+    coord.data = {**frame, "materialStatus": 1, "state": 5}
     _run(coord._check_notifications({}))
     status = json.loads(
         (Path(__file__).resolve().parents[2] / "custom_components/ha_creality_ws/strings.json")
         .read_text(encoding="utf-8")
     )["entity"]["sensor"]["print_status"]["state"]
     assert sent == [
-        _STRINGS["filament_runout"].format(device="1.2.3.4", state=status["printing"])
+        _STRINGS["filament_runout"].format(device="1.2.3.4", state=status["paused"])
     ]
+
+
+def test_filament_status_reads_the_flag_unless_it_is_shown_false(monkeypatch):
+    """Without a runout sensor, the alert needs a paused job; Filament Status
+    took the same rule, so after a runout's print was cancelled it read normal
+    with the filament still out (R82)."""
+    coord, _sent = _coordinator(monkeypatch)
+    idle = {"printFileName": "job.gcode", "state": 4, "materialStatus": 1}
+    coord.data = dict(idle)
+    assert coord.filament_runout() is True
+    assert coord._runout_reported(coord.data) is False  # the alert's rule
+    # Shown false: the printer's runout sensor says 0, or the flag is a latch.
+    coord.data = {**idle, "materialDetector1": 0}
+    assert coord.filament_runout() is False
+    coord.data = dict(idle)
+    coord._material_flag_stale = True
+    assert coord.filament_runout() is False
 
 
 def test_minutes_to_end_already_inside_window_at_startup_is_silent(monkeypatch):

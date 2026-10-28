@@ -609,11 +609,16 @@ def test_a_standalone_go2rtc_on_the_default_pair_is_still_used_without_has_own()
     )
 
 
-def _strikes(answers):
-    """Run failed-snapshot checks with go2rtc answering `answers` in turn;
-    return how many times the camera asked to move to direct WebRTC."""
+def _strikes(answers, step=0.0):
+    """Run failed-snapshot checks with go2rtc answering `answers` in turn,
+    `step` seconds apart; return how many times the camera asked to move to
+    direct WebRTC."""
     import asyncio
+    import custom_components.ha_creality_ws.camera as camera_mod
 
+    clock = iter(1000.0 + step * i for i in range(len(answers)))
+    real = camera_mod._monotonic
+    camera_mod._monotonic = lambda: next(clock)
     cam = _camera()
     cam._stream_name = "creality_k2_1_2_3_4"
     moves = []
@@ -624,16 +629,36 @@ def _strikes(answers):
         for _ in answers:
             await cam._note_failed_snapshot()
 
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    finally:
+        camera_mod._monotonic = real
     return len(moves)
 
 
 def test_go2rtc_connected_without_video_twice_moves_to_direct_webrtc():
     """#46: the K1C 2025 sends a payload type its own answer did not list,
     go2rtc drops every packet, and only the browser-side path shows video."""
-    assert _strikes([False, False]) == 1
+    assert _strikes([False, False], step=600) == 1
     # Once is enough: the camera is rebuilt by then.
-    assert _strikes([False, False, False, False]) == 1
+    assert _strikes([False, False, False, False], step=600) == 1
+
+
+def test_a_short_silence_does_not_move_the_camera_for_good():
+    """Two silent snapshots 20 s apart also fit a printer still booting, and
+    the move is cached for good: a K1 Max go2rtc streams fine ended up on
+    direct WebRTC, blank outside the LAN (#134). Silence that lasts does."""
+    assert _strikes([False, False], step=20) == 0
+    assert _strikes([False] * 5, step=120) == 0
+    assert _strikes([False] * 6, step=120) == 1
+
+
+def test_two_silent_moments_an_hour_apart_are_not_lasting_silence():
+    """With the printer off in between, no snapshot runs and nothing clears the
+    first strike, so a silent boot an hour later was taken for ten minutes of
+    silence (#134)."""
+    assert _strikes([False, False], step=3600) == 0
+    assert _strikes([False, False, False], step=3600) == 0
 
 
 def test_one_silent_moment_or_a_dark_printer_moves_nothing():
@@ -708,3 +733,252 @@ def test_the_video_check_runs_while_the_snapshot_is_still_waiting(monkeypatch):
     fine = run(succeeded=True)
     fine._note_failed_snapshot.assert_not_awaited()
     assert fine._silent_snapshots == 0
+
+
+# --------------------------------------------------------------------------- #
+# go2rtc snapshots and its leaking creality dial (#133)
+# --------------------------------------------------------------------------- #
+
+_JPEG = b"\xff\xd8" + b"\x00" * 32 + b"\xff\xd9"
+
+
+def _snapshot_camera(answering=True):
+    import custom_components.ha_creality_ws.camera as camera_mod
+
+    from types import SimpleNamespace
+
+    cam = _camera()
+    cam.coordinator = SimpleNamespace(power_is_off=lambda: False, available=True)
+    cam._last_frame = None  # set by _BaseCamera.__init__, patched out by _camera()
+    cam._ensure_stream_configured = AsyncMock()
+    cam._stream_name = "creality_k2_1_2_3_4"
+    cam._go2rtc_client = MagicMock()
+    cam._go2rtc_client.get_jpeg_snapshot = AsyncMock(side_effect=camera_mod.Go2RtcClientError())
+    cam._printer_webrtc_answering = AsyncMock(return_value=answering)
+    return cam
+
+
+def test_a_failed_snapshot_holds_off_the_next_and_the_hold_off_doubles():
+    """go2rtc 1.9.14 leaks a peer connection per failed creality dial; one dial
+    per 10 s dashboard refresh grew it by tens of MB an hour (#133)."""
+    import asyncio
+
+    cam = _snapshot_camera()
+
+    async def run():
+        await cam.async_camera_image()
+        await cam.async_camera_image()  # inside the hold-off: no dial
+        first = cam._snapshot_backoff
+        cam._snapshot_retry_at = 0.0  # the hold-off has passed
+        await cam.async_camera_image()
+        return first, cam._snapshot_backoff
+
+    first, second = asyncio.run(run())
+    assert cam._go2rtc_client.get_jpeg_snapshot.await_count == 2
+    assert (first, second) == (30.0, 60.0)
+
+    cam._snapshot_retry_at = 0.0
+    cam._go2rtc_client.get_jpeg_snapshot = AsyncMock(return_value=_JPEG)
+    assert asyncio.run(cam.async_camera_image()) == _JPEG
+    assert cam._snapshot_backoff == 0.0 and cam._snapshot_retry_at == 0.0
+
+
+def test_a_snapshot_home_assistant_cancels_holds_off_the_next_too():
+    """Home Assistant cancels a still image at 10 s; go2rtc's handler goes on
+    waiting, so the next refresh would stack another on top."""
+    import asyncio
+    import contextlib
+
+    cam = _snapshot_camera()
+
+    async def hang(**_kw):
+        await asyncio.sleep(3600)
+
+    cam._go2rtc_client.get_jpeg_snapshot = AsyncMock(side_effect=hang)
+
+    async def run():
+        task = asyncio.create_task(cam.async_camera_image())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        return cam._snapshot_retry_at - asyncio.get_running_loop().time()
+
+    assert asyncio.run(run()) > 25
+
+
+def test_a_snapshot_queued_behind_a_failing_one_does_not_dial_too():
+    """Both passed the hold-off check before the first failed; the second
+    dialled go2rtc as soon as it got the lock (#133)."""
+    import asyncio
+    import custom_components.ha_creality_ws.camera as camera_mod
+
+    cam = _snapshot_camera()
+
+    async def fail(**_kw):
+        await asyncio.sleep(0)
+        raise camera_mod.Go2RtcClientError()
+
+    cam._go2rtc_client.get_jpeg_snapshot = AsyncMock(side_effect=fail)
+
+    async def run():
+        await asyncio.gather(cam.async_camera_image(), cam.async_camera_image())
+
+    asyncio.run(run())
+    assert cam._go2rtc_client.get_jpeg_snapshot.await_count == 1
+
+
+def test_no_go2rtc_snapshot_while_the_printers_endpoint_is_down():
+    import asyncio
+
+    cam = _snapshot_camera(answering=False)
+    asyncio.run(cam.async_camera_image())
+    cam._go2rtc_client.get_jpeg_snapshot.assert_not_awaited()
+
+
+# --------------------------------------------------------------------------- #
+# go2rtc signalling over its WebSocket, with ICE servers and trickle (#134)
+# --------------------------------------------------------------------------- #
+
+
+class _FakeWs:
+    instances: list = []
+
+    def __init__(self, session, server_url, *, source=None):
+        self.session, self.server_url, self.source = session, server_url, source
+        self.sent, self.subscribers, self.closed = [], [], False
+        _FakeWs.instances.append(self)
+
+    def subscribe(self, callback):
+        self.subscribers.append(callback)
+
+    async def send(self, message):
+        self.sent.append(message)
+
+    async def close(self):
+        self.closed = True
+
+
+class _Offer:
+    def __init__(self, offer, ice_servers):
+        self.offer, self.ice_servers = offer, ice_servers
+
+
+class _Answer:
+    def __init__(self, sdp):
+        self.sdp = sdp
+
+
+class _Candidate:
+    def __init__(self, candidate):
+        self.candidate = candidate
+
+
+class _WsErr:
+    def __init__(self, error):
+        self.error = error
+
+
+def _ws_camera(monkeypatch):
+    from types import SimpleNamespace
+    import custom_components.ha_creality_ws.camera as camera_mod
+
+    for name, value in (
+        ("GO2RTC_WS_AVAILABLE", True), ("Go2RtcWsClient", _FakeWs), ("Go2RtcWsOffer", _Offer),
+        ("Go2RtcWsAnswer", _Answer), ("Go2RtcWsCandidate", _Candidate), ("Go2RtcWsError", _WsErr),
+    ):
+        monkeypatch.setattr(camera_mod, name, value, raising=False)
+    _FakeWs.instances = []
+    cam = _camera()
+    cam._ensure_stream_configured = AsyncMock()
+    cam._go2rtc_client = MagicMock()
+    cam._go2rtc_session = object()
+    cam._go2rtc_server_url = "http://localhost:11984/"
+    cam._stream_name = "creality_k2_1_2_3_4"
+    cam._log_negotiated_video_codec = lambda sdp, sid: None
+    cam.async_get_webrtc_client_configuration = lambda: SimpleNamespace(
+        configuration=SimpleNamespace(ice_servers=["stun:stun.home-assistant.io:3478"])
+    )
+    tasks = []
+    cam.hass = SimpleNamespace(async_create_task=lambda coro: tasks.append(coro))
+    return cam, tasks
+
+
+def test_a_go2rtc_offer_carries_the_frontends_ice_servers_and_trickles(monkeypatch):
+    """Over WHEP go2rtc got the SDP alone and answered with LAN addresses
+    only, so a phone outside the LAN never connected (#134)."""
+    import asyncio
+
+    cam, _tasks = _ws_camera(monkeypatch)
+    sent = []
+    asyncio.run(cam.async_handle_async_webrtc_offer("v=0 offer", "s1", lambda m: sent.append(m.as_dict())))
+
+    ws = _FakeWs.instances[0]
+    assert ws.source == "creality_k2_1_2_3_4"
+    offer = ws.sent[0]
+    assert (offer.offer, offer.ice_servers) == ("v=0 offer", ["stun:stun.home-assistant.io:3478"])
+    cam._go2rtc_client.webrtc.forward_whep_sdp_offer.assert_not_called()
+
+    for message in (_Answer("v=0 answer"), _Candidate("candidate:1 1 udp 1 203.0.113.9 4000 typ srflx")):
+        ws.subscribers[0](message)
+    assert sent == [
+        {"type": "answer", "answer": "v=0 answer"},
+        {"type": "candidate", "candidate": {"candidate": "candidate:1 1 udp 1 203.0.113.9 4000 typ srflx", "sdpMLineIndex": 0}},
+    ]
+
+
+def test_the_frontends_candidates_reach_go2rtc_and_closing_closes_its_socket(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    cam, tasks = _ws_camera(monkeypatch)
+    asyncio.run(cam.async_handle_async_webrtc_offer("v=0 offer", "s1", lambda m: None))
+    ws = _FakeWs.instances[0]
+    asyncio.run(cam.async_on_webrtc_candidate("s1", SimpleNamespace(candidate="candidate:2 1 udp 1 192.0.2.5 5000 typ host")))
+    assert [m.candidate for m in ws.sent[1:]] == ["candidate:2 1 udp 1 192.0.2.5 5000 typ host"]
+
+    cam.close_webrtc_session("s1")
+    assert "s1" not in cam._go2rtc_ws_sessions
+    for coro in tasks:
+        asyncio.run(coro)
+    assert ws.closed
+
+
+def test_a_stream_go2rtc_lost_is_added_again_at_the_next_offer(monkeypatch):
+    """go2rtc forgets the streams added over its API when it restarts. WHEP
+    recovered at the next offer; the WebSocket path kept the stale name, so
+    every offer failed until Home Assistant restarted."""
+    import asyncio
+
+    cam, _tasks = _ws_camera(monkeypatch)
+    cam._force_recreate_stream = False
+    asyncio.run(cam.async_handle_async_webrtc_offer("v=0 offer", "s1", lambda m: None))
+    _FakeWs.instances[0].subscribers[0](_WsErr("webrtc: unsupported codec"))
+    assert cam._force_recreate_stream is False
+    _FakeWs.instances[0].subscribers[0](_WsErr("stream not found"))
+    assert cam._force_recreate_stream is True
+
+
+def test_an_offer_the_websocket_cannot_carry_goes_over_whep(monkeypatch):
+    """A go2rtc behind a proxy that does not pass WebSocket upgrades answered
+    over WHEP before the WebSocket path; the failed connect ended the offer
+    with an error instead."""
+    import asyncio
+    from types import SimpleNamespace
+
+    cam, tasks = _ws_camera(monkeypatch)
+
+    async def refuse(self, message):
+        raise OSError("WebSocket upgrade refused")
+
+    monkeypatch.setattr(_FakeWs, "send", refuse)
+    cam._go2rtc_client.webrtc.forward_whep_sdp_offer = AsyncMock(
+        return_value=SimpleNamespace(sdp="v=0 whep answer")
+    )
+    sent = []
+    asyncio.run(cam.async_handle_async_webrtc_offer("v=0 offer", "s1", lambda m: sent.append(m.as_dict())))
+    assert sent == [{"type": "answer", "answer": "v=0 whep answer"}]
+    assert "s1" not in cam._go2rtc_ws_sessions
+    for coro in tasks:
+        asyncio.run(coro)
+    assert _FakeWs.instances[0].closed

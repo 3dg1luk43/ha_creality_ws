@@ -363,6 +363,22 @@ class KMappedSensor(KEntity, SensorEntity):
             return None
 
 
+class FilamentStatusSensor(KMappedSensor):
+    """`materialStatus`, with "runout" dropped where the flag is shown false.
+
+    A K1C keeps the flag up through whole prints with filament loaded, so the
+    raw mapping read "runout" from the first print after boot until power-off
+    (R82). The coordinator owns the rule; this only reports it.
+    """
+
+    @property
+    def native_value(self) -> str | None:
+        value = super().native_value
+        if value == "runout" and not self.coordinator.filament_runout():
+            return "normal"
+        return value
+
+
 class PrintStatusSensor(KEntity, SensorEntity):
     _attr_translation_key = "print_status"
     _attr_icon = "mdi:printer-3d"
@@ -370,6 +386,12 @@ class PrintStatusSensor(KEntity, SensorEntity):
     # Home Assistant's own state, reported as None.
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = [state for state in _PRINT_STATES if state != "unknown"]
+    # These change every second while printing and each has its own sensor.
+    # Recorded, they made every print write ~5,500 distinct attribute rows for
+    # this one entity (R84); they stay live for templates.
+    _unrecorded_attributes = frozenset(
+        {"job_time_s", "left_time_s", "used_material_mm", "real_time_flow_mm3_s"}
+    )
 
     def __init__(self, coordinator):
         super().__init__(coordinator, unique_id="print_status")
@@ -1218,7 +1240,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     # Mapped sensors
     for spec in MAPPED_SPECS:
-        ents.append(KMappedSensor(coord, spec))
+        cls = FilamentStatusSensor if spec["uid"] == "filament_status" else KMappedSensor
+        ents.append(cls(coord, spec))
 
     # Additional metrics
 

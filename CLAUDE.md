@@ -84,7 +84,9 @@ verify on the test box (`tools/testbox`) or a real HA, and say which in the comm
 - **`diagnostic_dump` answers three ways**: the data as its response (redacted unless
   `include_sensitive_data`), a "CREALITY DIAGNOSTIC DATA" block at WARNING, and a notification.
 - **Telemetry is cumulative:** `ws_client._state` is never cleared, so a key the printer stops
-  sending keeps its last value, and a blank `""` persists until re-sent.
+  sending keeps its last value, and a blank `""` persists until re-sent. Every frame is that whole
+  state, so a value written into `coordinator.data` alone is reverted by the next frame; setters
+  go through `assume_commanded` (#132).
 - **Capabilities are cached in `entry.data`** (model, camera type, firmware). The firmware and the
   camera type follow telemetry (R40, R5); the rest is re-cached on an integration upgrade, a moved
   printer or a missing key, never mid-session.
@@ -93,8 +95,12 @@ verify on the test box (`tools/testbox`) or a real HA, and say which in the comm
   WebRTC on `:8000`, preview on `:80`, Moonraker on `:7125` (K2 Base). Changing its model on the same
   IP leaves the integration's cached camera type behind (by design, #46): re-add the entry.
   Camera media is pre-rendered in `tools/simulator/media/`; never encode at runtime.
-- On the test box, go2rtc receives no RTP from the simulator (old or new) although ICE connects and an
-  aiortc client decodes it fine (R78); WebRTC snapshots through go2rtc time out there.
+- Never post the real K1C's `:8000/call/webrtc_local` an SDP with bare LF line endings: its WebRTC
+  server dies and stays down until the printer is power-cycled (R90). Probe scripts must keep CRLF
+  (read SDP files in binary or with `newline=""`).
+- go2rtc's creality source drops the **first** codec of the printer's answer (a real K1C lists an
+  unused 96 first). The simulator answers through `tools/simulator/sdp.py` for that; an answer that
+  lists the codec it sends first gets no video through go2rtc (R78).
 - `tools/test_files/` is gitignored and holds a secret (`deploy_to_ha.sh`). Never copy from it
   into tracked files.
 - `backups/`, `conductor/`, `.agent/` and `tools/test_files/internal_docs/` are stale scaffolding,
