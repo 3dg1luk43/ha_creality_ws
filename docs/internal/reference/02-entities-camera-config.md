@@ -48,7 +48,7 @@ Written by `async_setup_entry` and read by the platform gates. Not user-editable
 | `_device_info_cached`, `_cached_version` | `__init__.py:316-317`, `375-376` | Cache present; re-cache on version change (`__init__.py:245-249`) |
 | `_cached_model`, `_cached_hostname`, `_cached_model_version` | `__init__.py:318-320` | Device info |
 | `_cached_has_light` | `__init__.py:321`, promoted by live `lightSw` (`:337-338`) | Light platform gate |
-| `_cached_has_brightness_control`, `_cached_led_pin` | `__init__.py:322-323`, offline fallback `:391-405` | Light dimming (K2 Pro / K2 Plus pin `LED`, `utils.py:202-205`) |
+| `_cached_has_brightness_control`, `_cached_led_pin` | `__init__.py:322-323`, offline fallback `:391-405` | Light dimming (K2 / K2 Pro / K2 Plus pin `LED`, base K2 since 0.9.10 (#136), re-derived offline when cached as None, `utils.py:202-205`) |
 | `_cached_has_chamber_sensor` (+ legacy `_cached_has_box_sensor`) | `__init__.py:325,327`, promoted by `boxTemp`/`maxBoxTemp` (`:334-336`) | Chamber sensor gate |
 | `_cached_has_chamber_control` (+ legacy `_cached_has_box_control`) | `__init__.py:326,328`, promoted by `targetBoxTemp` (`:331-333`) | Chamber target number gate |
 | `_cached_cfs_detected` | `__init__.py:341` | Diagnostics only; also forces a re-cache when `cfsConnect == 1` (`:275-276`) |

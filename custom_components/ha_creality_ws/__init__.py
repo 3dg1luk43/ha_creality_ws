@@ -245,18 +245,21 @@ def _async_follow_host(hass: HomeAssistant, entry: ConfigEntry, host: str) -> No
 def _derive_led_pin(data: dict[str, Any]) -> bool:
     """Fill in whether the light dims from the cached model, if not cached yet.
 
-    For an entry cached before LED dimming existed (#102), set up while the
-    printer is offline: the model alone says whether the light can dim, so it
-    need not wait for the printer to come online. True if `data` changed.
+    For an entry cached before LED dimming existed (#102), or before its model
+    was known to dim (#136), set up while the printer is offline: the model
+    alone says whether the light can dim, so it need not wait for the printer
+    to come online. True if `data` changed.
     """
-    if not data.get("_cached_model") or (
-        "_cached_has_brightness_control" in data and "_cached_led_pin" in data
-    ):
+    if not data.get("_cached_model"):
         return False
     cached_model = ModelDetection({
         "model": data.get("_cached_model"),
         "modelVersion": data.get("_cached_model_version"),
     })
+    if "_cached_has_brightness_control" in data and "_cached_led_pin" in data and (
+        data["_cached_led_pin"] or not cached_model.led_pin
+    ):
+        return False
     data["_cached_has_brightness_control"] = cached_model.has_brightness_control
     data["_cached_led_pin"] = cached_model.led_pin
     return True

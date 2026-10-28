@@ -18,6 +18,7 @@ and versions are numbered major.minor.patch, with a fourth number for a hotfix r
 - Targets set from a script no longer snap back before the printer confirms them, iPhone notifications show the current print's thumbnail, and custom live-card text leaves out values the printer does not know yet.
 - Print Status no longer writes a set of attributes to the database every second while printing.
 - On an iPhone, tapping the live print card or a notification opens the printer camera, as on Android.
+- The base K2's chamber light dims, like the K2 Pro and K2 Plus.
 - An iPhone no longer chimes at live-card refreshes, or when Home Assistant restarts or the notification settings are saved mid-print.
 
 ### Fixes
@@ -37,6 +38,10 @@ and versions are numbered major.minor.patch, with a fourth number for a hotfix r
 - **The iPhone live card could vanish after a change in the notification settings**: saving them re-sends the card, and the integration sent a dismissal on the same tag just before it, as it does for a new print. An iPhone can process the two in either order, and when the dismissal came second it ended the card it had just started; the card stayed away until the next refresh, up to five minutes later. A settings change now re-sends the card in place, without the dismissal.
 - **An iPhone chimed at every live-card refresh, for example after its notification settings were saved**: Home Assistant updates an iPhone's live card only once the phone has reported the card's token, which it does only while the app runs, and sends every push before that as a new card, which always alerts. So each refresh started another card, with a sound, until the app was opened. After one new card, the integration now holds an iPhone's refreshes until Home Assistant has the token, and sends the card again after half an hour, then less often, in case iOS dropped it. The card re-sent after a restart or a settings save also chimed, as an update the integration did not mark silent; it now is.
 - **Print Status wrote a new set of attributes to the database every second while printing**: its job time, time left, used filament and flow attributes change every second and duplicate their own sensors. They are no longer recorded, and still update for templates.
+
+### Added
+
+- **Chamber light dimming on the base K2** ([#136](https://github.com/3dg1luk43/ha_creality_ws/issues/136)): its light now takes a brightness, as on the K2 Pro and K2 Plus. An existing entry gets it at the upgrade, also with the printer off. Thanks to @Cs50-sandbox-user for confirming the K2 supports it.
 
 ### Internal
 
